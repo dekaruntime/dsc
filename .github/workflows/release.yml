@@ -230,33 +230,29 @@ jobs:
             echo "R2_SECRET_ACCESS_KEY: empty"
           fi
 
-      - name: Ensure gh
-        run: |
-          if command -v gh >/dev/null 2>&1; then
-            gh --version
-            exit 0
-          fi
-          TMPDIR="$(mktemp -d)"
-          curl -fsSL -o "${TMPDIR}/gh.tar.gz" \
-            "https://github.com/cli/cli/releases/download/v2.98.0/gh_2.98.0_linux_amd64.tar.gz"
-          tar -xzf "${TMPDIR}/gh.tar.gz" -C "${TMPDIR}"
-          echo "${TMPDIR}/gh_2.98.0_linux_amd64/bin" >> "$GITHUB_PATH"
-
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${{ steps.prepare.outputs.version }}"
+          TMPDIR="$(mktemp -d)"
+          curl -fsSL -o "${TMPDIR}/gh.tar.gz" \
+            "https://github.com/cli/cli/releases/download/v2.98.0/gh_2.98.0_linux_amd64.tar.gz"
+          tar -xzf "${TMPDIR}/gh.tar.gz" -C "${TMPDIR}"
+          GH_BIN="${TMPDIR}/gh_2.98.0_linux_amd64/bin/gh"
+
           ASSETS=()
           for f in release/${VERSION}/*; do
             [ -f "$f" ] && ASSETS+=("$f")
           done
           TITLE="dsc ${VERSION}"
           NOTES="dsc ${VERSION} CLI binaries and WASM artifacts."
-          if gh release view "${GITHUB_REF_NAME}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            gh release upload "${GITHUB_REF_NAME}" "${ASSETS[@]}" --repo "${{ github.repository }}" --clobber
+          if "$GH_BIN" release view "${GITHUB_REF_NAME}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} already exists. Uploading/overwriting assets."
+            "$GH_BIN" release upload "${GITHUB_REF_NAME}" "${ASSETS[@]}" \
+              --repo "${{ github.repository }}" --clobber
           else
-            gh release create "${GITHUB_REF_NAME}" \
+            "$GH_BIN" release create "${GITHUB_REF_NAME}" \
               --repo "${{ github.repository }}" \
               --title "$TITLE" \
               --notes "$NOTES" \

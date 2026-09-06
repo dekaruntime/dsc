@@ -161,9 +161,6 @@ jobs:
           path: artifacts
           pattern: dsc-*
 
-      - name: Install AWS CLI
-        run: command -v aws >/dev/null 2>&1 || pip install --break-system-packages awscli
-
       - name: Prepare release layout
         id: prepare
         run: |
@@ -220,34 +217,6 @@ jobs:
 
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-      - name: Require R2 credentials
-        run: |
-          if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
-            echo "::error::R2_ACCESS_KEY_ID/SECRET empty. Allow the org secrets on dekaruntime/dsc."
-            exit 1
-          fi
-
-      - name: Upload versioned release to R2
-        run: |
-          VERSION="${{ steps.prepare.outputs.version }}"
-          aws s3 sync "release/${VERSION}/" "s3://${R2_BUCKET_RELEASES}/${VERSION}/" --endpoint-url="${R2_ENDPOINT}"
-
-      - name: Upload versioned WASM to R2
-        run: |
-          VERSION="${{ steps.prepare.outputs.version }}"
-          for f in dsc.wasm dsc_diagnostics.wasm manifest.json release.json; do
-            aws s3 cp "release/${VERSION}/${f}" "s3://${R2_BUCKET_WASM}/v${VERSION}/${f}" --endpoint-url="${R2_ENDPOINT}"
-          done
-
-      - name: Promote latest
-        run: |
-          VERSION="${{ steps.prepare.outputs.version }}"
-          aws s3 cp "release/${VERSION}/release.json" "s3://${R2_BUCKET_RELEASES}/latest.json" --endpoint-url="${R2_ENDPOINT}"
-          aws s3 cp "release/${VERSION}/dsc.wasm" "s3://${R2_BUCKET_WASM}/latest/dsc.wasm" --endpoint-url="${R2_ENDPOINT}"
-          aws s3 cp "release/${VERSION}/dsc_diagnostics.wasm" "s3://${R2_BUCKET_WASM}/latest/dsc_diagnostics.wasm" --endpoint-url="${R2_ENDPOINT}"
-          aws s3 cp "release/${VERSION}/manifest.json" "s3://${R2_BUCKET_WASM}/latest/manifest.json" --endpoint-url="${R2_ENDPOINT}"
-          aws s3 cp "release/${VERSION}/release.json" "s3://${R2_BUCKET_WASM}/latest/release.json" --endpoint-url="${R2_ENDPOINT}"
-
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -269,9 +238,40 @@ jobs:
               "${ASSETS[@]}"
           fi
 
+      - name: Skip R2 when credentials are missing
+        if: ${{ env.AWS_ACCESS_KEY_ID == '' || env.AWS_SECRET_ACCESS_KEY == '' }}
+        run: |
+          echo "::warning::R2_ACCESS_KEY_ID/SECRET empty. GitHub release was created. Allow the org secrets on dekaruntime/dsc to publish https://dsc-wasm.deka.gg."
+
+      - name: Install AWS CLI
+        if: ${{ env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != '' }}
+        run: command -v aws >/dev/null 2>&1 || pip install --break-system-packages awscli
+
+      - name: Upload versioned release to R2
+        if: ${{ env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != '' }}
+        run: |
+          VERSION="${{ steps.prepare.outputs.version }}"
+          aws s3 sync "release/${VERSION}/" "s3://${R2_BUCKET_RELEASES}/${VERSION}/" --endpoint-url="${R2_ENDPOINT}"
+
+      - name: Upload versioned WASM to R2
+        if: ${{ env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != '' }}
+        run: |
+          VERSION="${{ steps.prepare.outputs.version }}"
+          for f in dsc.wasm dsc_diagnostics.wasm manifest.json release.json; do
+            aws s3 cp "release/${VERSION}/${f}" "s3://${R2_BUCKET_WASM}/v${VERSION}/${f}" --endpoint-url="${R2_ENDPOINT}"
+          done
+
+      - name: Promote latest
+        if: ${{ env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != '' }}
+        run: |
+          VERSION="${{ steps.prepare.outputs.version }}"
+          aws s3 cp "release/${VERSION}/release.json" "s3://${R2_BUCKET_RELEASES}/latest.json" --endpoint-url="${R2_ENDPOINT}"
+          aws s3 cp "release/${VERSION}/dsc.wasm" "s3://${R2_BUCKET_WASM}/latest/dsc.wasm" --endpoint-url="${R2_ENDPOINT}"
+          aws s3 cp "release/${VERSION}/dsc_diagnostics.wasm" "s3://${R2_BUCKET_WASM}/latest/dsc_diagnostics.wasm" --endpoint-url="${R2_ENDPOINT}"
+          aws s3 cp "release/${VERSION}/manifest.json" "s3://${R2_BUCKET_WASM}/latest/manifest.json" --endpoint-url="${R2_ENDPOINT}"
+          aws s3 cp "release/${VERSION}/release.json" "s3://${R2_BUCKET_WASM}/latest/release.json" --endpoint-url="${R2_ENDPOINT}"
+
       - name: Summary
         run: |
-          echo "Published dsc ${{ github.ref_name }}"
-          echo "  wasm: https://dsc-wasm.deka.gg/latest/dsc.wasm"
-          echo "  diagnostics: https://dsc-wasm.deka.gg/latest/dsc_diagnostics.wasm"
-          echo "  manifest: https://dsc-wasm.deka.gg/latest/manifest.json"
+          echo "Published dsc ${{ github.ref_name }} to GitHub Releases."
+          echo "  wasm host (after R2 secrets): https://dsc-wasm.deka.gg/latest/dsc.wasm"

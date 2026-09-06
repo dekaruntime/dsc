@@ -48,4 +48,5 @@ Public wasm host: `https://dsc-wasm.deka.gg`.
 | Versioned | `https://dsc-wasm.deka.gg/v<VERSION>/...` |
 
 Org R2 secrets (`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`) must be allowed on
-`dekaruntime/dsc` or the publish job fails.
+`dekaruntime/dsc` or the GitHub release is created and R2 is skipped. Allow the
+org secrets (same keys as `deka`) for `https://dsc-wasm.deka.gg`.

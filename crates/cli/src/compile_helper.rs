@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use deka_compile::module_graph::{self, GraphCompileOptions};
+use deka_compile::module_graph::{self, GraphCompileOptions, ModuleLoader};
 use deka_compile::{compile_to_js, format_diagnostic, format_diagnostics};
 
 pub use deka_compile::SourceModuleMeta as ModuleMeta;
@@ -104,6 +104,9 @@ pub fn compile_graph_modules(
     let project_root = find_project_root(cwd, input)
         .or_else(|| input.parent().map(Path::to_path_buf))
         .unwrap_or_else(|| PathBuf::from("."));
+    if let Some(err) = unresolved_bare_import_error(&source, input, &project_root) {
+        return Err(err);
+    }
     let loader = module_graph::FsModuleLoader::new(project_root);
     let graph = module_graph::compile_module_graph_with_options(
         input,
@@ -147,4 +150,135 @@ pub fn rewrite_relative_ds_imports(mut js: String) -> String {
         }
     }
     js
+}
+
+pub fn project_root_from_cwd(cwd: &Path) -> PathBuf {
+    find_project_root(cwd, cwd).unwrap_or_else(|| cwd.to_path_buf())
+}
+
+pub fn print_cli_error(action: &str, err: &str) {
+    if err.contains("Validation Error") {
+        stdio::raw(err.trim_end_matches('\n'));
+    } else {
+        stdio::error(action, err);
+    }
+}
+
+/// Bare package imports must already live in `ds_modules/`. dsc never fetches
+/// or writes `deka.lock`; missing packages are a hard failure.
+pub fn unresolved_bare_import_error(
+    source: &str,
+    input: &Path,
+    project_root: &Path,
+) -> Option<String> {
+    let arena = bumpalo::Bump::new();
+    let parsed = deka_syntax::parse(source, &arena);
+    let program = parsed.program?;
+    let loader = module_graph::FsModuleLoader::new(project_root.to_path_buf());
+    for stmt in program.statements.iter() {
+        let deka_syntax::Stmt::Import {
+            specifiers,
+            source: spec,
+            span,
+        } = stmt
+        else {
+            continue;
+        };
+        if skip_bare_package_check(spec, specifiers.is_empty()) {
+            continue;
+        }
+        if loader.resolve(spec, input).is_ok() {
+            continue;
+        }
+        return Some(format_unresolved_package_import(
+            source,
+            input,
+            project_root,
+            spec,
+            *span,
+        ));
+    }
+    None
+}
+
+fn skip_bare_package_check(spec: &str, specs_empty: bool) -> bool {
+    let trimmed = spec.trim();
+    if trimmed.starts_with("./")
+        || trimmed.starts_with("../")
+        || trimmed.starts_with('/')
+        || trimmed.starts_with("@/")
+        || trimmed.starts_with("http://")
+        || trimmed.starts_with("https://")
+        || trimmed.starts_with("file://")
+    {
+        return true;
+    }
+    if specs_empty && trimmed.to_ascii_lowercase().ends_with(".css") {
+        return true;
+    }
+    let bare = trimmed.strip_prefix("@deka/").unwrap_or(trimmed);
+    bare == "ui"
+        || bare.starts_with("ui/")
+        || deka_compile::shake::normalize_ui_specifier(trimmed).is_some()
+}
+
+fn format_unresolved_package_import(
+    source: &str,
+    input: &Path,
+    project_root: &Path,
+    spec: &str,
+    span: deka_syntax::Span,
+) -> String {
+    let file_path = input
+        .strip_prefix(project_root)
+        .unwrap_or(input)
+        .display()
+        .to_string();
+    let (line, column, underline) = specifier_frame(source, spec, span);
+    deka_validation::format_validation_error(
+        source,
+        &file_path,
+        "Unresolved Import",
+        line,
+        column,
+        &format!("module '{spec}' is not installed in ds_modules/"),
+        &format!(
+            "run `deka install` or `deka add {spec}`. dsc does not fetch packages or write deka.lock."
+        ),
+        underline,
+    )
+}
+
+fn specifier_frame(source: &str, spec: &str, span: deka_syntax::Span) -> (usize, usize, usize) {
+    let start = span.byte_start.min(source.len());
+    let end = span.byte_end.min(source.len()).max(start);
+    let snippet = &source[start..end];
+    let double = format!("\"{spec}\"");
+    let single = format!("'{spec}'");
+    let (rel, quote) = if let Some(offset) = snippet.find(&double) {
+        (offset, 1usize)
+    } else if let Some(offset) = snippet.find(&single) {
+        (offset, 1usize)
+    } else {
+        (0, 0)
+    };
+    let (line, column) = byte_to_line_col(source, start + rel + quote);
+    (line, column, spec.chars().count().max(1))
+}
+
+fn byte_to_line_col(source: &str, byte: usize) -> (usize, usize) {
+    let mut line = 1usize;
+    let mut column = 1usize;
+    for (index, ch) in source.char_indices() {
+        if index >= byte {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+    (line, column)
 }

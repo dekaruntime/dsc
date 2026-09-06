@@ -4,6 +4,7 @@ use core::{Context, FlagSpec, ParamSpec, ParseError, ParseErrorKind, Registry};
 use stdio::{ascii, error as stdio_error, raw};
 
 pub mod check;
+pub mod emit;
 pub mod fmt;
 pub mod lsp;
 pub mod transpile;
@@ -45,6 +46,7 @@ pub fn help(registry: &Registry) {
         "dsc v{} — DekaScript compiler. Emits JavaScript. Does not run it.",
         env!("CARGO_PKG_VERSION")
     ));
+    raw("With no command, emit app/, api/, and src/ to dist/.");
     raw("");
 
     let dim = "\x1b[2m";
@@ -119,7 +121,22 @@ pub fn execute(registry: &Registry) {
             version(verbose);
             return;
         }
-        help(registry);
+        if args.flags.contains_key("--help")
+            || args.flags.contains_key("-H")
+            || args.flags.contains_key("help")
+        {
+            help(registry);
+            return;
+        }
+        let context = match Context::from_env(registry) {
+            Ok(context) => context,
+            Err(core::ContextError::Parse(errors)) => {
+                let message = format_parse_errors(&errors);
+                error(Some(message.as_str()));
+                return;
+            }
+        };
+        emit::cmd(&context);
         return;
     }
 

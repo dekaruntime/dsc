@@ -14,6 +14,7 @@ dsc --help
 
 Commands (`check`, `transpile`, `fmt`, `lsp`) are registered in `crates/cli/src/lib.rs`.
 
+- `dsc` (no command) emits `app/`, `api/`, and `src/` to `dist/`.
 - `dsc transpile <file-or-directory>` writes per-module `.js` (`--preserve`), or one graph with `--bundle`. `--treeshake` minifies.
 - `dsc check --as-package <dir>` typechecks a local package through a scratch consumer + `.deka/links.json`. Registry install stays on `deka`.
 

@@ -1,5 +1,9 @@
 # dsc
 
+<p align="center">
+  <img src=".github/DS%20logo.png" alt="DekaScript logo" width="180">
+</p>
+
 DekaScript compiler. Emits JavaScript. Does not run it.
 
 The host is [`deka`](https://github.com/dekaruntime/deka). See [rfd#38](https://github.com/dekaruntime/rfd/issues/38).

@@ -28,6 +28,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Where am I
+        uses: ./.github/actions/where-am-i
+
       - name: Tag matches workspace version
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
@@ -76,6 +79,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Where am I
+        uses: ./.github/actions/where-am-i
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.96.0
         with:
@@ -117,6 +123,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Where am I
+        uses: ./.github/actions/where-am-i
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.96.0
 
@@ -154,6 +163,9 @@ jobs:
       AWS_DEFAULT_REGION: auto
     steps:
       - uses: actions/checkout@v5
+
+      - name: Where am I
+        uses: ./.github/actions/where-am-i
 
       - name: Download artifacts
         uses: actions/download-artifact@v4

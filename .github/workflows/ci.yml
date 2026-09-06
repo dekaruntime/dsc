@@ -34,12 +34,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Where am I
-        run: |
-          echo "runner name: $(hostname)"
-          echo "runner os: ${{ runner.os }}"
-          echo "runner arch: ${{ runner.arch }}"
-          echo "uname -a: $(uname -a)"
-          (which cargo && cargo --version) || true
+        uses: ./.github/actions/where-am-i
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.96.0

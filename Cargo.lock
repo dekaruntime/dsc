@@ -158,13 +158,18 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "bumpalo",
  "core",
  "deka-fmt",
  "deka_compile",
+ "deka_project",
+ "deka_syntax",
  "dekascript_lsp",
+ "serde_json",
  "stdio",
+ "tempfile",
  "tokio",
 ]
 
@@ -181,7 +186,7 @@ dependencies = [
 
 [[package]]
 name = "core"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "dashmap"
@@ -204,7 +209,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 
 [[package]]
 name = "deka-fmt"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bumpalo",
  "deka_syntax",
@@ -214,11 +219,11 @@ dependencies = [
 
 [[package]]
 name = "deka-validation"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "deka_compile"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bumpalo",
  "deka_emit",
@@ -231,7 +236,7 @@ dependencies = [
 
 [[package]]
 name = "deka_compiler_wasm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bumpalo",
  "deka-fmt",
@@ -245,7 +250,7 @@ dependencies = [
 
 [[package]]
 name = "deka_emit"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bumpalo",
  "deka_syntax",
@@ -256,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "deka_project"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -265,7 +270,7 @@ dependencies = [
 
 [[package]]
 name = "deka_syntax"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bumpalo",
  "insta",
@@ -274,7 +279,7 @@ dependencies = [
 
 [[package]]
 name = "dekascript_lsp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "deka_compile",
@@ -287,7 +292,7 @@ dependencies = [
 
 [[package]]
 name = "dekascript_lsp_wasm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dekascript_lsp",
  "serde",
@@ -1197,7 +1202,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stdio"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "string_enum"

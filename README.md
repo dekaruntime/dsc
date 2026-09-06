@@ -14,6 +14,9 @@ dsc --help
 
 Commands (`check`, `transpile`, `fmt`, `lsp`) are registered in `crates/cli/src/lib.rs`.
 
+- `dsc transpile <file-or-directory>` writes per-module `.js` (`--preserve`). `--bundle` / `--treeshake` are not pulled yet.
+- `dsc check --as-package <dir>` typechecks a local package through a scratch consumer + `.deka/links.json`. Registry install stays on `deka`.
+
 ## Development
 
 Same as [`deka`](https://github.com/dekaruntime/deka): **PR → merge commit → tag**. Do not push to `main`. See [CONTRIBUTING.md](CONTRIBUTING.md).

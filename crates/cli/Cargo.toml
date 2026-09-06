@@ -13,6 +13,11 @@ path = "src/main.rs"
 core = { path = "../core" }
 stdio = { path = "../stdio" }
 deka_compile = { path = "../deka_compile" }
+deka_syntax = { path = "../deka_syntax" }
+deka_project = { path = "../deka_project" }
 deka-fmt = { path = "../deka-fmt" }
 dekascript_lsp = { path = "../deka_lsp" }
+bumpalo = { version = "3.16", features = ["collections"] }
+serde_json = { workspace = true }
+tempfile = "3.14"
 tokio = { workspace = true }

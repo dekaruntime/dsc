@@ -44,6 +44,11 @@ pub fn register(registry: &mut Registry) {
         aliases: &[],
         description: "treat the entry as a client bundle (ui/server is a build failure)",
     });
+    registry.add_flag(core::FlagSpec {
+        name: "--self-contained",
+        aliases: &[],
+        description: "inline each module's prelude so files can load in separate scopes",
+    });
     registry.add_param(ParamSpec {
         name: "--out",
         description: "output .js file (file) or output directory (preserve)",
@@ -94,17 +99,30 @@ fn run(context: &Context) -> Result<(), String> {
         .get("--client")
         .copied()
         .unwrap_or(false);
+    let self_contained = context
+        .args
+        .flags
+        .get("--self-contained")
+        .copied()
+        .unwrap_or(false);
 
     match (input.is_file(), input.is_dir()) {
-        (true, _) => {
-            transpile_file(&input, output.as_deref(), mode, treeshake, client, &context.env.cwd)
-        }
+        (true, _) => transpile_file(
+            &input,
+            output.as_deref(),
+            mode,
+            treeshake,
+            client,
+            self_contained,
+            &context.env.cwd,
+        ),
         (_, true) => transpile_directory(
             &input,
             output.as_deref(),
             mode,
             treeshake,
             client,
+            self_contained,
             &context.env.cwd,
         ),
         _ => Err(format!("input path does not exist: {}", input.display())),
@@ -112,7 +130,7 @@ fn run(context: &Context) -> Result<(), String> {
 }
 
 fn usage() -> &'static str {
-    "usage: dsc transpile <file-or-directory> [--preserve|--bundle] [--treeshake] [--client] [--out <path>]\n\nModes:\n  file: writes adjacent <name>.js by default; --out selects the output file\n  directory: --preserve is the default and mirrors .ds paths as .js paths\n  directory --bundle: requires --out <file.js> and emits one resolved graph\n  --treeshake: minify emitted JavaScript in either mode\n  --client: fail the build if the graph can reach ui/server\n\nExamples:\n  dsc transpile app/main.ds\n  dsc transpile app --preserve --out generated\n  dsc transpile app --bundle --out dist/app.js --treeshake\n  dsc transpile island.dsx --bundle --client --out dist/island.js"
+    "usage: dsc transpile <file-or-directory> [--preserve|--bundle] [--treeshake] [--client] [--out <path>]\n\nModes:\n  file: writes adjacent <name>.js by default; --out selects the output file\n  directory: --preserve is the default and mirrors .ds paths as .js paths\n  directory --bundle: requires --out <file.js> and emits one resolved graph\n  --treeshake: minify emitted JavaScript in either mode\n  --client: fail the build if the graph can reach ui/server\n  --self-contained: inline per-module prelude (isolate ESM loader)\n\nExamples:\n  dsc transpile app/main.ds\n  dsc transpile app --preserve --out generated\n  dsc transpile app --bundle --out dist/app.js --treeshake\n  dsc transpile island.dsx --bundle --client --out dist/island.js"
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -149,6 +167,7 @@ fn transpile_file(
     mode: TranspileMode,
     treeshake: bool,
     client: bool,
+    self_contained: bool,
     cwd: &Path,
 ) -> Result<(), String> {
     require_ds(input)?;
@@ -161,7 +180,7 @@ fn transpile_file(
     let js = if mode == TranspileMode::Bundle {
         build_bundle(input, cwd, treeshake, client)?
     } else {
-        build_module(input, cwd, treeshake, client)?
+        build_module(input, cwd, treeshake, client, self_contained)?
     };
     write_generated_js(&output, &js)?;
     stdio::success(&format!(
@@ -178,6 +197,7 @@ fn transpile_directory(
     mode: TranspileMode,
     treeshake: bool,
     client: bool,
+    self_contained: bool,
     cwd: &Path,
 ) -> Result<(), String> {
     let sources = collect_ds_sources(input)?;
@@ -214,7 +234,7 @@ fn transpile_directory(
                     .strip_prefix(input)
                     .map_err(|_| "failed to preserve source tree".to_string())?;
                 let output = output_root.join(rel).with_extension("js");
-                let js = build_module(source, cwd, treeshake, client)?;
+                let js = build_module(source, cwd, treeshake, client, self_contained)?;
                 write_generated_js(&output, &js)?;
             }
             stdio::success(&format!(
@@ -243,8 +263,14 @@ fn directory_entry(root: &Path, sources: &[PathBuf]) -> Result<PathBuf, String> 
     ))
 }
 
-fn build_module(input: &Path, cwd: &Path, treeshake: bool, client: bool) -> Result<String, String> {
-    let mut js = compile_source_js(input, cwd, client)?;
+fn build_module(
+    input: &Path,
+    cwd: &Path,
+    treeshake: bool,
+    client: bool,
+    self_contained: bool,
+) -> Result<String, String> {
+    let mut js = compile_source_js(input, cwd, client, self_contained)?;
     js = rewrite_relative_ds_imports(js);
     if treeshake {
         js = optimize_emitted_module(&js, &input.with_extension("js"))?;

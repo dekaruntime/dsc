@@ -62,7 +62,16 @@ pub fn is_deka_source_path(path: &Path) -> bool {
 
 /// Emit one module. Files with imports go through the graph so relative and
 /// linked packages typecheck; isolated files use the single-file pipeline.
-pub fn compile_source_js(input: &Path, cwd: &Path, client: bool) -> Result<String, String> {
+///
+/// `self_contained` inlines that module's prelude so the file can run in its
+/// own scope (the isolate ESM loader). Default preserve emit leaves the
+/// prelude detached for a later bundle.
+pub fn compile_source_js(
+    input: &Path,
+    cwd: &Path,
+    client: bool,
+    self_contained: bool,
+) -> Result<String, String> {
     let source = std::fs::read_to_string(input)
         .map_err(|err| format!("failed to read {}: {err}", input.display()))?;
     let input_name = input
@@ -86,8 +95,12 @@ pub fn compile_source_js(input: &Path, cwd: &Path, client: bool) -> Result<Strin
         },
     )
     .map_err(|diagnostics| format_diagnostics(&diagnostics))?;
-    graph
-        .modules
+    let modules = if self_contained {
+        graph.self_contained_modules()
+    } else {
+        graph.modules
+    };
+    modules
         .get(&graph.entry)
         .cloned()
         .ok_or_else(|| "module graph did not emit entry module".to_string())

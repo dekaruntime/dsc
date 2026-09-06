@@ -1,4 +1,4 @@
-use bundler::{bundle_virtual_entry, optimize_emitted_module, BuildOptions, VirtualSource};
+use bundler::{BuildOptions, VirtualSource, bundle_virtual_entry, optimize_emitted_module};
 use core::{CommandSpec, Context, ParamSpec, Registry};
 use deka_compile::format_diagnostics;
 use deka_compile::module_graph::{self, GraphCompileOptions};
@@ -65,7 +65,7 @@ fn cmd(context: &Context) {
         return;
     }
     if let Err(err) = run(context) {
-        stdio::error("transpile", &err);
+        crate::compile_helper::print_cli_error("transpile", &err);
         std::process::exit(1);
     }
 }
@@ -159,6 +159,22 @@ impl TranspileMode {
 
 fn out_is_graph_dir(out: &Path) -> bool {
     out.is_dir() || out.extension().is_none()
+}
+
+pub(crate) fn transpile_entry_file(
+    input: &Path,
+    out: Option<&Path>,
+    cwd: &Path,
+) -> Result<(), String> {
+    transpile_file(
+        input,
+        out,
+        TranspileMode::Preserve,
+        false,
+        false,
+        false,
+        cwd,
+    )
 }
 
 fn transpile_file(
@@ -308,7 +324,7 @@ fn directory_entry(root: &Path, sources: &[PathBuf]) -> Result<PathBuf, String> 
     ))
 }
 
-fn build_module(
+pub(crate) fn build_module(
     input: &Path,
     cwd: &Path,
     treeshake: bool,
@@ -374,7 +390,7 @@ impl VirtualSource for GraphSourceProvider {
     }
 }
 
-fn write_generated_js(path: &Path, js: &str) -> Result<(), String> {
+pub(crate) fn write_generated_js(path: &Path, js: &str) -> Result<(), String> {
     if path.exists() {
         let existing = fs::read_to_string(path)
             .map_err(|err| format!("failed to read {}: {err}", path.display()))?;

@@ -315,6 +315,7 @@ dependencies = [
  "bundler",
  "core",
  "deka-fmt",
+ "deka-validation",
  "deka_compile",
  "deka_project",
  "deka_syntax",

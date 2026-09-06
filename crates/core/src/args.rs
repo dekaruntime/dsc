@@ -122,6 +122,11 @@ impl Args {
                 continue;
             }
 
+            if looks_like_path(arg_str) {
+                positionals.push(arg.clone());
+                continue;
+            }
+
             let suggestions = suggest(arg_str, &suggestion_tokens);
             errors.push(ParseError::unknown(arg.clone(), suggestions));
         }
@@ -144,6 +149,15 @@ pub fn parse_env(registry: &Registry) -> ParseOutcome {
     #[cfg(not(target_arch = "wasm32"))]
     let args: Vec<String> = std::env::args().skip(1).collect();
     Args::collect(args, registry)
+}
+
+fn looks_like_path(token: &str) -> bool {
+    token.contains('/')
+        || token.contains('\\')
+        || token.ends_with(".ds")
+        || token.ends_with(".dsx")
+        || token.starts_with("./")
+        || token.starts_with("../")
 }
 
 fn suggest(token: &str, candidates: &[String]) -> Vec<String> {
@@ -231,10 +245,7 @@ mod tests {
 
     #[test]
     fn parses_bare_allow_read_flag() {
-        let parsed = Args::collect(
-            vec!["--allow-read".to_string()],
-            &security_registry(),
-        );
+        let parsed = Args::collect(vec!["--allow-read".to_string()], &security_registry());
         assert!(parsed.errors.is_empty());
         assert_eq!(parsed.args.flags.get("--allow-read"), Some(&true));
         assert!(parsed.args.params.get("--allow-read").is_none());
@@ -256,14 +267,25 @@ mod tests {
 
     #[test]
     fn parses_deny_read_equals_path() {
-        let parsed = Args::collect(
-            vec!["--deny-read=/etc".to_string()],
-            &security_registry(),
-        );
+        let parsed = Args::collect(vec!["--deny-read=/etc".to_string()], &security_registry());
         assert!(parsed.errors.is_empty());
         assert_eq!(
             parsed.args.params.get("--deny-read").map(String::as_str),
             Some("/etc")
         );
+    }
+
+    #[test]
+    fn path_tokens_without_command_are_positionals() {
+        let parsed = Args::collect(vec!["app/main.ds".to_string()], &security_registry());
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        assert_eq!(parsed.args.positionals, vec!["app/main.ds"]);
+    }
+
+    #[test]
+    fn unknown_words_without_command_still_error() {
+        let parsed = Args::collect(vec!["chek".to_string()], &security_registry());
+        assert!(!parsed.errors.is_empty());
+        assert!(parsed.args.positionals.is_empty());
     }
 }

@@ -192,10 +192,11 @@ pub fn unresolved_bare_import_error(
         if skip_bare_package_check(spec, specifiers.is_empty()) {
             continue;
         }
-        let aliases = deka_project::module_spec::module_spec_aliases(spec);
-        if aliases.iter().any(|alias| linked.contains_key(alias)) {
+        if is_linked_bare_import(spec, &linked) {
             continue;
         }
+        let package_name = lock_package_name(spec).unwrap_or_else(|| spec.to_string());
+        let aliases = deka_project::module_spec::module_spec_aliases(&package_name);
         if let Some(err) = package_lock_error(
             source,
             input,
@@ -224,6 +225,42 @@ pub fn unresolved_bare_import_error(
         ));
     }
     None
+}
+
+/// Lock / install identity for a bare import (`json` / `json/x` → `@deka/json`).
+fn lock_package_name(spec: &str) -> Option<String> {
+    let trimmed = spec.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.starts_with('@') {
+        let mut parts = trimmed.split('/');
+        let scope = parts.next()?;
+        let name = parts.next()?;
+        if name.is_empty() {
+            return None;
+        }
+        return Some(format!("{scope}/{name}"));
+    }
+    let first = trimmed.split('/').next()?;
+    if first.is_empty() {
+        return None;
+    }
+    Some(format!("@deka/{first}"))
+}
+
+fn is_linked_bare_import(
+    spec: &str,
+    linked: &std::collections::BTreeMap<String, PathBuf>,
+) -> bool {
+    for package in linked.keys() {
+        for alias in deka_project::module_spec::module_spec_aliases(package) {
+            if spec == alias || spec.starts_with(&(alias + "/")) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn package_lock_error(
@@ -334,7 +371,7 @@ fn lock_fs_graph_hash(entry: &serde_json::Value) -> Option<String> {
         .and_then(|graph| graph.get("hash"))
         .and_then(|hash| hash.as_str())
         .map(str::trim)
-        .filter(|hash| !hash.is_empty())?;
+        .filter(|hash| !hash.is_empty() && hash.chars().all(|ch| ch.is_ascii_hexdigit()))?;
     Some(hash.to_string())
 }
 

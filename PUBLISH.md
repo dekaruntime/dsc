@@ -38,13 +38,16 @@ The Release workflow aborts if the tag and `[workspace.package]` disagree.
 5. Promotes `latest` pointers.
 6. Creates the GitHub release.
 
-Public wasm host: `https://dsc-wasm.deka.gg`.
+Public wasm + CLI host: `https://dsc-wasm.deka.gg`.
 
 | Artifact | URL |
 |---|---|
 | Compiler WASM | `https://dsc-wasm.deka.gg/latest/dsc.wasm` |
 | Diagnostics WASM | `https://dsc-wasm.deka.gg/latest/dsc_diagnostics.wasm` |
 | Manifest | `https://dsc-wasm.deka.gg/latest/manifest.json` |
+| CLI (linux-x64) | `https://dsc-wasm.deka.gg/latest/dsc-linux-x64` |
+| CLI (darwin-x64) | `https://dsc-wasm.deka.gg/latest/dsc-darwin-x64` |
+| CLI (darwin-arm64) | `https://dsc-wasm.deka.gg/latest/dsc-darwin-arm64` |
 | Versioned | `https://dsc-wasm.deka.gg/v<VERSION>/...` |
 
 Org R2 secrets (`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`) must be allowed on

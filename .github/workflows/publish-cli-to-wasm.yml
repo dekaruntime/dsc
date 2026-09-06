@@ -1,0 +1,92 @@
+# Copies already-built CLI binaries from a GitHub Release onto the public
+# wasm host (https://dsc-wasm.deka.gg). The tag-driven Release workflow does
+# this going forward; this job exists so a version published before that
+# change (v0.5.1) can be republished without cutting a new compiler.
+name: Publish CLI to wasm host
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: dsc version without the v prefix (e.g. 0.5.1)
+        required: true
+        default: "0.5.1"
+      promote_latest:
+        description: also copy the binaries to latest/
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  R2_ENDPOINT: "https://08b93c93f8b7adc43678e9afba31e4ee.r2.cloudflarestorage.com"
+  R2_BUCKET_WASM: "dsc-wasm"
+
+jobs:
+  publish:
+    name: Copy CLI binaries to dsc-wasm
+    runs-on: [self-hosted, linux, x64]
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Where am I
+        uses: ./.github/actions/where-am-i
+
+      - name: Require R2 credentials
+        run: |
+          if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+            echo "::error::R2_ACCESS_KEY_ID/SECRET empty. Allow the org secrets on dekaruntime/dsc."
+            exit 1
+          fi
+
+      - name: Install AWS CLI
+        run: command -v aws >/dev/null 2>&1 || pip install --break-system-packages awscli
+
+      - name: Download GitHub release binaries
+        run: |
+          VERSION="${{ inputs.version }}"
+          TAG="v${VERSION}"
+          mkdir -p dist
+          TMPDIR="$(mktemp -d)"
+          curl -fsSL -o "${TMPDIR}/gh.tar.gz" \
+            "https://github.com/cli/cli/releases/download/v2.98.0/gh_2.98.0_linux_amd64.tar.gz"
+          tar -xzf "${TMPDIR}/gh.tar.gz" -C "${TMPDIR}"
+          GH_BIN="${TMPDIR}/gh_2.98.0_linux_amd64/bin/gh"
+          for platform in linux-x64 darwin-x64 darwin-arm64; do
+            "$GH_BIN" release download "$TAG" --repo "${{ github.repository }}" \
+              --pattern "dsc-${platform}" --dir dist --clobber
+          done
+          ls -l dist
+
+      - name: Upload versioned CLI to R2
+        run: |
+          VERSION="${{ inputs.version }}"
+          for platform in linux-x64 darwin-x64 darwin-arm64; do
+            [ -f "dist/dsc-${platform}" ] || { echo "missing dist/dsc-${platform}"; exit 1; }
+            aws s3 cp "dist/dsc-${platform}" \
+              "s3://${R2_BUCKET_WASM}/v${VERSION}/dsc-${platform}" \
+              --endpoint-url="${R2_ENDPOINT}"
+          done
+
+      - name: Promote latest CLI
+        if: ${{ inputs.promote_latest }}
+        run: |
+          for platform in linux-x64 darwin-x64 darwin-arm64; do
+            aws s3 cp "dist/dsc-${platform}" \
+              "s3://${R2_BUCKET_WASM}/latest/dsc-${platform}" \
+              --endpoint-url="${R2_ENDPOINT}"
+          done
+
+      - name: Summary
+        run: |
+          VERSION="${{ inputs.version }}"
+          echo "Published dsc CLI ${VERSION} to https://dsc-wasm.deka.gg/v${VERSION}/"
+          echo "  https://dsc-wasm.deka.gg/v${VERSION}/dsc-linux-x64"
+          echo "  https://dsc-wasm.deka.gg/v${VERSION}/dsc-darwin-x64"
+          echo "  https://dsc-wasm.deka.gg/v${VERSION}/dsc-darwin-arm64"

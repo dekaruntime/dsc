@@ -302,6 +302,7 @@ jobs:
         run: |
           VERSION="${{ steps.prepare.outputs.version }}"
           for f in dsc.wasm dsc_diagnostics.wasm deka_compiler.wasm deka_diagnostics.wasm \
+            dsc-linux-x64 dsc-darwin-x64 dsc-darwin-arm64 \
             manifest.json release.json deka-compiler-artifact.json deka-diagnostics-artifact.json; do
             aws s3 cp "release/${VERSION}/${f}" "s3://${R2_BUCKET_WASM}/v${VERSION}/${f}" --endpoint-url="${R2_ENDPOINT}"
           done
@@ -319,8 +320,12 @@ jobs:
           aws s3 cp "release/${VERSION}/release.json" "s3://${R2_BUCKET_WASM}/latest/release.json" --endpoint-url="${R2_ENDPOINT}"
           aws s3 cp "release/${VERSION}/deka-compiler-artifact.json" "s3://${R2_BUCKET_WASM}/latest/deka-compiler-artifact.json" --endpoint-url="${R2_ENDPOINT}"
           aws s3 cp "release/${VERSION}/deka-diagnostics-artifact.json" "s3://${R2_BUCKET_WASM}/latest/deka-diagnostics-artifact.json" --endpoint-url="${R2_ENDPOINT}"
+          aws s3 cp "release/${VERSION}/dsc-linux-x64" "s3://${R2_BUCKET_WASM}/latest/dsc-linux-x64" --endpoint-url="${R2_ENDPOINT}"
+          aws s3 cp "release/${VERSION}/dsc-darwin-x64" "s3://${R2_BUCKET_WASM}/latest/dsc-darwin-x64" --endpoint-url="${R2_ENDPOINT}"
+          aws s3 cp "release/${VERSION}/dsc-darwin-arm64" "s3://${R2_BUCKET_WASM}/latest/dsc-darwin-arm64" --endpoint-url="${R2_ENDPOINT}"
 
       - name: Summary
         run: |
           echo "Published dsc ${{ github.ref_name }} to GitHub Releases."
           echo "  wasm host (after R2 secrets): https://dsc-wasm.deka.gg/latest/dsc.wasm"
+          echo "  CLI (after R2 secrets): https://dsc-wasm.deka.gg/latest/dsc-darwin-arm64"

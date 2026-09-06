@@ -13,10 +13,12 @@ members = [
     "crates/deka_lsp_wasm",
     "crates/deka_emit",
     "crates/deka_project",
+    "crates/deka_ui",
+    "crates/bundler",
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license = "MIT"
 

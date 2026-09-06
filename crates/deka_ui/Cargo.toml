@@ -1,0 +1,9 @@
+[package]
+name = "deka_ui"
+version.workspace = true
+edition.workspace = true
+description = "Compiler-provided UI runtime modules (jsx / reactive / client / server)"
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"

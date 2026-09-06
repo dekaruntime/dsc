@@ -217,6 +217,31 @@ jobs:
 
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
+      - name: R2 credential presence
+        run: |
+          if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
+            echo "R2_ACCESS_KEY_ID: set"
+          else
+            echo "R2_ACCESS_KEY_ID: empty"
+          fi
+          if [ -n "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+            echo "R2_SECRET_ACCESS_KEY: set"
+          else
+            echo "R2_SECRET_ACCESS_KEY: empty"
+          fi
+
+      - name: Ensure gh
+        run: |
+          if command -v gh >/dev/null 2>&1; then
+            gh --version
+            exit 0
+          fi
+          TMPDIR="$(mktemp -d)"
+          curl -fsSL -o "${TMPDIR}/gh.tar.gz" \
+            "https://github.com/cli/cli/releases/download/v2.98.0/gh_2.98.0_linux_amd64.tar.gz"
+          tar -xzf "${TMPDIR}/gh.tar.gz" -C "${TMPDIR}"
+          echo "${TMPDIR}/gh_2.98.0_linux_amd64/bin" >> "$GITHUB_PATH"
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

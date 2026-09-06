@@ -226,7 +226,7 @@ impl ModuleLoader for FsModuleLoader {
         for alias in &aliases {
             let base = modules_dir.join(alias);
             if let Some(resolved) = self.resolve_ds_file(&base) {
-                return Ok(resolved);
+                return self.guard_project_root(&resolved);
             }
         }
 
@@ -236,7 +236,7 @@ impl ModuleLoader for FsModuleLoader {
             for alias in &aliases {
                 let base = modules_dir.join(alias);
                 if let Some(resolved) = self.resolve_ds_file(&base) {
-                    return Ok(resolved);
+                    return self.guard_project_root(&resolved);
                 }
             }
         }
@@ -749,7 +749,10 @@ pub fn compile_module_graph_with_options(
         module_demand.declares_structs = program_demand.declares_structs;
         module_demand.declares_enums = program_demand.declares_enums;
         module_demand.declares_newtypes = program_demand.declares_newtypes;
-        module_preludes.insert(path.clone(), deka_emit::prelude::shared_prelude(&module_demand));
+        module_preludes.insert(
+            path.clone(),
+            deka_emit::prelude::shared_prelude(&module_demand),
+        );
     }
     let prelude = deka_emit::prelude::shared_prelude(&program_demand);
 
@@ -1011,8 +1014,8 @@ mod tests {
         aliases.insert((factory.clone(), "./types.ds".to_string()), types.clone());
         aliases.insert((main.clone(), "./factory.ds".to_string()), factory.clone());
         aliases.insert((main.clone(), "./types.ds".to_string()), types.clone());
-        let result = compile_module_graph(&main, &InMemoryLoader { files, aliases })
-            .expect("compile graph");
+        let result =
+            compile_module_graph(&main, &InMemoryLoader { files, aliases }).expect("compile graph");
 
         // The call site must rewrite through the typechecker's type_of_calls
         // set — an unannotated binding does not record it, so this assertion
@@ -1051,8 +1054,8 @@ mod tests {
         );
         let mut aliases = HashMap::new();
         aliases.insert((app.clone(), "./math.ds".to_string()), math.clone());
-        let result = compile_module_graph(&app, &InMemoryLoader { files, aliases })
-            .expect("compile graph");
+        let result =
+            compile_module_graph(&app, &InMemoryLoader { files, aliases }).expect("compile graph");
         assert!(
             !result.module_preludes[&app].contains("v.__deka_struct"),
             "struct-free program emitted the struct brand branch:\n{}",
@@ -1385,7 +1388,8 @@ mod tests {
         );
         files.insert(
             main.clone(),
-            "import { Counter } from \"./counter.ds\";\nlet c = Counter { n: 1 };\nc.bump();".to_string(),
+            "import { Counter } from \"./counter.ds\";\nlet c = Counter { n: 1 };\nc.bump();"
+                .to_string(),
         );
 
         let mut aliases = HashMap::new();
@@ -1815,5 +1819,4 @@ mod tests {
         assert!(js.contains("ui/form"), "got: {js}");
         assert!(js.contains("Form"), "got: {js}");
     }
-
 }

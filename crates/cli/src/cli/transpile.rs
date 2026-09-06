@@ -1,4 +1,4 @@
-use bundler::{BuildOptions, VirtualSource, bundle_virtual_entry, optimize_emitted_module};
+use bundler::{bundle_virtual_entry, optimize_emitted_module, BuildOptions, VirtualSource};
 use core::{CommandSpec, Context, ParamSpec, Registry};
 use deka_compile::format_diagnostics;
 use deka_compile::module_graph::{self, GraphCompileOptions};
@@ -94,12 +94,7 @@ fn run(context: &Context) -> Result<(), String> {
         .get("--treeshake")
         .copied()
         .unwrap_or(false);
-    let client = context
-        .args
-        .flags
-        .get("--client")
-        .copied()
-        .unwrap_or(false);
+    let client = context.args.flags.get("--client").copied().unwrap_or(false);
     let self_contained = context
         .args
         .flags
@@ -225,6 +220,7 @@ fn write_self_contained_graph(
         if treeshake {
             js = optimize_emitted_module(&js, &source.with_extension("js"))?;
         }
+        let source = fs::canonicalize(&source).unwrap_or(source);
         let rel = source
             .strip_prefix(&project_root)
             .unwrap_or_else(|_| Path::new(source.file_name().unwrap_or(source.as_os_str())));
@@ -395,8 +391,7 @@ fn write_generated_js(path: &Path, js: &str) -> Result<(), String> {
     }
     let tmp = path.with_extension("js.tmp-dsc");
     fs::write(&tmp, js).map_err(|err| format!("failed to write {}: {err}", tmp.display()))?;
-    fs::rename(&tmp, path)
-        .map_err(|err| format!("failed to write {}: {err}", path.display()))?;
+    fs::rename(&tmp, path).map_err(|err| format!("failed to write {}: {err}", path.display()))?;
     Ok(())
 }
 

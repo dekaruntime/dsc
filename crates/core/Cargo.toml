@@ -1,0 +1,8 @@
+[package]
+name = "core"
+version.workspace = true
+edition.workspace = true
+description = "CLI registry, args, and context for dsc"
+license.workspace = true
+
+[dependencies]

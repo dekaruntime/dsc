@@ -1,0 +1,8 @@
+[package]
+name = "stdio"
+version.workspace = true
+edition = "2021"
+description = "Terminal output utilities for dsc"
+license.workspace = true
+
+[dependencies]

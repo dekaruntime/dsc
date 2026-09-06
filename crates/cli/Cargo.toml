@@ -1,0 +1,14 @@
+[package]
+name = "cli"
+version.workspace = true
+edition.workspace = true
+description = "dsc command-line interface"
+license.workspace = true
+
+[[bin]]
+name = "dsc"
+path = "src/main.rs"
+
+[dependencies]
+core = { path = "../core" }
+stdio = { path = "../stdio" }

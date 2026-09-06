@@ -19,3 +19,7 @@ Commands (`check`, `transpile`, `fmt`, `lsp`) are registered in `crates/cli/src/
 Self-hosted only. No V8. sccache buckets are `dsc-sccache-{linux-x64,darwin-x64,darwin-arm64}`.
 
 Browser artifacts: `scripts/build-wasm.sh` → `dsc.wasm` / `dsc_diagnostics.wasm` for `https://dsc-wasm.deka.gg` (publish on release).
+
+## Versioning
+
+Independent of deka. dsc starts at **v0.1.0** and iterates `v0.2.0`, `v0.3.0`, … — it does not inherit the runtime's `0.42` line. See [VERSIONING.md](VERSIONING.md).

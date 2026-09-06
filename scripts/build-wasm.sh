@@ -11,7 +11,7 @@ esac
 target_dir=${CARGO_TARGET_DIR:-"$root/target"}
 source_commit=$(git -C "$root" rev-parse HEAD)
 cargo_lock_sha256=$(shasum -a 256 "$root/Cargo.lock" | awk '{print $1}')
-version=$(sed -n 's/^version = "\(.*\)"/\1/p' "$root/Cargo.toml" | head -1)
+version=$("$root/scripts/dsc-version.sh")
 
 mkdir -p "$out_dir"
 cd "$root"

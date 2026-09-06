@@ -13,3 +13,4 @@ path = "src/main.rs"
 core = { path = "../core" }
 stdio = { path = "../stdio" }
 deka_compile = { path = "../deka_compile" }
+deka-fmt = { path = "../deka-fmt" }

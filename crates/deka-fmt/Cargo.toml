@@ -1,0 +1,10 @@
+[package]
+name = "deka-fmt"
+version.workspace = true
+edition = "2021"
+
+[dependencies]
+bumpalo = "3.20"
+deka_syntax = { path = "../deka_syntax" }
+dprint-core = "0.67.4"
+dprint-plugin-typescript = "0.96.1"

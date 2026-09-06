@@ -4,17 +4,11 @@
   <img src=".github/DS%20logo.png" alt="DekaScript logo" width="180">
 </p>
 
-DekaScript compiler. Emits JavaScript. Does not run it.
+DekaScript compiler. DekaScript goes in, JavaScript comes out.
 
-The host is [`deka`](https://github.com/dekaruntime/deka). See [rfd#38](https://github.com/dekaruntime/rfd/issues/38).
-
-## License
-
-Copyright 2026 Sami Fouad. Licensed under the [Apache License, Version 2.0](LICENSE.md).
+**dsc** does not execute the emitted JavaScript. That task belongs to [deka](https://github.com/dekaruntime/deka).
 
 ## CLI
-
-Same shape as `deka`: a `Registry` in `crates/core`, commands that `register(&mut registry)`, `crates/cli` builds the list and dispatches.
 
 ```
 dsc --help
@@ -32,12 +26,16 @@ Same as [`deka`](https://github.com/dekaruntime/deka): **PR → merge commit →
 
 ## CI
 
-Self-hosted only. No V8. sccache buckets are `dsc-sccache-{linux-x64,darwin-x64,darwin-arm64}`. `main` requires the **Rust tests** check.
+`main` requires the **Rust tests** check. No pass, no merge.
 
-## Versioning and release
+## Versioning
 
-Independent of deka. dsc starts at **v0.1.0** and iterates `v0.2.0`, `v0.3.0`, … — it does not inherit the runtime's `0.42` line.
+Vercioning of dsc is independent of deka. There is no pinning in place. Deka is designed to be indifferent to which version of dsc is being used.
 
 Bump on a branch (`scripts/bump-version.sh minor`), merge the PR, then push an annotated `v*` tag from `main`. That tag is the release. See [VERSIONING.md](VERSIONING.md) and [PUBLISH.md](PUBLISH.md).
 
 Browser artifacts: `scripts/build-wasm.sh` → `dsc.wasm` / `dsc_diagnostics.wasm` at `https://dsc-wasm.deka.gg`.
+
+## License
+
+Copyright 2026 Sami Fouad < https://samifou.ad >. Licensed under the [Apache License, Version 2.0](LICENSE.md).

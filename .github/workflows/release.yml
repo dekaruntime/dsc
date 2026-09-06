@@ -227,6 +227,17 @@ jobs:
           python3 -m json.tool "release/${VERSION}/release.json" > "release/${VERSION}/release.json.tmp"
           mv "release/${VERSION}/release.json.tmp" "release/${VERSION}/release.json"
 
+          COMPILER_SIZE="$(stat -c%s "release/${VERSION}/dsc.wasm")"
+          DIAGNOSTICS_SIZE="$(stat -c%s "release/${VERSION}/dsc_diagnostics.wasm")"
+          cp "release/${VERSION}/dsc.wasm" "release/${VERSION}/deka_compiler.wasm"
+          cp "release/${VERSION}/dsc_diagnostics.wasm" "release/${VERSION}/deka_diagnostics.wasm"
+
+          python3 scripts/write-browser-artifacts.py \
+            "$VERSION" "$COMMIT" "$CARGO_LOCK_SHA256" \
+            "$COMPILER_SHA256" "$COMPILER_SIZE" \
+            "$DIAGNOSTICS_SHA256" "$DIAGNOSTICS_SIZE" \
+            "release/${VERSION}"
+
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: R2 credential presence
@@ -290,7 +301,8 @@ jobs:
         if: ${{ env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != '' }}
         run: |
           VERSION="${{ steps.prepare.outputs.version }}"
-          for f in dsc.wasm dsc_diagnostics.wasm manifest.json release.json; do
+          for f in dsc.wasm dsc_diagnostics.wasm deka_compiler.wasm deka_diagnostics.wasm \
+            manifest.json release.json deka-compiler-artifact.json deka-diagnostics-artifact.json; do
             aws s3 cp "release/${VERSION}/${f}" "s3://${R2_BUCKET_WASM}/v${VERSION}/${f}" --endpoint-url="${R2_ENDPOINT}"
           done
 
@@ -301,8 +313,12 @@ jobs:
           aws s3 cp "release/${VERSION}/release.json" "s3://${R2_BUCKET_RELEASES}/latest.json" --endpoint-url="${R2_ENDPOINT}"
           aws s3 cp "release/${VERSION}/dsc.wasm" "s3://${R2_BUCKET_WASM}/latest/dsc.wasm" --endpoint-url="${R2_ENDPOINT}"
           aws s3 cp "release/${VERSION}/dsc_diagnostics.wasm" "s3://${R2_BUCKET_WASM}/latest/dsc_diagnostics.wasm" --endpoint-url="${R2_ENDPOINT}"
+          aws s3 cp "release/${VERSION}/deka_compiler.wasm" "s3://${R2_BUCKET_WASM}/latest/deka_compiler.wasm" --endpoint-url="${R2_ENDPOINT}"
+          aws s3 cp "release/${VERSION}/deka_diagnostics.wasm" "s3://${R2_BUCKET_WASM}/latest/deka_diagnostics.wasm" --endpoint-url="${R2_ENDPOINT}"
           aws s3 cp "release/${VERSION}/manifest.json" "s3://${R2_BUCKET_WASM}/latest/manifest.json" --endpoint-url="${R2_ENDPOINT}"
           aws s3 cp "release/${VERSION}/release.json" "s3://${R2_BUCKET_WASM}/latest/release.json" --endpoint-url="${R2_ENDPOINT}"
+          aws s3 cp "release/${VERSION}/deka-compiler-artifact.json" "s3://${R2_BUCKET_WASM}/latest/deka-compiler-artifact.json" --endpoint-url="${R2_ENDPOINT}"
+          aws s3 cp "release/${VERSION}/deka-diagnostics-artifact.json" "s3://${R2_BUCKET_WASM}/latest/deka-diagnostics-artifact.json" --endpoint-url="${R2_ENDPOINT}"
 
       - name: Summary
         run: |

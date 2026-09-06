@@ -240,3 +240,45 @@ fn self_contained_file_out_dir_writes_the_whole_graph() {
         "graph dump must include the imported module: {point_js}"
     );
 }
+
+#[test]
+fn self_contained_graph_dump_keeps_package_paths() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    write(
+        &root.join("ds_modules/@deka/io/index.ds"),
+        "export fn echo(s: string) {}\n",
+    );
+    write(&root.join("deka.json"), "{}\n");
+    write(
+        &root.join("main.ds"),
+        "import { echo } from \"io\"\necho(\"hi\")\n",
+    );
+    let out = root.join("graph");
+    let result = Command::new(cli_bin())
+        .args([
+            "transpile",
+            "--self-contained",
+            root.join("main.ds").to_str().unwrap(),
+            "--out",
+        ])
+        .arg(&out)
+        .output()
+        .expect("transpile package graph");
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(
+        out.join("ds_modules/@deka/io/index.js").is_file(),
+        "package module must keep ds_modules path, dump was: {:?}",
+        fs::read_dir(&out)
+            .map(|d| d.filter_map(|e| e.ok().map(|e| e.path())).collect::<Vec<_>>())
+            .unwrap_or_default()
+    );
+    assert!(
+        !out.join("index.js").is_file(),
+        "package index.ds must not collapse to graph/index.js"
+    );
+}

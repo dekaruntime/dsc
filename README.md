@@ -1,6 +1,6 @@
 # dsc
 
-<p align="center">
+<p align="left">
   <img src=".github/DS%20logo.png" alt="DekaScript logo" width="180">
 </p>
 

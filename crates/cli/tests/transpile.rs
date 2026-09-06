@@ -249,7 +249,7 @@ fn self_contained_graph_dump_keeps_package_paths() {
         &root.join("ds_modules/@deka/io/index.ds"),
         "export fn echo(s: string) {}\n",
     );
-    write(root.join("deka.json"), "{}\n");
+    write(&root.join("deka.json"), "{}\n");
     write(
         &root.join("main.ds"),
         "import { echo } from \"io\"\necho(\"hi\")\n",

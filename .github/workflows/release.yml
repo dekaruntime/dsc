@@ -1,0 +1,277 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+env:
+  SCCACHE_ENDPOINT: "https://08b93c93f8b7adc43678e9afba31e4ee.r2.cloudflarestorage.com"
+  SCCACHE_REGION: "auto"
+  R2_ENDPOINT: "https://08b93c93f8b7adc43678e9afba31e4ee.r2.cloudflarestorage.com"
+  R2_BUCKET_RELEASES: "dsc-releases"
+  R2_BUCKET_WASM: "dsc-wasm"
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+
+jobs:
+  test:
+    name: Test
+    runs-on: [self-hosted, linux, x64]
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Tag matches workspace version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          TREE_VERSION="$(scripts/dsc-version.sh)"
+          if [ "$TREE_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::git tag ${GITHUB_REF_NAME} does not match workspace version ${TREE_VERSION}."
+            echo "Bump with scripts/bump-version.sh, open a PR, merge, then tag from main."
+            exit 1
+          fi
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache
+        run: scripts/ci-configure-sccache.sh
+
+      - name: Test workspace
+        run: cargo test --locked --workspace
+
+      - name: Check wasm32 compiler + diagnostics
+        run: |
+          cargo check --locked --target wasm32-unknown-unknown -p deka_compiler_wasm
+          cargo check --locked --target wasm32-unknown-unknown -p dekascript_lsp_wasm --no-default-features
+
+      - name: Forbid V8 in this repo
+        run: |
+          if grep -RInE 'deno_core|rusty_v8' \
+            --include='Cargo.toml' --include='Cargo.lock' --include='*.rs' \
+            crates Cargo.toml Cargo.lock; then
+            echo "::error::dsc must not depend on V8 / deno_core"
+            exit 1
+          fi
+
+  build-wasm:
+    name: Build browser compiler + diagnostics WASM
+    needs: [test]
+    runs-on: [self-hosted, linux, x64]
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache
+        run: scripts/ci-configure-sccache.sh
+
+      - name: Build WASM artifacts
+        run: scripts/build-wasm.sh dist/wasm
+
+      - name: Upload WASM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsc-wasm
+          path: dist/wasm/*
+          retention-days: 1
+
+  build-cli:
+    name: Build CLI (${{ matrix.platform }})
+    needs: [test]
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: [self-hosted, linux, x64]
+          - platform: darwin-x64
+            runner: [self-hosted, macos, x64]
+          - platform: darwin-arm64
+            runner: [self-hosted, macos, arm64]
+    runs-on: ${{ matrix.runner }}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.96.0
+
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache
+        run: scripts/ci-configure-sccache.sh
+
+      - name: Build CLI
+        run: cargo build --locked --release -p cli
+
+      - name: Prepare binary
+        run: |
+          mkdir -p dist
+          cp target/release/dsc "dist/dsc-${{ matrix.platform }}"
+          chmod +x "dist/dsc-${{ matrix.platform }}"
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsc-cli-${{ matrix.platform }}
+          path: dist/dsc-${{ matrix.platform }}
+          retention-days: 1
+
+  publish:
+    name: Publish
+    needs: [build-wasm, build-cli]
+    runs-on: [self-hosted, linux, x64]
+    permissions:
+      contents: write
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: dsc-*
+
+      - name: Install AWS CLI
+        run: command -v aws >/dev/null 2>&1 || pip install --break-system-packages awscli
+
+      - name: Prepare release layout
+        id: prepare
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          TAG="${GITHUB_REF_NAME}"
+          COMMIT="${GITHUB_SHA}"
+          PUBLISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          TREE_VERSION="$(scripts/dsc-version.sh)"
+          if [ "$TREE_VERSION" != "$VERSION" ]; then
+            echo "::error::git tag ${TAG} does not match workspace version ${TREE_VERSION}."
+            exit 1
+          fi
+
+          mkdir -p "release/${VERSION}"
+          for platform in linux-x64 darwin-x64 darwin-arm64; do
+            cp "artifacts/dsc-cli-${platform}/dsc-${platform}" "release/${VERSION}/dsc-${platform}"
+            chmod +x "release/${VERSION}/dsc-${platform}"
+          done
+          cp artifacts/dsc-wasm/dsc.wasm "release/${VERSION}/"
+          cp artifacts/dsc-wasm/dsc_diagnostics.wasm "release/${VERSION}/"
+          cp artifacts/dsc-wasm/manifest.json "release/${VERSION}/"
+          cp artifacts/dsc-wasm/*.sha256 "release/${VERSION}/" 2>/dev/null || true
+
+          sha256() { sha256sum "$1" | awk '{print $1}'; }
+          LINUX_X64_SHA256="$(sha256 "release/${VERSION}/dsc-linux-x64")"
+          DARWIN_X64_SHA256="$(sha256 "release/${VERSION}/dsc-darwin-x64")"
+          DARWIN_ARM64_SHA256="$(sha256 "release/${VERSION}/dsc-darwin-arm64")"
+          COMPILER_SHA256="$(sha256 "release/${VERSION}/dsc.wasm")"
+          DIAGNOSTICS_SHA256="$(sha256 "release/${VERSION}/dsc_diagnostics.wasm")"
+          CARGO_LOCK_SHA256="$(sha256sum Cargo.lock | awk '{print $1}')"
+
+          cat > "release/${VERSION}/release.json" <<EOF
+          {
+            "version": "${VERSION}",
+            "tag": "${TAG}",
+            "commit": "${COMMIT}",
+            "published_at": "${PUBLISHED_AT}",
+            "cargo_lock_sha256": "${CARGO_LOCK_SHA256}",
+            "binaries": {
+              "linux-x64": {"name": "dsc-linux-x64", "sha256": "${LINUX_X64_SHA256}"},
+              "darwin-x64": {"name": "dsc-darwin-x64", "sha256": "${DARWIN_X64_SHA256}"},
+              "darwin-arm64": {"name": "dsc-darwin-arm64", "sha256": "${DARWIN_ARM64_SHA256}"}
+            },
+            "wasm": {
+              "compiler": "dsc.wasm",
+              "compiler_sha256": "${COMPILER_SHA256}",
+              "diagnostics": "dsc_diagnostics.wasm",
+              "diagnostics_sha256": "${DIAGNOSTICS_SHA256}"
+            }
+          }
+          EOF
+          python3 -m json.tool "release/${VERSION}/release.json" > "release/${VERSION}/release.json.tmp"
+          mv "release/${VERSION}/release.json.tmp" "release/${VERSION}/release.json"
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Require R2 credentials
+        run: |
+          if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+            echo "::error::R2_ACCESS_KEY_ID/SECRET empty. Allow the org secrets on dekaruntime/dsc."
+            exit 1
+          fi
+
+      - name: Upload versioned release to R2
+        run: |
+          VERSION="${{ steps.prepare.outputs.version }}"
+          aws s3 sync "release/${VERSION}/" "s3://${R2_BUCKET_RELEASES}/${VERSION}/" --endpoint-url="${R2_ENDPOINT}"
+
+      - name: Upload versioned WASM to R2
+        run: |
+          VERSION="${{ steps.prepare.outputs.version }}"
+          for f in dsc.wasm dsc_diagnostics.wasm manifest.json release.json; do
+            aws s3 cp "release/${VERSION}/${f}" "s3://${R2_BUCKET_WASM}/v${VERSION}/${f}" --endpoint-url="${R2_ENDPOINT}"
+          done
+
+      - name: Promote latest
+        run: |
+          VERSION="${{ steps.prepare.outputs.version }}"
+          aws s3 cp "release/${VERSION}/release.json" "s3://${R2_BUCKET_RELEASES}/latest.json" --endpoint-url="${R2_ENDPOINT}"
+          aws s3 cp "release/${VERSION}/dsc.wasm" "s3://${R2_BUCKET_WASM}/latest/dsc.wasm" --endpoint-url="${R2_ENDPOINT}"
+          aws s3 cp "release/${VERSION}/dsc_diagnostics.wasm" "s3://${R2_BUCKET_WASM}/latest/dsc_diagnostics.wasm" --endpoint-url="${R2_ENDPOINT}"
+          aws s3 cp "release/${VERSION}/manifest.json" "s3://${R2_BUCKET_WASM}/latest/manifest.json" --endpoint-url="${R2_ENDPOINT}"
+          aws s3 cp "release/${VERSION}/release.json" "s3://${R2_BUCKET_WASM}/latest/release.json" --endpoint-url="${R2_ENDPOINT}"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.prepare.outputs.version }}"
+          ASSETS=()
+          for f in release/${VERSION}/*; do
+            [ -f "$f" ] && ASSETS+=("$f")
+          done
+          TITLE="dsc ${VERSION}"
+          NOTES="dsc ${VERSION} CLI binaries and WASM artifacts."
+          if gh release view "${GITHUB_REF_NAME}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" "${ASSETS[@]}" --repo "${{ github.repository }}" --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --repo "${{ github.repository }}" \
+              --title "$TITLE" \
+              --notes "$NOTES" \
+              "${ASSETS[@]}"
+          fi
+
+      - name: Summary
+        run: |
+          echo "Published dsc ${{ github.ref_name }}"
+          echo "  wasm: https://dsc-wasm.deka.gg/latest/dsc.wasm"
+          echo "  diagnostics: https://dsc-wasm.deka.gg/latest/dsc_diagnostics.wasm"
+          echo "  manifest: https://dsc-wasm.deka.gg/latest/manifest.json"

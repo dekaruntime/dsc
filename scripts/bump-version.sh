@@ -13,7 +13,7 @@
 # Writes [workspace.package] version, every crates/*/Cargo.toml that still
 # inlines a version, and Cargo.lock. Does not commit or tag.
 #
-# Tag from main AFTER this lands:
+# Open a PR with this bump. Do not push to main. After merge, tag from main:
 #   git tag -a "v$(scripts/dsc-version.sh)" -m "dsc v$(scripts/dsc-version.sh)"
 set -euo pipefail
 

@@ -41,6 +41,8 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          targets: wasm32-unknown-unknown
 
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.9
@@ -77,6 +79,11 @@ jobs:
 
       - name: Test workspace
         run: cargo test --locked --workspace
+
+      - name: Check wasm32 compiler + diagnostics
+        run: |
+          cargo check --locked --target wasm32-unknown-unknown -p deka_compiler_wasm
+          cargo check --locked --target wasm32-unknown-unknown -p dekascript_lsp_wasm --no-default-features
 
       - name: Forbid V8 in this repo
         run: |

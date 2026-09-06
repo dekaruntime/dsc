@@ -1,0 +1,12 @@
+[package]
+name = "dekascript_lsp_wasm"
+version.workspace = true
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+dekascript_lsp = { path = "../deka_lsp", default-features = false }
+serde = { workspace = true }
+serde_json = { workspace = true }

@@ -8,6 +8,9 @@ members = [
     "crates/deka_compile",
     "crates/deka-fmt",
     "crates/deka_lsp",
+    "crates/deka-validation",
+    "crates/deka_compiler_wasm",
+    "crates/deka_lsp_wasm",
     "crates/deka_emit",
     "crates/deka_project",
 ]

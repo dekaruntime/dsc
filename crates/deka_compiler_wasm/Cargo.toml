@@ -1,0 +1,17 @@
+[package]
+name = "deka_compiler_wasm"
+version.workspace = true
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+bumpalo = "3"
+serde = { workspace = true }
+serde_json = { workspace = true }
+deka_compile = { path = "../deka_compile" }
+deka_syntax = { path = "../deka_syntax" }
+deka_project = { path = "../deka_project" }
+deka-fmt = { path = "../deka-fmt" }
+deka-validation = { path = "../deka-validation", default-features = false }

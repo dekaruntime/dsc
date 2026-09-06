@@ -213,6 +213,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "deka-validation"
+version = "0.1.0"
+
+[[package]]
 name = "deka_compile"
 version = "0.1.0"
 dependencies = [
@@ -223,6 +227,20 @@ dependencies = [
  "insta",
  "serde",
  "tempfile",
+]
+
+[[package]]
+name = "deka_compiler_wasm"
+version = "0.1.0"
+dependencies = [
+ "bumpalo",
+ "deka-fmt",
+ "deka-validation",
+ "deka_compile",
+ "deka_project",
+ "deka_syntax",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -265,6 +283,15 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower-lsp",
+]
+
+[[package]]
+name = "dekascript_lsp_wasm"
+version = "0.1.0"
+dependencies = [
+ "dekascript_lsp",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

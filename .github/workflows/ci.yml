@@ -36,6 +36,12 @@ jobs:
       - name: Where am I
         uses: ./.github/actions/where-am-i
 
+      # rust-toolchain installs rustup if `rustup` is not on PATH. Non-login
+      # runner shells often have ~/.cargo/bin missing, then the installer
+      # hits static.rust-lang.org and flakes on DNS.
+      - name: Cargo bin on PATH
+        run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.96.0
         with:

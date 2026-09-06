@@ -181,9 +181,18 @@ fn self_contained_inlines_prelude_for_separate_scopes() {
 
     let detached_point = fs::read_to_string(detached.join("point.js")).expect("detached point");
     let contained_point = fs::read_to_string(contained.join("point.js")).expect("contained point");
+    let contained_main = fs::read_to_string(contained.join("main.js")).expect("contained main");
     assert!(
         contained_point.contains("__deka_struct") || contained_point.contains("function Point"),
         "self-contained point.js should inline the struct factory: {contained_point}"
+    );
+    assert!(
+        contained_main.contains("./point.ds"),
+        "self-contained isolate emit must keep .ds specifiers, got: {contained_main}"
+    );
+    assert!(
+        !contained_main.contains("./point.js"),
+        "self-contained isolate emit must not rewrite .ds imports to .js, got: {contained_main}"
     );
     assert!(
         contained_point.len() >= detached_point.len(),

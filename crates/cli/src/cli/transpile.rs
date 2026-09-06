@@ -271,7 +271,12 @@ fn build_module(
     self_contained: bool,
 ) -> Result<String, String> {
     let mut js = compile_source_js(input, cwd, client, self_contained)?;
-    js = rewrite_relative_ds_imports(js);
+    // On-disk preserve mode rewrites relative `.ds` imports to `.js` peers.
+    // `--self-contained` is for the isolate ESM loader, which resolves `.ds`
+    // specifiers from memory — rewriting those to `.js` makes Deno ENOENT.
+    if !self_contained {
+        js = rewrite_relative_ds_imports(js);
+    }
     if treeshake {
         js = optimize_emitted_module(&js, &input.with_extension("js"))?;
     }

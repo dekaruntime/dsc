@@ -144,3 +144,49 @@ fn refuses_to_overwrite_hand_written_js() {
         "unexpected output: {stderr}"
     );
 }
+
+#[test]
+fn self_contained_inlines_prelude_for_separate_scopes() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().join("src");
+    write(
+        &root.join("point.ds"),
+        "struct Point {\n  x: number;\n}\nexport const origin = Point { x: 0 }\n",
+    );
+    write(
+        &root.join("main.ds"),
+        "import { origin } from './point.ds'\nexport const x = origin.x\n",
+    );
+    let detached = temp.path().join("detached");
+    let contained = temp.path().join("contained");
+
+    let a = Command::new(cli_bin())
+        .args(["transpile", root.to_str().unwrap(), "--out"])
+        .arg(&detached)
+        .output()
+        .expect("transpile");
+    assert!(a.status.success(), "{}", String::from_utf8_lossy(&a.stderr));
+
+    let b = Command::new(cli_bin())
+        .args([
+            "transpile",
+            "--self-contained",
+            root.to_str().unwrap(),
+            "--out",
+        ])
+        .arg(&contained)
+        .output()
+        .expect("transpile self-contained");
+    assert!(b.status.success(), "{}", String::from_utf8_lossy(&b.stderr));
+
+    let detached_point = fs::read_to_string(detached.join("point.js")).expect("detached point");
+    let contained_point = fs::read_to_string(contained.join("point.js")).expect("contained point");
+    assert!(
+        contained_point.contains("__deka_struct") || contained_point.contains("function Point"),
+        "self-contained point.js should inline the struct factory: {contained_point}"
+    );
+    assert!(
+        contained_point.len() >= detached_point.len(),
+        "self-contained emit should not be smaller than detached"
+    );
+}

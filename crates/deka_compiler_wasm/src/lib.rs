@@ -702,9 +702,10 @@ const origin = Point { x: 3, y: 4 };
     #[test]
     fn all_website_tour_sources_match_the_native_abi_contract() {
         let lessons = load_tour_lessons();
-        if lessons.is_empty() {
-            return;
-        }
+        assert!(
+            !lessons.is_empty(),
+            "tests/tour/manifest.json missing or empty; dsc owns tour fixtures"
+        );
 
         let tour_dir =
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/tour");

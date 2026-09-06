@@ -1,8 +1,8 @@
 name: CI
 
 on:
-  # PRs always run: main requires the "Rust tests" check, and a
-  # paths-ignore here would leave docs-only PRs permanently unmergeable.
+  # PRs always create the required "Rust tests" check. A workflow-level path
+  # filter would leave docs-only PRs permanently pending and unmergeable.
   pull_request:
     branches: [main]
   push:
@@ -11,63 +11,120 @@ on:
       - '**/*.md'
       - '.github/ISSUE_TEMPLATE/**'
 
+permissions:
+  contents: read
+  pull-requests: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Self-hosted only. This repo must never download V8 or link deno_core.
 env:
-  SCCACHE_ENDPOINT: "https://08b93c93f8b7adc43678e9afba31e4ee.r2.cloudflarestorage.com"
-  SCCACHE_REGION: "auto"
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_DEV_DEBUG: 0
   CARGO_PROFILE_TEST_DEBUG: 0
 
 jobs:
-  rust:
-    name: Rust tests
-    runs-on: [self-hosted, linux, x64]
-    env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  changes:
+    name: Classify changes
+    runs-on: ubuntu-latest
+    outputs:
+      source_changed: ${{ steps.classify.outputs.source_changed }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - id: classify
+        name: Detect source-impacting changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_AFTER_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            base="$PR_BASE_SHA"
+            head="$PR_HEAD_SHA"
+          else
+            base="$PUSH_BEFORE_SHA"
+            head="$PUSH_AFTER_SHA"
+          fi
+
+          # A new ref has no parent SHA. Run the full gate rather than
+          # attempting to classify an incomplete diff.
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            echo "source_changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          source_changed=false
+          while IFS= read -r path; do
+            case "$path" in
+              Cargo.toml|Cargo.lock|rust-toolchain|rust-toolchain.toml|build.rs|\
+              crates/*|tests/*|scripts/*|.cargo/*|.github/actions/*|.github/workflows/*)
+                source_changed=true
+                ;;
+            esac
+          done < <(git diff --name-only "$base" "$head")
+
+          echo "source_changed=$source_changed" >> "$GITHUB_OUTPUT"
+
+  rust:
+    # Keep this exact required-check name. It always reports, while the
+    # expensive steps below run only when source or CI inputs changed.
+    name: Rust tests
+    needs: changes
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    environment: public-ci
+    steps:
+      - name: Require successful change classification
+        if: ${{ needs.changes.result != 'success' }}
+        run: |
+          echo "::error::Could not classify changed files; refusing to skip Rust tests."
+          exit 1
+
+      - name: Skip Rust work for non-source changes
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed != 'true' }}
+        run: echo "No source-impacting changes; Rust tests intentionally skipped."
+
+      - uses: actions/checkout@v5
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
 
       - name: Where am I
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
         uses: ./.github/actions/where-am-i
 
-      # rust-toolchain installs rustup if `rustup` is not on PATH. Non-login
-      # runner shells often have ~/.cargo/bin missing, then the installer
-      # hits static.rust-lang.org and flakes on DNS.
-      - name: Cargo bin on PATH
-        run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
       - name: Setup Rust
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
         uses: dtolnay/rust-toolchain@1.96.0
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.9
-
-      - name: Configure sccache
-        run: scripts/ci-configure-sccache.sh
-
       - name: Cache Rust dependencies
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
         uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
 
       - name: Verify lockfile
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
         run: cargo update --workspace --locked
 
       - name: Test workspace
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
         run: cargo test --locked --workspace
 
       # rfd#38: this repo owns tests/tour + tests/testsuite. cargo test
       # already runs fmt corpus + wasm tour; name the gate and refuse an
       # empty tree (the wasm test used to return on a missing manifest).
       - name: Language fixtures
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
         run: |
           test -f tests/tour/manifest.json
           n=$(find tests/testsuite \( -name '*.pass.ds' -o -name '*.pass.dsx' \) | wc -l)
@@ -76,11 +133,13 @@ jobs:
           cargo test --locked -p deka_compiler_wasm all_website_tour_sources_match_the_native_abi_contract
 
       - name: Check wasm32 compiler + diagnostics
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
         run: |
           cargo check --locked --target wasm32-unknown-unknown -p deka_compiler_wasm
           cargo check --locked --target wasm32-unknown-unknown -p dekascript_lsp_wasm --no-default-features
 
       - name: Forbid V8 in this repo
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
         run: |
           if grep -RInE 'deno_core|rusty_v8' \
             --include='Cargo.toml' --include='Cargo.lock' --include='*.rs' \

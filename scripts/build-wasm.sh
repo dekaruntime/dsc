@@ -10,7 +10,14 @@ case "$out_dir" in
 esac
 target_dir=${CARGO_TARGET_DIR:-"$root/target"}
 source_commit=$(git -C "$root" rev-parse HEAD)
-cargo_lock_sha256=$(shasum -a 256 "$root/Cargo.lock" | awk '{print $1}')
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
+cargo_lock_sha256=$(sha256_file "$root/Cargo.lock")
 version=$("$root/scripts/dsc-version.sh")
 
 mkdir -p "$out_dir"
@@ -23,7 +30,6 @@ CARGO_INCREMENTAL=0 DSC_SOURCE_COMMIT="$source_commit" \
 cp "$target_dir/wasm32-unknown-unknown/release/deka_compiler_wasm.wasm" "$out_dir/dsc.wasm"
 cp "$target_dir/wasm32-unknown-unknown/release/dekascript_lsp_wasm.wasm" "$out_dir/dsc_diagnostics.wasm"
 
-sha256_file() { shasum -a 256 "$1" | awk '{print $1}'; }
 compiler_sha=$(sha256_file "$out_dir/dsc.wasm")
 diag_sha=$(sha256_file "$out_dir/dsc_diagnostics.wasm")
 printf '%s  dsc.wasm\n' "$compiler_sha" > "$out_dir/dsc.wasm.sha256"

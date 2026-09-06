@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  # PRs always run: main requires the "Rust tests" check, and a
+  # paths-ignore here would leave docs-only PRs permanently unmergeable.
   pull_request:
     branches: [main]
   push:
@@ -48,26 +50,7 @@ jobs:
         uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Configure sccache
-        run: |
-          case "$(uname -s)-$(uname -m)" in
-            Darwin-arm64)  BUCKET=dsc-sccache-darwin-arm64 ;;
-            Darwin-x86_64) BUCKET=dsc-sccache-darwin-x64 ;;
-            Linux-x86_64)  BUCKET=dsc-sccache-linux-x64 ;;
-            *) echo "unsupported sccache host: $(uname -sm)" >&2; exit 1 ;;
-          esac
-          # Org R2 secrets must be allowed on this repo. Empty keys make
-          # RUSTC_WRAPPER=sccache fail every rustc with InvalidArgument,
-          # which looks like a code failure and is not one.
-          if ! command -v sccache >/dev/null 2>&1; then
-            echo "::warning::sccache not found on PATH - building without a compiler cache."
-          elif [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
-            echo "::warning::R2_ACCESS_KEY_ID/SECRET empty - building without sccache. Allow the org secrets on dekaruntime/dsc."
-          else
-            echo "SCCACHE_BUCKET=$BUCKET" >> "$GITHUB_ENV"
-            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-            echo "sccache enabled, bucket: $BUCKET"
-            sccache --show-stats
-          fi
+        run: scripts/ci-configure-sccache.sh
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2

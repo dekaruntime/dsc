@@ -47,7 +47,8 @@ and `Cargo.lock`. It refuses to go backwards, reuse a version that already
 has a `v*` tag, or land on `0.42.x` (deka's line when the crates were
 copied). It does not commit or tag.
 
-Open a PR with the bump, merge it, then tag from `main`:
+Do **not** push the bump to `main`. Open a PR, merge with a merge commit, then
+tag from `main`:
 
 ```sh
 git checkout main

@@ -251,6 +251,16 @@ fn self_contained_graph_dump_keeps_package_paths() {
     );
     write(&root.join("deka.json"), "{}\n");
     write(
+        &root.join("deka.lock"),
+        r#"{
+  "lockfileVersion": 1,
+  "packages": {
+    "@deka/io": ["@deka/io@0.0.0", "local", {}, ""]
+  }
+}
+"#,
+    );
+    write(
         &root.join("main.ds"),
         "import { echo } from \"io\"\necho(\"hi\")\n",
     );

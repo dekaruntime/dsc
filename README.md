@@ -16,4 +16,6 @@ Commands (`check`, `transpile`, `fmt`, `lsp`) are registered in `crates/cli/src/
 
 ## CI
 
-Self-hosted only. No V8. sccache buckets are `dsc-sccache-{linux-x64,darwin-x64,darwin-arm64}`. WASM artifacts go to `dsc-wasm` (`https://dsc-wasm.deka.gg`).
+Self-hosted only. No V8. sccache buckets are `dsc-sccache-{linux-x64,darwin-x64,darwin-arm64}`.
+
+Browser artifacts: `scripts/build-wasm.sh` → `dsc.wasm` / `dsc_diagnostics.wasm` for `https://dsc-wasm.deka.gg` (publish on release).

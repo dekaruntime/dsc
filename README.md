@@ -26,7 +26,7 @@ Same as [`deka`](https://github.com/dekaruntime/deka): **PR → merge commit →
 
 ## CI
 
-`main` requires the **Rust tests** check. No pass, no merge.
+PR CI runs on GitHub-hosted runners with a read-only token and no secrets. The required **Rust tests** check skips cargo work for documentation-only changes, but runs the full gate when source, tests, scripts, or CI inputs change. Release-only R2 credentials are never available to CI.
 
 ## Versioning
 

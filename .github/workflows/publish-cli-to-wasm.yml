@@ -20,18 +20,19 @@ permissions:
   contents: read
 
 env:
-  R2_ENDPOINT: "https://08b93c93f8b7adc43678e9afba31e4ee.r2.cloudflarestorage.com"
   R2_BUCKET_WASM: "dsc-wasm"
 
 jobs:
   publish:
     name: Copy CLI binaries to dsc-wasm
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
+    environment: release
     env:
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: auto
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
 
@@ -40,8 +41,8 @@ jobs:
 
       - name: Require R2 credentials
         run: |
-          if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
-            echo "::error::R2_ACCESS_KEY_ID/SECRET empty. Allow the org secrets on dekaruntime/dsc."
+          if [ -z "${R2_ENDPOINT:-}" ] || [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+            echo "::error::release requires R2_ENDPOINT, R2_ACCESS_KEY_ID, and R2_SECRET_ACCESS_KEY."
             exit 1
           fi
 

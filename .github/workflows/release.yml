@@ -9,9 +9,6 @@ permissions:
   contents: read
 
 env:
-  SCCACHE_ENDPOINT: "https://08b93c93f8b7adc43678e9afba31e4ee.r2.cloudflarestorage.com"
-  SCCACHE_REGION: "auto"
-  R2_ENDPOINT: "https://08b93c93f8b7adc43678e9afba31e4ee.r2.cloudflarestorage.com"
   R2_BUCKET_RELEASES: "dsc-releases"
   R2_BUCKET_WASM: "dsc-wasm"
   CARGO_INCREMENTAL: 0
@@ -21,15 +18,22 @@ env:
 jobs:
   test:
     name: Test
-    runs-on: [self-hosted, linux, x64]
-    env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Where am I
         uses: ./.github/actions/where-am-i
+
+      - name: Tag commit is reachable from main
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::${GITHUB_REF_NAME} must reference a commit reachable from main."
+            exit 1
+          fi
 
       - name: Tag matches workspace version
         run: |
@@ -45,12 +49,6 @@ jobs:
         uses: dtolnay/rust-toolchain@1.96.0
         with:
           targets: wasm32-unknown-unknown
-
-      - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.9
-
-      - name: Configure sccache
-        run: scripts/ci-configure-sccache.sh
 
       - name: Test workspace
         run: cargo test --locked --workspace
@@ -72,10 +70,7 @@ jobs:
   build-wasm:
     name: Build browser compiler + diagnostics WASM
     needs: [test]
-    runs-on: [self-hosted, linux, x64]
-    env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
@@ -86,12 +81,6 @@ jobs:
         uses: dtolnay/rust-toolchain@1.96.0
         with:
           targets: wasm32-unknown-unknown
-
-      - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.9
-
-      - name: Configure sccache
-        run: scripts/ci-configure-sccache.sh
 
       - name: Build WASM artifacts
         run: scripts/build-wasm.sh dist/wasm
@@ -111,15 +100,12 @@ jobs:
       matrix:
         include:
           - platform: linux-x64
-            runner: [self-hosted, linux, x64]
+            runner: ubuntu-latest
           - platform: darwin-x64
-            runner: [self-hosted, macos, x64]
+            runner: macos-13
           - platform: darwin-arm64
-            runner: [self-hosted, macos, arm64]
+            runner: macos-14
     runs-on: ${{ matrix.runner }}
-    env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     steps:
       - uses: actions/checkout@v5
 
@@ -128,12 +114,6 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.96.0
-
-      - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.9
-
-      - name: Configure sccache
-        run: scripts/ci-configure-sccache.sh
 
       - name: Build CLI
         run: cargo build --locked --release -p cli
@@ -154,10 +134,12 @@ jobs:
   publish:
     name: Publish
     needs: [build-wasm, build-cli]
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: write
     env:
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: auto
@@ -240,22 +222,33 @@ jobs:
 
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-      - name: R2 credential presence
+      - name: Require R2 release credentials
         run: |
-          if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
-            echo "R2_ACCESS_KEY_ID: set"
-          else
-            echo "R2_ACCESS_KEY_ID: empty"
+          if [ -z "${R2_ENDPOINT:-}" ] || [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+            echo "::error::release requires R2_ENDPOINT, R2_ACCESS_KEY_ID, and R2_SECRET_ACCESS_KEY in the release environment."
+            exit 1
           fi
-          if [ -n "${AWS_SECRET_ACCESS_KEY:-}" ]; then
-            echo "R2_SECRET_ACCESS_KEY: set"
-          else
-            echo "R2_SECRET_ACCESS_KEY: empty"
-          fi
+
+      - name: Install AWS CLI
+        run: command -v aws >/dev/null 2>&1 || pip install --break-system-packages awscli
+
+      - name: Upload versioned release to R2
+        run: |
+          VERSION="${{ steps.prepare.outputs.version }}"
+          aws s3 sync "release/${VERSION}/" "s3://${R2_BUCKET_RELEASES}/${VERSION}/" --endpoint-url="${R2_ENDPOINT}"
+
+      - name: Upload versioned WASM to R2
+        run: |
+          VERSION="${{ steps.prepare.outputs.version }}"
+          for f in dsc.wasm dsc_diagnostics.wasm deka_compiler.wasm deka_diagnostics.wasm \
+            dsc-linux-x64 dsc-darwin-x64 dsc-darwin-arm64 \
+            manifest.json release.json deka-compiler-artifact.json deka-diagnostics-artifact.json; do
+            aws s3 cp "release/${VERSION}/${f}" "s3://${R2_BUCKET_WASM}/v${VERSION}/${f}" --endpoint-url="${R2_ENDPOINT}"
+          done
 
       - name: Create GitHub release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${{ steps.prepare.outputs.version }}"
           TMPDIR="$(mktemp -d)"
@@ -282,33 +275,7 @@ jobs:
               "${ASSETS[@]}"
           fi
 
-      - name: Skip R2 when credentials are missing
-        if: ${{ env.AWS_ACCESS_KEY_ID == '' || env.AWS_SECRET_ACCESS_KEY == '' }}
-        run: |
-          echo "::warning::R2_ACCESS_KEY_ID/SECRET empty. GitHub release was created. Allow the org secrets on dekaruntime/dsc to publish https://dsc-wasm.deka.gg."
-
-      - name: Install AWS CLI
-        if: ${{ env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != '' }}
-        run: command -v aws >/dev/null 2>&1 || pip install --break-system-packages awscli
-
-      - name: Upload versioned release to R2
-        if: ${{ env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != '' }}
-        run: |
-          VERSION="${{ steps.prepare.outputs.version }}"
-          aws s3 sync "release/${VERSION}/" "s3://${R2_BUCKET_RELEASES}/${VERSION}/" --endpoint-url="${R2_ENDPOINT}"
-
-      - name: Upload versioned WASM to R2
-        if: ${{ env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != '' }}
-        run: |
-          VERSION="${{ steps.prepare.outputs.version }}"
-          for f in dsc.wasm dsc_diagnostics.wasm deka_compiler.wasm deka_diagnostics.wasm \
-            dsc-linux-x64 dsc-darwin-x64 dsc-darwin-arm64 \
-            manifest.json release.json deka-compiler-artifact.json deka-diagnostics-artifact.json; do
-            aws s3 cp "release/${VERSION}/${f}" "s3://${R2_BUCKET_WASM}/v${VERSION}/${f}" --endpoint-url="${R2_ENDPOINT}"
-          done
-
       - name: Promote latest
-        if: ${{ env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != '' }}
         run: |
           VERSION="${{ steps.prepare.outputs.version }}"
           aws s3 cp "release/${VERSION}/release.json" "s3://${R2_BUCKET_RELEASES}/latest.json" --endpoint-url="${R2_ENDPOINT}"
@@ -327,5 +294,5 @@ jobs:
       - name: Summary
         run: |
           echo "Published dsc ${{ github.ref_name }} to GitHub Releases."
-          echo "  wasm host (after R2 secrets): https://dsc-wasm.deka.gg/latest/dsc.wasm"
-          echo "  CLI (after R2 secrets): https://dsc-wasm.deka.gg/latest/dsc-darwin-arm64"
+          echo "  wasm host: https://dsc-wasm.deka.gg/latest/dsc.wasm"
+          echo "  CLI: https://dsc-wasm.deka.gg/latest/dsc-darwin-arm64"

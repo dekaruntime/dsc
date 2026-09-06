@@ -50,6 +50,6 @@ Public wasm + CLI host: `https://dsc-wasm.deka.gg`.
 | CLI (darwin-arm64) | `https://dsc-wasm.deka.gg/latest/dsc-darwin-arm64` |
 | Versioned | `https://dsc-wasm.deka.gg/v<VERSION>/...` |
 
-Org R2 secrets (`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`) must be allowed on
-`dekaruntime/dsc` or the GitHub release is created and R2 is skipped. Allow the
-org secrets (same keys as `deka`) for `https://dsc-wasm.deka.gg`.
+The final Publish job uses the `release` environment's `R2_ENDPOINT`,
+`R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY`. It fails before publishing if
+any are unavailable; CI and release build jobs never receive those values.

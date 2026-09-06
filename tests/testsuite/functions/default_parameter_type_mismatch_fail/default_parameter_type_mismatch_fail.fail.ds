@@ -1,0 +1,5 @@
+import { echo } from "io"
+fn scale(x: number, factor: number = 2) number {
+  return x * factor
+}
+echo(scale(3, "x"))

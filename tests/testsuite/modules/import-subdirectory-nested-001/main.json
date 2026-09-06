@@ -1,0 +1,4 @@
+{
+  "title": "import resolves modules in nested subdirectories",
+  "stage": "run"
+}

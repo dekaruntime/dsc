@@ -1,0 +1,6 @@
+{
+  "title": "Mutating an immutable struct field fails",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "cannot assign to field `x` of immutable value"
+}

@@ -1,0 +1,12 @@
+import { echo } from "io"
+struct Point {
+  x: number
+  y: number
+}
+
+fn (p Point) magnitude() number {
+  return Math.sqrt((p.x * p.x) + (p.y * p.y))
+}
+
+const p = Point { x: 3, y: 4 };
+echo(string(p.magnitude()));

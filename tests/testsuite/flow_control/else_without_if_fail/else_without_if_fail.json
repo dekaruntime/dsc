@@ -1,0 +1,6 @@
+{
+  "title": "Else without matching if fails",
+  "stage": "parse",
+  "notes": "An else branch must follow an if statement.",
+  "expectedDiagnosticContains": "expected expression, found ``else``"
+}

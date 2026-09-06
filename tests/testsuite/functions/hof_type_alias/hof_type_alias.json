@@ -1,0 +1,5 @@
+{
+  "title": "Function type alias can be used as a binding type",
+  "stage": "run",
+  "notes": ""
+}

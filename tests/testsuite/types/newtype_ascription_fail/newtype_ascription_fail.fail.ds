@@ -1,0 +1,2 @@
+type Cents number
+const c: Cents = 500

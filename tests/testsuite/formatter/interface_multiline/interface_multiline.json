@@ -1,0 +1,5 @@
+{
+  "title": "Interface and struct formatting is normalized",
+  "stage": "run",
+  "notes": "Formatter should expand interface, struct, and method definitions onto canonical multiline forms."
+}

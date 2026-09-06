@@ -1,0 +1,5 @@
+{
+  "title": "await inside a non-async struct method fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "`await` is only allowed inside async functions or at the top level"
+}

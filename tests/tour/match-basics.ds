@@ -1,0 +1,10 @@
+import { echo } from "io"
+const value = 2
+
+const label = match (value) {
+  1 => "one",
+  2 => "two",
+  3 => "three",
+  _ => "other",
+}
+echo(label)

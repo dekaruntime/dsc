@@ -1,0 +1,5 @@
+{
+  "title": "Hoisted fn is callable inside a block.",
+  "stage": "run",
+  "notes": ""
+}

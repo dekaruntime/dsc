@@ -1,0 +1,5 @@
+{
+  "title": "Function returns a closure with an inferred return type",
+  "stage": "run",
+  "notes": ""
+}

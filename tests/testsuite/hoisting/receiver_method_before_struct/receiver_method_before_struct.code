@@ -1,0 +1,9 @@
+import { echo } from "io"
+fn (p Person) greet() string {
+  return "hi, " + p.name
+}
+struct Person {
+  name: string;
+}
+const p = Person({name: "Ada"})
+echo(p.greet())

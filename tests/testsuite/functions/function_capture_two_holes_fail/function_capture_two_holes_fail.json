@@ -1,0 +1,6 @@
+{
+  "title": "Function captures reject two holes",
+  "stage": "parse",
+  "notes": "RFD 30",
+  "expectedDiagnosticContains": "exactly one"
+}

@@ -1,0 +1,6 @@
+import { echo } from "io"
+import { stringify } from "json"
+echo(match (stringify({ a: { b: 1 } })) {
+  Ok(v) => v,
+  Err(e) => "fail"
+})

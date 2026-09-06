@@ -1,0 +1,5 @@
+{
+  "title": "unsafe block parses valid JSON via host JSON.parse",
+  "stage": "run",
+  "notes": ""
+}

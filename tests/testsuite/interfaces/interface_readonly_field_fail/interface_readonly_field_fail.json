@@ -1,0 +1,6 @@
+{
+  "title": "Readonly visibility modifier on interface field fails",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "expected ``:``, found `identifier`"
+}

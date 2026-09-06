@@ -1,0 +1,2 @@
+import { echo } from "io"
+echo(1) echo(2)

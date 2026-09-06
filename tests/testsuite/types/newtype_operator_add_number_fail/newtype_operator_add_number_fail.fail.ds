@@ -1,0 +1,5 @@
+import { echo } from "io"
+
+type Cents number
+const a = Cents(1)
+const c = a + 1

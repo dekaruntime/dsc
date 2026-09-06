@@ -1,0 +1,8 @@
+{
+  "title": "Attribute values are HTML-escaped",
+  "stage": "run",
+  "notes": "",
+  "hosts": [
+    "browser"
+  ]
+}

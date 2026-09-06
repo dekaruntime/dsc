@@ -1,0 +1,6 @@
+{
+  "title": "Object shorthand property syntax is rejected",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected ``:``, found ``}``",
+  "notes": ""
+}

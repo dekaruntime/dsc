@@ -1,0 +1,5 @@
+import { echo } from "io"
+async fn greet() {
+  echo("hi")
+}
+await greet()

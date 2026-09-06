@@ -1,0 +1,6 @@
+{
+  "title": "An unconstrained type parameter does not excuse a constrained mismatch",
+  "stage": "parse",
+  "expectedDiagnosticContains": "found type `Result<_, string>`",
+  "notes": "deka#468."
+}

@@ -1,0 +1,12 @@
+import { echo } from "io"
+enum E {
+  A(number),
+  B(string),
+}
+const e = E.A(42)
+const r = match (e) {
+  A(n) => n,
+  B(s) => -1,
+  _ => 0,
+}
+echo(string(r))

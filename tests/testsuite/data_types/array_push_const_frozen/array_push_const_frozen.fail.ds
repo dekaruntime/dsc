@@ -1,0 +1,4 @@
+import { echo } from "io"
+const arr = []
+arr.push(1)
+echo(string(arr.length))

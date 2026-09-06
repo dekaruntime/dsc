@@ -1,0 +1,6 @@
+{
+  "title": "Ascription does not convert into a newtype",
+  "stage": "typecheck",
+  "expectedDiagnosticContains": "Cents",
+  "notes": "Phase 2 of deka#346: ascription never converts; use the constructor."
+}

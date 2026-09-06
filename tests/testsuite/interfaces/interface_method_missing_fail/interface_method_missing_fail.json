@@ -1,0 +1,6 @@
+{
+  "title": "Struct missing interface method fails",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "expected argument type `Greeter`, found type `Person`"
+}

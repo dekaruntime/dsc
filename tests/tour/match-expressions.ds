@@ -1,0 +1,8 @@
+import { echo } from "io"
+const role = "owner";
+const label = match (role) {
+  "owner" => "Admin",
+  "member" => "User",
+  _ => "Guest"
+};
+echo(label);

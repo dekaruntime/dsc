@@ -1,0 +1,6 @@
+{
+  "title": "A never arm does not fix the match type by position",
+  "stage": "run",
+  "packages": ["io"],
+  "notes": "deka#407: seeding the match type from a panic arm rejected every arm after it, so the same match compiled or failed depending on arm order."
+}

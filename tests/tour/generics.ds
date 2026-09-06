@@ -1,0 +1,15 @@
+import { echo } from "io"
+
+// A type parameter lets one function work for many types.
+// `T` is chosen by the caller, not written into the function.
+fn first<T>(items: Array<T>, fallback: T): T {
+  if (items.length == 0) {
+    return fallback
+  }
+  return items[0]
+}
+
+// The compiler infers T from the arguments — you rarely name it.
+echo(string(first([3, 4, 5], 0)))
+echo(first(["a", "b"], "none"))
+echo(first([], "empty"))

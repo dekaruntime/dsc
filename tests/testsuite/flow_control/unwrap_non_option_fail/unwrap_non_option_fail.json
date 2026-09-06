@@ -1,0 +1,6 @@
+{
+  "title": "unwrap only applies to Option and Result",
+  "stage": "parse",
+  "expectedDiagnosticContains": "works on `Option` and `Result`",
+  "notes": "deka#445."
+}

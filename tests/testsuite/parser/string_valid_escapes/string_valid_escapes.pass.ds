@@ -1,0 +1,2 @@
+import { echo } from "io"
+echo("a\nb\tc\"d\\e")

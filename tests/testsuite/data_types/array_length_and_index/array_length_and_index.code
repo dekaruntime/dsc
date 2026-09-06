@@ -1,0 +1,4 @@
+import { echo } from "io"
+const items = [10, 20, 30]
+echo(items.length)
+echo(items[1])

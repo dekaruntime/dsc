@@ -1,0 +1,17 @@
+import { echo } from "io"
+fn find(hit: boolean): Option<number> {
+  if (hit) {
+    return Some(7)
+  }
+  return None
+}
+fn label(value: Option<number>): string {
+  return match (value) {
+    Some(v) => "some",
+    None => "none"
+  }
+}
+const direct: Option<number> = None
+echo(label(find(true)))
+echo(label(find(false)))
+echo(label(direct))

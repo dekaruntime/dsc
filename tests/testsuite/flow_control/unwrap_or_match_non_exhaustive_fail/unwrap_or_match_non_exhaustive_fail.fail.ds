@@ -1,0 +1,14 @@
+enum Failure {
+  Timeout
+  Refused
+}
+
+// The arms are real match arms, so the existing exhaustiveness check runs over
+// them plus the implicit success arm. `or match` adds enforced precision, not
+// just ergonomics (deka#445).
+fn f(r: Result<string, Failure>): string {
+  let v = unwrap(r) or match {
+    Err(Timeout) => "slow"
+  }
+  return v
+}

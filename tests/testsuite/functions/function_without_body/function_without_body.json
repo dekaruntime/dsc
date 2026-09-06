@@ -1,0 +1,6 @@
+{
+  "title": "Function declaration missing a body fails",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "expected ``{``, found `newline`"
+}

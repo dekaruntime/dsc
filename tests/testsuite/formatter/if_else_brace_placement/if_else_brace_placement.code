@@ -1,0 +1,6 @@
+import { echo } from "io"
+if (true) {
+  echo("yes")
+} else {
+  echo("no")
+}

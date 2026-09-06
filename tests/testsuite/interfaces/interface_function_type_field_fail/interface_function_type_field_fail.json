@@ -1,0 +1,6 @@
+{
+  "title": "Function-type field in an interface is not supported",
+  "stage": "parse",
+  "expectedDiagnosticContains": "interface fields may not have function types; use a method instead",
+  "notes": "Interfaces do not support function-type fields. The source now parses (fn(number, number) number is a valid type since return types dropped the colon), so the rejection comes from the interface check rather than the parser -- the old expectation named a struct-field diagnostic that no longer fires."
+}

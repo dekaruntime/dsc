@@ -1,0 +1,6 @@
+{
+  "title": "Nested constructor pattern must cover the inner enum",
+  "stage": "parse",
+  "expectedDiagnosticContains": "non-exhaustive match: missing Result::Ok(Option::None)",
+  "notes": "deka#396: coverage tracked only top-level constructor names, so Ok(Some(v)) counted as covering all of Ok. RFD 6 / deka#300 make this the idiomatic shape."
+}

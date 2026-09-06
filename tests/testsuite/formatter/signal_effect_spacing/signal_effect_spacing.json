@@ -1,0 +1,8 @@
+{
+  "title": "Signal and memo spacing is normalized",
+  "stage": "run",
+  "notes": "Formatter should preserve signal/memo API spacing while canonicalizing surrounding whitespace.",
+  "hosts": [
+    "browser"
+  ]
+}

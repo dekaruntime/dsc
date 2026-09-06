@@ -1,0 +1,6 @@
+{
+  "title": "For-of destructuring binding fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected ``=``, found ``,``",
+  "notes": "DekaScript for-of loops do not support destructuring in the binding."
+}

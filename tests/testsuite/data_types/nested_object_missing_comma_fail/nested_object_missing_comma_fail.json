@@ -1,0 +1,6 @@
+{
+  "title": "Missing comma in nested object literal fails",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "expected ``}``, found `identifier`"
+}

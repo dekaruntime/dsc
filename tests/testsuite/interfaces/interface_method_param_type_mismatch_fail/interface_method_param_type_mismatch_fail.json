@@ -1,0 +1,5 @@
+{
+  "title": "Interface method parameter type mismatch fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected argument type `Shouter`, found type `Bullhorn`"
+}

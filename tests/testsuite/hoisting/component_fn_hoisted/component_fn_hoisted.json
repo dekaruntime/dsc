@@ -1,0 +1,5 @@
+{
+  "title": "fn components are hoisted and usable before source position.",
+  "stage": "run",
+  "notes": ""
+}

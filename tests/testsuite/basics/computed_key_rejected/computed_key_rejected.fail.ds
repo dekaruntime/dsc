@@ -1,0 +1,2 @@
+const key = "k"
+const obj = { [key]: 1 }

@@ -1,0 +1,6 @@
+{
+  "title": "Arrow-function callback is rejected",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected ``)``, found ``=>``",
+  "notes": "Pins the current diagnostic. A JS/TS developer writing `(n) => n + 1` should be told arrows are not DekaScript, not that a semicolon is missing."
+}

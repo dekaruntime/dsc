@@ -1,0 +1,5 @@
+{
+  "title": "Newtype constructor and unwrap work",
+  "stage": "run",
+  "notes": "Phase 2 of deka#346: newtypes over primitives."
+}

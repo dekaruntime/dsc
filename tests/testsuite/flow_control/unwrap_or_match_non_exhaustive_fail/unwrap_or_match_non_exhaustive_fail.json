@@ -1,0 +1,6 @@
+{
+  "title": "or match arms are exhaustiveness-checked",
+  "stage": "parse",
+  "expectedDiagnosticContains": "non-exhaustive match",
+  "notes": "deka#445."
+}

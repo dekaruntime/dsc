@@ -1,0 +1,5 @@
+{
+  "title": "Nested generic Array<Array<number>> parses and typechecks",
+  "stage": "run",
+  "notes": "Adjacent closing brackets in nested generics (deka#465)."
+}

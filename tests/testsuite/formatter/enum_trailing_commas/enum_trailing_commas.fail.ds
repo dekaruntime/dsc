@@ -1,0 +1,4 @@
+import { echo } from "io"
+enum Color Red Green Blue
+let c = Color.Green
+echo(c)

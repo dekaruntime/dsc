@@ -1,0 +1,4 @@
+import { echo } from "io"
+const arr = [1, 2]
+const arr2 = arr.concat([3, 4])
+echo(string(arr2.length))

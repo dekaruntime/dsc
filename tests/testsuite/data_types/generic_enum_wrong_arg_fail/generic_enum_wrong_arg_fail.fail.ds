@@ -1,0 +1,11 @@
+enum Box<T> {
+  Empty
+  Full(T)
+}
+fn unwrap(b: Box<number>): number {
+  return match (b) {
+    Full(value) => value,
+    Empty => 0
+  }
+}
+const bad = unwrap(Box.Full("string"))

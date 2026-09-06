@@ -1,0 +1,17 @@
+import { echo } from "io"
+
+interface CardProps {
+  title: string
+}
+
+fn Card(props: CardProps) Component {
+  return <h2>{props.title}</h2>
+}
+
+// deka#461: a JSX element has type `Component`. Annotating the binding is the
+// point of the test -- while JSX was typed `Infer` it was assignable to
+// anything, so an annotation proved nothing about it.
+const view: Component = <Card title="Hello" />
+const plain: Component = <p>hi</p>
+
+echo("ok")

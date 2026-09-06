@@ -1,0 +1,5 @@
+{
+  "title": "If Else Brace Placement",
+  "stage": "run",
+  "notes": "Formatter should canonicalize if else brace placement."
+}

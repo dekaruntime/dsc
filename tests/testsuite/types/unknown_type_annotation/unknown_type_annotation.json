@@ -1,0 +1,6 @@
+{
+  "title": "Unknown type name in parameter annotation fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "unknown type `NotAType`",
+  "notes": "Type annotations must refer to defined primitive, struct, interface, or enum types."
+}

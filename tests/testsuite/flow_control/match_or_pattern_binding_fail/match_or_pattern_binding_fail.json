@@ -1,0 +1,6 @@
+{
+  "title": "An alternative may not bind",
+  "stage": "parse",
+  "expectedDiagnosticContains": "cannot bind",
+  "notes": "deka#446: same-name bindings across alternatives are a later addition."
+}

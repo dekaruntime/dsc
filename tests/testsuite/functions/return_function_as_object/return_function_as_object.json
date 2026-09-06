@@ -1,0 +1,6 @@
+{
+  "title": "Returning a function with an explicit object return type fails",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "unknown type `object`"
+}

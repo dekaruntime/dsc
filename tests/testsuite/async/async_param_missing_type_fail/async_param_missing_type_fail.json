@@ -1,0 +1,5 @@
+{
+  "title": "Async function parameter missing a type annotation fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "parameter `name` is missing a type annotation"
+}

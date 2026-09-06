@@ -1,0 +1,6 @@
+{
+  "title": "const component is not hoisted above its use",
+  "stage": "parse",
+  "notes": "Components declared with const behave like const and stay in source order.",
+  "expectedDiagnosticContains": "`Card` is used here but is not initialized until later"
+}

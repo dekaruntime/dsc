@@ -1,0 +1,6 @@
+import { echo } from "io"
+import { validate } from "json"
+echo(match (validate("{\"a\":1}")) {
+  Ok(v) => v,
+  Err(e) => false
+})

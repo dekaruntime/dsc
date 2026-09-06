@@ -1,0 +1,3 @@
+fn add($value: number) number {
+  return $value;
+}

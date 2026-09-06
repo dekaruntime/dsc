@@ -1,0 +1,5 @@
+{
+  "title": "Receiver methods are collected and registered after struct factories.",
+  "stage": "run",
+  "notes": ""
+}

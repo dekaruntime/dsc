@@ -1,0 +1,6 @@
+{
+  "title": "Returning a struct from a number-typed function fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected return type `number`, found type `Point`",
+  "notes": "Named struct instances are not implicitly convertible to primitives."
+}

@@ -1,0 +1,11 @@
+import { echo } from "io"
+async fn value() Promise<number> {
+  return 7
+}
+
+async fn main() {
+  const v = await value()
+  echo(v)
+}
+
+main()

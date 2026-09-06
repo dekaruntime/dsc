@@ -1,0 +1,6 @@
+{
+  "title": "Undefined variable as JSX attribute name fails",
+  "stage": "parse",
+  "notes": "Using an undefined variable as a JSX attribute name is a parse error.",
+  "expectedDiagnosticContains": "expected ``...``, found `identifier`"
+}

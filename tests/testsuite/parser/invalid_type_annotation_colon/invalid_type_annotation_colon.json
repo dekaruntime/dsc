@@ -1,0 +1,6 @@
+{
+  "title": "A binding annotation with no type is rejected",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected type, found ``=``",
+  "notes": "Stays a rejection. `const x: = 5` must not compile as an untyped binding -- the annotation would look present and check nothing. This fixture caught exactly that hole in the first cut of deka #273."
+}

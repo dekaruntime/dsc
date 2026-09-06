@@ -1,0 +1,5 @@
+{
+  "title": "Calling an async function with too few arguments fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected 1 argument, found 0"
+}

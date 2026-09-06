@@ -1,0 +1,6 @@
+{
+  "title": "string does not implicitly coerce to bytes",
+  "stage": "parse",
+  "notes": "RFD 15: string and Bytes do not interoperate implicitly.",
+  "expectedDiagnosticContains": "expected argument type `bytes`, found type `string`"
+}

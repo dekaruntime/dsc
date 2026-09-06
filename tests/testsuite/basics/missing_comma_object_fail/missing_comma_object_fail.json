@@ -1,0 +1,6 @@
+{
+  "title": "Missing comma between object fields is rejected",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected ``}``, found `identifier`",
+  "notes": ""
+}

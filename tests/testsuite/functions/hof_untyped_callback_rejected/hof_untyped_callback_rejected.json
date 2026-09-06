@@ -1,0 +1,5 @@
+{
+  "title": "Untyped callback parameter is rejected",
+  "stage": "parse",
+  "expectedDiagnosticContains": "parameter `f` is missing a type annotation"
+}

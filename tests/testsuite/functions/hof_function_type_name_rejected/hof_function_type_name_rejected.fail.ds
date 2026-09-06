@@ -1,0 +1,8 @@
+import { echo } from "io"
+fn apply(f: Function, x: number) number {
+  return f(x)
+}
+fn inc(n: number) number {
+  return n + 1
+}
+echo(apply(inc, 5))

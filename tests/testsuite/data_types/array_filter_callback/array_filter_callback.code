@@ -1,0 +1,6 @@
+import { echo } from "io"
+const arr = [1, 2, 3, 4]
+const evens = arr.filter(fn(x: number) boolean { return x % 2 === 0 })
+echo(evens.length)
+echo(evens[0])
+echo(evens[1])

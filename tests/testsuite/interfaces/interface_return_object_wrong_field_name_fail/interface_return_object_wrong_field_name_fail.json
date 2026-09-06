@@ -1,0 +1,6 @@
+{
+  "title": "Returning an object with a wrong field name for an interface fails",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "expected return type `Named`, found type `{nombre: string}`"
+}

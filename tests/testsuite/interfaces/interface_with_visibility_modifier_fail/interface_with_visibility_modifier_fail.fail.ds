@@ -1,0 +1,3 @@
+interface Box {
+  pub value: number
+}

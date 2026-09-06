@@ -1,0 +1,7 @@
+import { echo } from "io"
+
+type Cents number
+type Dollars number
+const a = Cents(1)
+const b = Dollars(1)
+const c = a == b

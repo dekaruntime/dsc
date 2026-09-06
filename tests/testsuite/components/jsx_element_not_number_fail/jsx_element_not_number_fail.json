@@ -1,0 +1,6 @@
+{
+  "title": "A JSX element is not assignable to number",
+  "stage": "parse",
+  "expectedDiagnosticContains": "found type `Component`",
+  "notes": "deka#461."
+}

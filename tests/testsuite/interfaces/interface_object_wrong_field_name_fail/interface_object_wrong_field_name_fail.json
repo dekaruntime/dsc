@@ -1,0 +1,6 @@
+{
+  "title": "Object literal with wrong field name fails interface check",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "expected argument type `Named`, found type `{nombre: string}`"
+}

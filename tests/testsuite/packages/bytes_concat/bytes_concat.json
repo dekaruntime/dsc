@@ -1,0 +1,11 @@
+{
+  "title": "bytes.concat joins two buffers from the package",
+  "stage": "run",
+  "notes": "Native-only. Code lives in the bytes package from the index (`deka add bytes`), not in this fixture.",
+  "hosts": [
+    "native"
+  ],
+  "packages": [
+    "bytes"
+  ]
+}

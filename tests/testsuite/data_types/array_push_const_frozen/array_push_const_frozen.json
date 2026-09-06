@@ -1,0 +1,5 @@
+{
+  "title": "Push on const frozen array fails at runtime",
+  "stage": "run",
+  "notes": ""
+}

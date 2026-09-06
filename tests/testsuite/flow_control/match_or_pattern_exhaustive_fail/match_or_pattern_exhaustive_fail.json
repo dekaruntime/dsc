@@ -1,0 +1,6 @@
+{
+  "title": "Alternatives count toward exhaustiveness, and no further",
+  "stage": "parse",
+  "expectedDiagnosticContains": "non-exhaustive match",
+  "notes": "deka#446: an or-pattern covers what its alternatives cover."
+}

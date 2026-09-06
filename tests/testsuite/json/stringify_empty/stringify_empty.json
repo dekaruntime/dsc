@@ -1,0 +1,11 @@
+{
+  "title": "stringify empty object",
+  "stage": "run",
+  "hosts": [
+    "native"
+  ],
+  "packages": [
+    "json"
+  ],
+  "notes": "Native-only. Code lives in the package from the index (`deka add`), not in this fixture."
+}

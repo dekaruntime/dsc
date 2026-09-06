@@ -1,0 +1,5 @@
+async fn work() Promise<void> {
+  return 1
+}
+
+await work()

@@ -1,0 +1,14 @@
+import { echo } from "io"
+import { stringify, parse } from "json"
+const encoded = match (stringify({ name: "deka" })) {
+  Ok(v) => v,
+  Err(e) => ""
+}
+const name = match (parse(encoded)) {
+  Err(e) => "",
+  Ok(o) => match (unsafe<string> { String(o.name) }) {
+    Ok(v) => v,
+    Err(e) => ""
+  }
+}
+echo(name)

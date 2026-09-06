@@ -1,0 +1,5 @@
+{
+  "title": "export async fn parses",
+  "stage": "run",
+  "notes": "deka#410: the export arm matched only Fn, so export async fn was rejected outright while a bare async fn parsed."
+}

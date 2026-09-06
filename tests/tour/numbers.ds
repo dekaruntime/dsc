@@ -1,0 +1,4 @@
+import { echo } from "io"
+const radius = 5
+const area = Math.PI * radius * radius
+echo(Math.floor(area))

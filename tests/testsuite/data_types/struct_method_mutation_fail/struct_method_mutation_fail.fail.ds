@@ -1,0 +1,6 @@
+struct Counter {
+  count: number
+}
+fn (c Counter) reset() {
+  c.count = 0
+}

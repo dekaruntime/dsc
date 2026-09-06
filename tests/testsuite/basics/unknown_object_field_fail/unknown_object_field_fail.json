@@ -1,0 +1,6 @@
+{
+  "title": "Accessing an unknown object field is rejected",
+  "stage": "parse",
+  "expectedDiagnosticContains": "object has no field `y`",
+  "notes": ""
+}

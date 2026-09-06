@@ -1,0 +1,6 @@
+{
+  "title": "Rest parameters in interface method signatures are not supported",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "expected identifier, found ``...``"
+}

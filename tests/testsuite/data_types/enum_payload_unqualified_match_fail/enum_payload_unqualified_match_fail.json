@@ -1,0 +1,5 @@
+{
+  "title": "Unqualified enum payload match works",
+  "stage": "run",
+  "notes": "Enum payload match arms may use the qualified or unqualified form."
+}

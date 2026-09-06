@@ -1,0 +1,6 @@
+{
+  "title": "Computed object keys are rejected",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "expected object key, found ``[``"
+}

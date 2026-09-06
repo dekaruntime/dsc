@@ -1,0 +1,6 @@
+{
+  "title": "Mismatched JSX closing tag fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected closing tag `</div>` but found `</span>`",
+  "notes": ""
+}

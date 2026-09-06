@@ -1,0 +1,6 @@
+struct Counter {
+  value: number
+}
+fn (c Counter) get() string {
+  return c.value
+}

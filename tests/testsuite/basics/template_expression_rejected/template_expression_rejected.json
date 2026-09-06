@@ -1,0 +1,5 @@
+{
+  "title": "Template string with an embedded expression works",
+  "stage": "run",
+  "notes": "Simple variable interpolation and ${expr} both work in DS."
+}

@@ -1,0 +1,5 @@
+{
+  "title": "Pushing to a frozen array fails at runtime",
+  "stage": "run",
+  "notes": "Array literals are frozen, so in-place push throws."
+}

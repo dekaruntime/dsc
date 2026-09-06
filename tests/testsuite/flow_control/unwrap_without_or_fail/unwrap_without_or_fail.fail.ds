@@ -1,0 +1,7 @@
+// The absent case cannot be left unwritten. This is the whole safety property:
+// there is no spelling of `unwrap` that skips it, which is what makes it
+// unlike Rust's `.unwrap()` (deka#445, RFD 28).
+fn f(o: Option<string>): string {
+  let v = unwrap(o)
+  return v
+}

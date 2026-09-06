@@ -1,0 +1,5 @@
+{
+  "title": "export-fn-direct-001",
+  "stage": "parse",
+  "expectedDiagnosticContains": "Failed to read module '<entry>': operation not supported on this platform"
+}

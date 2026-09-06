@@ -1,0 +1,5 @@
+{
+  "title": "Awaiting a non-promise value inside an async function fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "`await` expected Promise<T>, found type `number`"
+}

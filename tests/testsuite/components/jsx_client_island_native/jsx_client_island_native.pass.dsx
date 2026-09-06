@@ -1,0 +1,13 @@
+import { echo } from "io"
+
+fn Counter() {
+  return <button>0</button>
+}
+
+const tree = <Counter client:load count={1} />
+const result = unsafe { deka.ui.renderToString(tree) }
+match (result) {
+  Ok(r) => echo(r.html),
+  Err(e) => echo(e.message),
+  _ => echo("nomatch"),
+}

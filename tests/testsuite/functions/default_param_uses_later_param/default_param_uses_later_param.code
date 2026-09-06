@@ -1,0 +1,6 @@
+import { echo } from "io"
+fn pair(y: number, x: number = y) number {
+  return x + y
+}
+
+echo(pair(3))

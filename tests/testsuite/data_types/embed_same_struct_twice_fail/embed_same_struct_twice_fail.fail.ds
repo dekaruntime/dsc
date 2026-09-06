@@ -1,0 +1,8 @@
+struct A {
+  value: number
+}
+struct B {
+  A
+  A
+}
+const b = B { A: A { value: 1 } }

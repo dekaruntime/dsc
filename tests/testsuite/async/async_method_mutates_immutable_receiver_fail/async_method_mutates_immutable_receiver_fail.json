@@ -1,0 +1,5 @@
+{
+  "title": "Async method that mutates an immutable receiver fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "cannot assign to field `count` of immutable value"
+}

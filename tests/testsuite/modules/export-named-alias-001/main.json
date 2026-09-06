@@ -1,0 +1,4 @@
+{
+  "title": "export { local as exported } re-exports with alias",
+  "stage": "run"
+}

@@ -1,0 +1,11 @@
+{
+  "title": "upgrade Err carries a message",
+  "stage": "run",
+  "hosts": [
+    "native"
+  ],
+  "packages": [
+    "tls"
+  ],
+  "notes": "Native-only. Code lives in the package from the index (`deka add`), not in this fixture."
+}

@@ -1,0 +1,13 @@
+import { echo } from "io"
+struct User {
+  name: string;
+  email?: string;
+}
+
+const u = User { name: "DekaScript" }
+
+match (u.email) {
+  Some(value) => echo(value),
+  None => echo("no email"),
+  _ => "unknown",
+}

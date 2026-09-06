@@ -1,0 +1,2 @@
+type Cents number
+fn (c mut Cents) setValue(v: number) { c = Cents(v) }

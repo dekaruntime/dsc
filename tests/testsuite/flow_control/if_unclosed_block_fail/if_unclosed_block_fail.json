@@ -1,0 +1,6 @@
+{
+  "title": "If block missing closing brace fails",
+  "stage": "parse",
+  "notes": "An if statement body block must be properly closed.",
+  "expectedDiagnosticContains": "expected ``}``, found `end of file`"
+}

@@ -1,0 +1,6 @@
+{
+  "title": "Interface field with unknown type annotation fails",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "unknown type `UnknownType`"
+}

@@ -1,0 +1,8 @@
+{
+  "title": "Undefined variable in JSX attribute expression fails at runtime",
+  "stage": "run",
+  "notes": "",
+  "hosts": [
+    "browser"
+  ]
+}

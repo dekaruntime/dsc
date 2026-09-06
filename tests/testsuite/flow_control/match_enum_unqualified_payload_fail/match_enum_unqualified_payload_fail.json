@@ -1,0 +1,6 @@
+{
+  "title": "A case with a payload cannot be named bare",
+  "stage": "parse",
+  "expectedDiagnosticContains": "carries a payload",
+  "notes": "deka#450: say so rather than silently binding."
+}

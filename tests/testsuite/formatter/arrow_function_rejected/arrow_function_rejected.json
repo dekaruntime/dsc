@@ -1,0 +1,6 @@
+{
+  "title": "Arrow function expression is rejected",
+  "stage": "parse",
+  "notes": "DekaScript does not support arrow function expressions; the formatter sees a parse error.",
+  "expectedDiagnosticContains": "expected `;` or newline, found ``=>``"
+}

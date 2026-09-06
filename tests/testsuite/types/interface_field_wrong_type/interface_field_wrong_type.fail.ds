@@ -1,0 +1,5 @@
+interface Point {
+  x: number
+}
+fn show(p: Point) {}
+show({ x: "not a number" })

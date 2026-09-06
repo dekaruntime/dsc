@@ -1,0 +1,6 @@
+{
+  "title": "A bare case name is not a catch-all",
+  "stage": "parse",
+  "expectedDiagnosticContains": "non-exhaustive match",
+  "notes": "deka#450."
+}

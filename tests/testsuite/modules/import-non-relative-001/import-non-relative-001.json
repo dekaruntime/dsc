@@ -1,0 +1,5 @@
+{
+  "title": "import-non-relative-001",
+  "expectedDiagnosticContains": "Failed to read module '<entry>': operation not supported on this platform",
+  "stage": "parse"
+}

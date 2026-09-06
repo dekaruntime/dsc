@@ -1,0 +1,5 @@
+import { echo } from "io"
+const greet = fn(name: string) string {
+  return `Hello, ${name}`
+}
+echo(greet("DekaScript"))

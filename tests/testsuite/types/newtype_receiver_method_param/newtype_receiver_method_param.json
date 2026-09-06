@@ -1,0 +1,5 @@
+{
+  "title": "Newtype receiver method accepts parameters",
+  "stage": "run",
+  "notes": "Phase 4 of deka#346: receiver methods on newtype prototypes."
+}

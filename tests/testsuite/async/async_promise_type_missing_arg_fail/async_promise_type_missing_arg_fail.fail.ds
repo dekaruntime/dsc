@@ -1,0 +1,5 @@
+async fn value() Promise {
+  return 1
+}
+
+await value()

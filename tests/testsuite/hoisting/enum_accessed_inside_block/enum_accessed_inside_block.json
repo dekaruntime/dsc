@@ -1,0 +1,5 @@
+{
+  "title": "Hoisted enum is accessible inside a block.",
+  "stage": "run",
+  "notes": "Public discriminator is `.name`. `__case` is the compiler's match tag, not a user field."
+}

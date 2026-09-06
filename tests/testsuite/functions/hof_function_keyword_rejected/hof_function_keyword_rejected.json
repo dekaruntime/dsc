@@ -1,0 +1,5 @@
+{
+  "title": "JS function keyword is rejected",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected expression, found ``function``"
+}

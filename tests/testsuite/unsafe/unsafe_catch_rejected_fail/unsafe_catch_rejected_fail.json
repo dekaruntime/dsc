@@ -1,0 +1,6 @@
+{
+  "title": "Explicit catch clause is rejected in unsafe",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "expected `;` or newline, found `identifier`"
+}

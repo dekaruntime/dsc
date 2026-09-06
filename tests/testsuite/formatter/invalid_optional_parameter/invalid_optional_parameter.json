@@ -1,0 +1,6 @@
+{
+  "title": "Optional parameter syntax is rejected",
+  "stage": "parse",
+  "notes": "DekaScript parameters do not support the optional ? marker; this is a parse error.",
+  "expectedDiagnosticContains": "expected ``)``, found ``?``"
+}

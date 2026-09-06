@@ -1,0 +1,6 @@
+{
+  "title": "If statement cannot be used as an expression",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected expression, found ``if``",
+  "notes": "DekaScript if is a statement; use a match expression for conditional values."
+}

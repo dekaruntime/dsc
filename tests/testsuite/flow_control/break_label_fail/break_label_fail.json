@@ -1,0 +1,6 @@
+{
+  "title": "Labeled break fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected `;` or newline, found `identifier`",
+  "notes": "DekaScript only supports numeric break/continue levels, not labels."
+}

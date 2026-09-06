@@ -1,0 +1,5 @@
+{
+  "title": "Struct method call returns declared type",
+  "stage": "run",
+  "notes": "Methods defined on structs can be invoked and return typed values."
+}

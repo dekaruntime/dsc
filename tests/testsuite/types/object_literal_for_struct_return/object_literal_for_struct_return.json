@@ -1,0 +1,6 @@
+{
+  "title": "Returning an object literal for a struct return type fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected return type `Box`, found type `{value: number}`",
+  "notes": "Object literals are not implicitly compatible with named struct return types."
+}

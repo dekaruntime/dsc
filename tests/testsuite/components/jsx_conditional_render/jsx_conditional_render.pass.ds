@@ -1,0 +1,7 @@
+import { echo } from "io"
+const ui = globalThis.deka.ui
+fn Banner(props: object) object {
+  return props.show ? ui.jsx("div", { children: "yes" }) : ui.jsx("div", { children: "no" })
+}
+const html = ui.renderToString(ui.jsx(Banner, { show: true }))
+echo(html.html)

@@ -1,0 +1,6 @@
+{
+  "title": "Optional Chaining Rejected",
+  "stage": "parse",
+  "notes": "Formatter passthrough for invalid optional chaining rejected source.",
+  "expectedDiagnosticContains": "expected expression, found ``.``"
+}

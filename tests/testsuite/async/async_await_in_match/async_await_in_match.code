@@ -1,0 +1,17 @@
+import { echo } from "io"
+async fn pick(n: number) Promise<string> {
+  return match (n) {
+    1 => "one",
+    2 => "two",
+    _ => "many",
+  }
+}
+
+async fn main() {
+  const a = await pick(1)
+  const b = await pick(2)
+  echo(a)
+  echo(b)
+}
+
+await main()

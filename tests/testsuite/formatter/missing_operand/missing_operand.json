@@ -1,0 +1,6 @@
+{
+  "title": "Missing right operand",
+  "stage": "parse",
+  "notes": "A binary operator with no right-hand operand is a parse error.",
+  "expectedDiagnosticContains": "expected expression, found ``)``"
+}

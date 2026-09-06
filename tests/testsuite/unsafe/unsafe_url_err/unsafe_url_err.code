@@ -1,0 +1,6 @@
+import { echo } from "io"
+const r = unsafe { new URL("://invalid") }
+echo(match (r) {
+  Ok(v) => `ok: ${v}`,
+  Err(e) => `err: ${e.message}`,
+})

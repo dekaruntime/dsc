@@ -1,0 +1,12 @@
+enum Shape {
+  Circle(number)
+  Square(number)
+}
+
+// `Circle` carries a payload, so the bare name is not a case reference.
+fn area(s: Shape): number {
+  return match (s) {
+    Circle => 0,
+    Square(side) => side
+  }
+}

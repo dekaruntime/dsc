@@ -1,0 +1,5 @@
+{
+  "title": "unsafe TextEncoder.encode returns a byte view",
+  "stage": "run",
+  "notes": "Browser Worker and native isolate both expose TextEncoder. This is the JS-side shape Bytes maps to."
+}

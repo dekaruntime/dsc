@@ -58,8 +58,7 @@ fn collect(dir: &Path, suffix: &str, out: &mut Vec<PathBuf>) {
 fn fmt_output_parses_and_is_idempotent_across_corpus() {
     let files = corpus_files();
     if files.is_empty() {
-        // Conformance corpus lives in deka until we copy tests/.
-        return;
+        panic!("tests/testsuite and tests/tour are missing");
     }
     assert!(
         files.len() > 100,

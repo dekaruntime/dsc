@@ -1,0 +1,6 @@
+{
+  "title": "Unclosed match expression brace is rejected",
+  "stage": "parse",
+  "notes": "A match expression missing its closing brace is a parse error.",
+  "expectedDiagnosticContains": "expected ``=>``, found `newline`"
+}

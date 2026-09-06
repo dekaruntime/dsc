@@ -1,0 +1,11 @@
+import { echo } from "io"
+async fn inner() Promise<number> {
+  return 3
+}
+
+async fn outer() Promise<number> {
+  return await inner() * 2
+}
+
+const result = await outer()
+echo(string(result))

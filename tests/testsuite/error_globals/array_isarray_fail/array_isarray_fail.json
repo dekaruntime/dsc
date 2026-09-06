@@ -1,0 +1,6 @@
+{
+  "title": "Array.isArray is rejected by parser",
+  "stage": "parse",
+  "expectedDiagnosticContains": "unknown identifier `Array`",
+  "notes": "The parser confuses Array.isArray with PHP array syntax."
+}

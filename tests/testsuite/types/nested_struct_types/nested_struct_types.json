@@ -1,0 +1,5 @@
+{
+  "title": "Nested struct type references",
+  "stage": "run",
+  "notes": "Forward struct references and nested struct literals."
+}

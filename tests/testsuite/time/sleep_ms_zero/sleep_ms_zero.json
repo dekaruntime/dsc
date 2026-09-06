@@ -1,0 +1,11 @@
+{
+  "title": "sleep_ms(0) is Ok",
+  "stage": "run",
+  "hosts": [
+    "native"
+  ],
+  "packages": [
+    "time"
+  ],
+  "notes": "Native-only. Code lives in the package from the index (`deka add`), not in this fixture."
+}

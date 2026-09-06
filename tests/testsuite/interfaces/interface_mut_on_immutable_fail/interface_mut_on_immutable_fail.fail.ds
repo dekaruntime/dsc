@@ -1,0 +1,8 @@
+interface MutableNamed {
+  mut name: string
+}
+fn rename(n: MutableNamed) {
+  n.name = "New"
+}
+const p = { name: "Old" }
+rename(p)

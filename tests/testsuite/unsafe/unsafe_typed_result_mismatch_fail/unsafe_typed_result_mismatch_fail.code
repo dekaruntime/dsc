@@ -1,0 +1,4 @@
+// deka#460: the annotation is enforced at the use site. While `unsafe` was
+// `Result<Infer, Infer>` this was accepted, because `Infer` is assignable to
+// anything.
+const n: number = unsafe<string> { String(42) }

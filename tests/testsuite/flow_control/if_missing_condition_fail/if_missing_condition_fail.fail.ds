@@ -1,0 +1,4 @@
+import { echo } from "io"
+if {
+  echo("x")
+}

@@ -1,0 +1,10 @@
+import { echo } from "io"
+struct Box {
+  value: number
+}
+
+async fn (b) read() Promise<number> {
+  return b.value
+}
+
+echo(await Box { value: 1 }.read())

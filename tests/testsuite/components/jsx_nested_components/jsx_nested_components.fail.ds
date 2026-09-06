@@ -1,0 +1,7 @@
+import { echo } from "io"
+const ui = globalThis.deka.ui
+fn Outer(props: object) object {
+  return ui.jsxs("div", { children: [ui.jsx(Inner, { text: "a" })] })
+}
+const html = ui.renderToString(ui.jsx(Outer, {}))
+echo(html.html)

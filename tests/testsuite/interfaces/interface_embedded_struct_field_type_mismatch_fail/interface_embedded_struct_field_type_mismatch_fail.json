@@ -1,0 +1,6 @@
+{
+  "title": "Embedded struct field with wrong type for interface fails",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "missing required field `name` in struct literal for `Label`"
+}

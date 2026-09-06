@@ -1,0 +1,4 @@
+{
+  "title": "Async function returning Promise<void>",
+  "stage": "run"
+}

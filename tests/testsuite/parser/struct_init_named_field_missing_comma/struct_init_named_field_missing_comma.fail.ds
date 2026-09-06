@@ -1,0 +1,4 @@
+import { echo } from "io"
+struct S { x: number y: number }
+const s = S { x: 1 y: 2 }
+echo(s.x)

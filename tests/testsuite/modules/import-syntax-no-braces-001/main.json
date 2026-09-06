@@ -1,0 +1,5 @@
+{
+  "title": "import without braces is rejected",
+  "stage": "parse",
+  "expectedDiagnosticContains": "Missing export"
+}

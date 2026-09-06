@@ -1,0 +1,5 @@
+{
+  "title": "Hex literal with no digits fails",
+  "stage": "parse",
+  "notes": ""
+}

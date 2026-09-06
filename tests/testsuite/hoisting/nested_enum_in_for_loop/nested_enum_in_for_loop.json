@@ -1,0 +1,6 @@
+{
+  "title": "Nested enum inside for loop is rejected.",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "enum declarations are only allowed at the top level in DekaScript"
+}

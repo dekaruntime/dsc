@@ -1,0 +1,6 @@
+{
+  "title": "Function component returning number fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "unknown type `object`",
+  "notes": "A function component declared to return object must actually return an object."
+}

@@ -1,0 +1,4 @@
+import { echo } from "io"
+const props = { name: "Deka" }
+const el = <div {...props} />
+echo(el)

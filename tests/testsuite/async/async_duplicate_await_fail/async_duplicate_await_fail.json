@@ -1,0 +1,5 @@
+{
+  "title": "Double await on a non-Promise value fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "`await` expected Promise<T>, found type `number`"
+}

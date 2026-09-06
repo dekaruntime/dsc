@@ -1,0 +1,4 @@
+{
+  "title": "Block comment is ignored by parser",
+  "stage": "run"
+}

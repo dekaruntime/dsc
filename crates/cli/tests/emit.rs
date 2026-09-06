@@ -179,11 +179,39 @@ fn missing_bare_import_hard_fails_without_writing_lock() {
     assert!(!root.join("dist/app/main.js").exists());
 }
 
-#[test]
-fn installed_bare_import_emits() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let root = temp.path();
-    write(root.join("deka.json").as_path(), "{}\n");
+fn json_lock_without_hash() -> &'static str {
+    r#"{
+  "lockfileVersion": 1,
+  "packages": {
+    "@deka/json": [
+      "@deka/json@0.0.0",
+      "local",
+      {},
+      ""
+    ]
+  }
+}
+"#
+}
+
+fn json_lock_with_fs_hash(hash: &str) -> String {
+    format!(
+        r#"{{
+  "lockfileVersion": 1,
+  "packages": {{
+    "@deka/json": [
+      "@deka/json@0.0.0",
+      "local",
+      {{ "fsGraph": {{ "algo": "sha256", "hash": "{hash}" }} }},
+      ""
+    ]
+  }}
+}}
+"#
+    )
+}
+
+fn write_json_package(root: &Path) {
     write(
         &root.join("ds_modules/@deka/json/index.ds"),
         "export fn parse(s: string) string {\n  return s\n}\n",
@@ -192,12 +220,94 @@ fn installed_bare_import_emits() {
         &root.join("app/main.ds"),
         "import { parse } from \"json\"\nexport const value = parse(\"ok\")\n",
     );
+}
+
+#[test]
+fn installed_bare_import_emits() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    write(root.join("deka.json").as_path(), "{}\n");
+    write(&root.join("deka.lock"), json_lock_without_hash());
+    write_json_package(root);
+    let lock_before = fs::read_to_string(root.join("deka.lock")).expect("lock");
 
     let output = run_in(root, &[]);
     assert!(output.status.success(), "{}", combined(&output));
     let emitted = fs::read_to_string(root.join("dist/app/main.js")).expect("emitted");
     assert!(emitted.contains("parse"), "{emitted}");
-    assert!(!root.join("deka.lock").exists());
+    assert_eq!(
+        fs::read_to_string(root.join("deka.lock")).expect("lock after"),
+        lock_before,
+        "dsc must not write deka.lock"
+    );
+}
+
+#[test]
+fn installed_package_without_lock_entry_hard_fails() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    write(root.join("deka.json").as_path(), "{}\n");
+    write_json_package(root);
+
+    let output = run_in(root, &[]);
+    assert!(!output.status.success(), "{}", combined(&output));
+    let text = combined(&output);
+    assert!(
+        text.contains("deka.lock") && text.contains("deka install") && text.contains("deka add json"),
+        "missing lock-entry guidance: {text}"
+    );
+    assert!(!root.join("deka.lock").exists(), "dsc must not write deka.lock");
+    assert!(!root.join("dist/app/main.js").exists());
+}
+
+#[test]
+fn lock_entry_without_ds_modules_hard_fails() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    write(root.join("deka.json").as_path(), "{}\n");
+    write(&root.join("deka.lock"), json_lock_without_hash());
+    write(
+        &root.join("app/main.ds"),
+        "import { parse } from \"json\"\nexport const value = parse(\"ok\")\n",
+    );
+
+    let output = run_in(root, &[]);
+    assert!(!output.status.success(), "{}", combined(&output));
+    let text = combined(&output);
+    assert!(
+        text.contains("ds_modules") && text.contains("deka install") && text.contains("deka add json"),
+        "missing ds_modules guidance: {text}"
+    );
+    assert!(!root.join("dist/app/main.js").exists());
+}
+
+#[test]
+fn lock_integrity_mismatch_hard_fails() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    write(root.join("deka.json").as_path(), "{}\n");
+    write(
+        &root.join("deka.lock"),
+        &json_lock_with_fs_hash("0000000000000000000000000000000000000000000000000000000000000000"),
+    );
+    write_json_package(root);
+    let lock_before = fs::read_to_string(root.join("deka.lock")).expect("lock");
+
+    let output = run_in(root, &[]);
+    assert!(!output.status.success(), "{}", combined(&output));
+    let text = combined(&output);
+    assert!(
+        text.contains("Integrity Mismatch")
+            && text.contains("deka install")
+            && text.contains("deka add json"),
+        "missing integrity guidance: {text}"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("deka.lock")).expect("lock after"),
+        lock_before,
+        "dsc must not write deka.lock"
+    );
+    assert!(!root.join("dist/app/main.js").exists());
 }
 
 #[test]

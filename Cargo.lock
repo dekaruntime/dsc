@@ -321,6 +321,7 @@ dependencies = [
  "deka_syntax",
  "dekascript_lsp",
  "serde_json",
+ "sha2",
  "stdio",
  "tempfile",
  "tokio",

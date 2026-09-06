@@ -13,3 +13,7 @@ dsc --help
 ```
 
 Commands land as compiler crates are pulled over. They are registered in `crates/cli/src/lib.rs`.
+
+## CI
+
+Self-hosted only. No V8. sccache buckets are `dsc-sccache-{linux-x64,darwin-x64,darwin-arm64}`. WASM artifacts go to `dsc-wasm` (`https://dsc-wasm.deka.gg`).

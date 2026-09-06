@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '.github/ISSUE_TEMPLATE/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Self-hosted only. This repo must never download V8 or link deno_core.
+env:
+  SCCACHE_ENDPOINT: "https://08b93c93f8b7adc43678e9afba31e4ee.r2.cloudflarestorage.com"
+  SCCACHE_REGION: "auto"
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+
+jobs:
+  rust:
+    name: Rust tests
+    runs-on: [self-hosted, linux, x64]
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Where am I
+        run: |
+          echo "runner name: $(hostname)"
+          echo "runner os: ${{ runner.os }}"
+          echo "runner arch: ${{ runner.arch }}"
+          echo "uname -a: $(uname -a)"
+          (which cargo && cargo --version) || true
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.96.0
+
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache
+        run: |
+          case "$(uname -s)-$(uname -m)" in
+            Darwin-arm64)  BUCKET=dsc-sccache-darwin-arm64 ;;
+            Darwin-x86_64) BUCKET=dsc-sccache-darwin-x64 ;;
+            Linux-x86_64)  BUCKET=dsc-sccache-linux-x64 ;;
+            *) echo "unsupported sccache host: $(uname -sm)" >&2; exit 1 ;;
+          esac
+          if command -v sccache >/dev/null 2>&1; then
+            echo "SCCACHE_BUCKET=$BUCKET" >> "$GITHUB_ENV"
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "sccache enabled, bucket: $BUCKET"
+            sccache --show-stats
+          else
+            echo "::warning::sccache not found on PATH - building without a compiler cache."
+          fi
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Verify lockfile
+        run: cargo update --workspace --locked
+
+      - name: Test workspace
+        run: cargo test --locked --workspace
+
+      - name: Forbid V8 in this repo
+        run: |
+          if grep -RInE 'deno_core|rusty_v8' \
+            --include='Cargo.toml' --include='Cargo.lock' --include='*.rs' \
+            crates Cargo.toml Cargo.lock; then
+            echo "::error::dsc must not depend on V8 / deno_core"
+            exit 1
+          fi

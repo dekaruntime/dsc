@@ -3,7 +3,7 @@ name = "deka_syntax"
 version.workspace = true
 edition = "2021"
 description = "DekaScript lexer, parser, and typechecker (Compiler v2)"
-license = "MIT"
+license = "Apache-2.0"
 
 [dependencies]
 bumpalo = { version = "3.16", features = ["collections"] }

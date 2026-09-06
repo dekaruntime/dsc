@@ -1,0 +1,6 @@
+{
+  "title": "Match guards are not supported",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected ``=>``, found ``if``",
+  "notes": "DekaScript match arms do not support `if` guards."
+}

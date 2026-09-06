@@ -1,0 +1,6 @@
+{
+  "title": "Bare return in a void function fails",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "expected expression, found ``}``"
+}

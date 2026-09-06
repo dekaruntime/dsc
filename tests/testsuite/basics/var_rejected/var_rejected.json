@@ -1,0 +1,6 @@
+{
+  "title": "var declarations are rejected",
+  "stage": "parse",
+  "expectedDiagnosticContains": "unknown identifier `var`",
+  "notes": ""
+}

@@ -1,0 +1,4 @@
+import { echo } from "io"
+import { upgrade } from "tls"
+const r = upgrade(1)
+echo(r)

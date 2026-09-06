@@ -1,0 +1,6 @@
+import { echo } from "io"
+import { parse } from "json"
+echo(match (parse("\"hi\"")) {
+  Ok(v) => v,
+  Err(e) => "fail"
+})

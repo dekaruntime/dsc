@@ -1,0 +1,6 @@
+{
+  "title": "Mutating a frozen object fails",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "cannot assign to field `a` of immutable value"
+}

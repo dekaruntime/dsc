@@ -1,0 +1,6 @@
+{
+  "title": "Struct method returning wrong type fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected return type `string`, found type `number`",
+  "notes": "Methods declared on structs enforce their return type annotations."
+}

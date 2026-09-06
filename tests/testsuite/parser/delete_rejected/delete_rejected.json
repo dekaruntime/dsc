@@ -1,0 +1,5 @@
+{
+  "title": "delete operator is rejected",
+  "stage": "parse",
+  "expectedDiagnosticContains": "unknown identifier `delete`"
+}

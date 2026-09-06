@@ -1,0 +1,8 @@
+{
+  "title": "Undefined variable in boolean JSX attribute fails",
+  "stage": "run",
+  "notes": "A boolean JSX attribute expression referencing an undefined variable should fail at runtime.",
+  "hosts": [
+    "browser"
+  ]
+}

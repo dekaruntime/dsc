@@ -1,0 +1,6 @@
+{
+  "title": "Self-referencing const initializer fails",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "unknown identifier `x`"
+}

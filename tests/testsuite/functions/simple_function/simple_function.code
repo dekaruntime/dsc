@@ -1,0 +1,6 @@
+import { echo } from "io"
+fn double(x: number) number {
+  return x * 2
+}
+
+echo(double(5))

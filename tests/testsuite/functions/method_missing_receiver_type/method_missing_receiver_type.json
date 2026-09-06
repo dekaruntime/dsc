@@ -1,0 +1,6 @@
+{
+  "title": "Method declaration missing receiver type fails",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "expected identifier, found ``)``"
+}

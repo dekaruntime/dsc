@@ -1,0 +1,5 @@
+{
+  "title": "Async function with bare Promise return type fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "unknown type `Promise`"
+}

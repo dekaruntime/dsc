@@ -1,0 +1,11 @@
+import { echo } from "io"
+fn logSum(left: number, right: number) void {
+  echo(string(left + right))
+}
+
+fn sum(left: number, right: number) number {
+  return left + right
+}
+
+logSum(20, 22)
+echo(string(sum(10, 5)))

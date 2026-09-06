@@ -1,0 +1,5 @@
+{
+  "title": "Function shadowing a const fails at runtime",
+  "stage": "parse",
+  "notes": ""
+}

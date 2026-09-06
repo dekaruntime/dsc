@@ -1,0 +1,6 @@
+{
+  "title": "Unterminated block comment is rejected",
+  "stage": "parse",
+  "expectedDiagnosticContains": "unterminated block comment",
+  "notes": ""
+}

@@ -1,0 +1,4 @@
+import { echo } from "io"
+const greeting = "Hello, "
+const name = "Deka"
+echo(greeting + name)

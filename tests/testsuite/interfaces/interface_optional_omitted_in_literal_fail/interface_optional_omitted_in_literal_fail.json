@@ -1,0 +1,6 @@
+{
+  "title": "Omitting an optional field in an object literal is rejected",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected argument type",
+  "notes": "deka#416: JSX fills omitted optionals; a bare object literal does not."
+}

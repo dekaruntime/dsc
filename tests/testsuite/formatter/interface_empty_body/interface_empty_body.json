@@ -1,0 +1,6 @@
+{
+  "title": "Anonymous interface is invalid",
+  "stage": "parse",
+  "notes": "Interfaces must have a name; an anonymous interface body is a parse error.",
+  "expectedDiagnosticContains": "expected ``{``, found ``fn``"
+}

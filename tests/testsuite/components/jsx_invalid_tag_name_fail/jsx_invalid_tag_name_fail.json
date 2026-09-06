@@ -1,0 +1,6 @@
+{
+  "title": "Invalid JSX tag name fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected identifier, found `number`",
+  "notes": ""
+}

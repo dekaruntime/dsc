@@ -1,0 +1,5 @@
+{
+  "title": "bytes is a first-class parameter type",
+  "stage": "run",
+  "notes": "Language-level bytes type. Construction still comes from the bytes package."
+}

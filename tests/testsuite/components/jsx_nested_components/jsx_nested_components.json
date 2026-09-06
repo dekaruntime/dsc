@@ -1,0 +1,8 @@
+{
+  "title": "Nested component referencing undefined component fails",
+  "stage": "run",
+  "notes": "A component that invokes an undefined inner component should fail at runtime.",
+  "hosts": [
+    "browser"
+  ]
+}

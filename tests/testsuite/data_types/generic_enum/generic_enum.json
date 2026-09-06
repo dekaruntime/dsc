@@ -1,0 +1,5 @@
+{
+  "title": "Generic enums typecheck and infer their type argument",
+  "stage": "run",
+  "notes": "deka#372: enum type_params were parsed and then discarded at every typeck site, so T never resolved and a use site spelled Box<number> did not match the enum."
+}

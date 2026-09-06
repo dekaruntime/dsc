@@ -1,0 +1,5 @@
+{
+  "title": "renderToStream emits fallback then a swap chunk",
+  "stage": "run",
+  "hosts": ["native"]
+}

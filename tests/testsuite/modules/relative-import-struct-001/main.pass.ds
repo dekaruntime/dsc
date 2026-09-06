@@ -1,0 +1,4 @@
+import { echo } from "io"
+import { Person } from "./person.ds"
+const p = Person { name: "Deka" }
+echo(p.name)

@@ -1,0 +1,5 @@
+{
+  "title": "await inside a non-async closure inside an async function fails at runtime",
+  "stage": "parse",
+  "notes": "The compiler accepts the program, but the emitted JavaScript contains a syntax error because await appears in a non-async closure."
+}

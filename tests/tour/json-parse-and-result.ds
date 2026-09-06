@@ -1,0 +1,6 @@
+import { echo } from "io"
+const parsed = unsafe { JSON.parse("{\"answer\":42}") }
+echo(match (parsed) {
+  Ok(v) => v.answer,
+  Err(_) => "parse failed",
+})

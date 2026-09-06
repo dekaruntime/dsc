@@ -1,0 +1,6 @@
+{
+  "title": "Missing statement separator",
+  "stage": "parse",
+  "notes": "Formatter sees a parse error when two statements share a line with no semicolon or newline.",
+  "expectedDiagnosticContains": "expected `;` or newline, found ``const``"
+}

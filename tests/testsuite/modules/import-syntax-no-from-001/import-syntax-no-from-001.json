@@ -1,0 +1,5 @@
+{
+  "title": "import-syntax-no-from-001",
+  "expectedDiagnosticContains": "Expected 'from' after import specifiers",
+  "stage": "parse"
+}

@@ -1,0 +1,5 @@
+{
+  "title": "`function` keyword is rejected; use `fn`",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected expression, found ``function``"
+}

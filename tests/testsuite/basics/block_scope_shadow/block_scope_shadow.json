@@ -1,0 +1,5 @@
+{
+  "title": "Block-local const shadows the outer binding",
+  "stage": "run",
+  "notes": ""
+}

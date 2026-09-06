@@ -1,0 +1,5 @@
+{
+  "title": "Function-type parameter annotations are supported",
+  "stage": "run",
+  "notes": "First-class function values, Go-style: a parameter may be typed fn(number) number and receive a named function. This was previously reported as rejected, but that rejection was an artifact of the colon in the return-type position -- the parser saw fn(number) then : and demanded a parameter type. With the colon removed the annotation parses and the call runs."
+}

@@ -1,0 +1,7 @@
+import { echo } from "io"
+const parts = ["Deka", "Script"];
+let initials = "";
+for (const part of parts) {
+  initials = initials + part.slice(0, 1);
+}
+echo(initials);

@@ -1,0 +1,8 @@
+{
+  "title": "Client directive emits island markers",
+  "stage": "run",
+  "notes": "",
+  "hosts": [
+    "browser"
+  ]
+}

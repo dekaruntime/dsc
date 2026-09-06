@@ -1,0 +1,6 @@
+{
+  "title": "Match arm missing pattern fails",
+  "stage": "parse",
+  "notes": "Each match arm must have a pattern before `=>`.",
+  "expectedDiagnosticContains": "expected pattern, found ``=>``"
+}

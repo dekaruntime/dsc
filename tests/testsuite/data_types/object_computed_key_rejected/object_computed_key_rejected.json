@@ -1,0 +1,6 @@
+{
+  "title": "Object computed key syntax is rejected",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected object key, found ``[``",
+  "notes": ""
+}

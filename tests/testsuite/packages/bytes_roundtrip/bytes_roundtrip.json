@@ -1,0 +1,11 @@
+{
+  "title": "bytes from_string/to_string round-trip via package index",
+  "stage": "run",
+  "notes": "Native-only. Code lives in the bytes package from the index (`deka add bytes`), not in this fixture.",
+  "hosts": [
+    "native"
+  ],
+  "packages": [
+    "bytes"
+  ]
+}

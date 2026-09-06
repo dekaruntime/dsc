@@ -1,0 +1,6 @@
+{
+  "title": "Undefined pseudo-literal is rejected",
+  "stage": "parse",
+  "expectedDiagnosticContains": "undefined",
+  "notes": "DekaScript uses Option<T> instead of undefined."
+}

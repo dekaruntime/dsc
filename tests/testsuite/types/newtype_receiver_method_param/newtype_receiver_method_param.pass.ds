@@ -1,0 +1,7 @@
+import { echo } from "io"
+
+type Cents number
+fn (c Cents) add(other: Cents) Cents { return Cents(number(c) + number(other)) }
+const a = Cents(100)
+const b = Cents(200)
+echo(string(number(a.add(b))))

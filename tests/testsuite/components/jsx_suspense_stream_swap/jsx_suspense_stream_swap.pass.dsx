@@ -1,0 +1,30 @@
+import { echo } from "io"
+import { Suspense } from "ui/suspense"
+
+async fn Slow() Promise<Component> {
+  return <p>ready</p>
+}
+
+async fn collect(node: Component) Promise<string> {
+  const boxed = unsafe { deka.ui.renderToStreamHtml(node) }
+  const prom = match (boxed) {
+    Ok(p) => p,
+    Err(e) => e.message,
+    _ => "",
+  }
+  return await prom
+}
+
+async fn Inner() Promise<Component> {
+  return <span>inner</span>
+}
+
+async fn Nested() Promise<Component> {
+  return <Suspense fallback={<em>inner-wait</em>}><Inner /></Suspense>
+}
+
+const tree = <Suspense fallback={<p>wait</p>}><Slow /></Suspense>
+echo(await collect(tree))
+
+const nested = <Suspense fallback={<p>outer</p>}><Nested /></Suspense>
+echo(await collect(nested))

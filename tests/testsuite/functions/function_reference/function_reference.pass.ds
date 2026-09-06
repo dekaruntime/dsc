@@ -1,0 +1,6 @@
+import { echo } from "io"
+fn add(x: number, y: number) number {
+  return x + y
+}
+const f = add
+echo(string(f(1, 2)))

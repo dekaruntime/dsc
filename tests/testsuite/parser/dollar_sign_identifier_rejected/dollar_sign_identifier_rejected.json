@@ -1,0 +1,5 @@
+{
+  "title": "Dollar sign in identifier is rejected",
+  "stage": "parse",
+  "expectedDiagnosticContains": "unexpected character '$'"
+}

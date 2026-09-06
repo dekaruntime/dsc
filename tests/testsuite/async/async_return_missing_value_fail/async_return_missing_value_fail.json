@@ -1,0 +1,5 @@
+{
+  "title": "Empty return in an async Promise<number> function fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected expression, found ``}``"
+}

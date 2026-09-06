@@ -1,0 +1,21 @@
+import { echo } from "io"
+fn read(ok: boolean): Result<number, string> {
+  if (ok) {
+    return Ok(5)
+  }
+  return Err("bad")
+}
+fn first(ok: boolean): number {
+  return match (read(ok)) {
+    Err(e) => panic(e),
+    Ok(v) => v
+  }
+}
+fn second(ok: boolean): number {
+  return match (read(ok)) {
+    Ok(v) => v,
+    Err(e) => panic(e)
+  }
+}
+echo(string(first(true)))
+echo(string(second(true)))

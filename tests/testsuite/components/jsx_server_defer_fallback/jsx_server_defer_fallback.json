@@ -1,0 +1,5 @@
+{
+  "title": "server:defer SSR emits fallback, not the deferred tree",
+  "stage": "run",
+  "hosts": ["native"]
+}

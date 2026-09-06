@@ -1,0 +1,6 @@
+{
+  "title": "Cannot compare two different number newtypes",
+  "stage": "typecheck",
+  "expectedDiagnosticContains": "cannot compare",
+  "notes": "Phase 3 of deka#346: comparisons are only allowed within the same newtype."
+}

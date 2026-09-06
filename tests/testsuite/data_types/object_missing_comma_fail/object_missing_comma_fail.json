@@ -1,0 +1,6 @@
+{
+  "title": "Missing comma in multiline object fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected object key, found `newline`",
+  "notes": ""
+}

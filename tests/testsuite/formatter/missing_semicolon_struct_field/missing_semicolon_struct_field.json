@@ -1,0 +1,6 @@
+{
+  "title": "Missing Semicolon Struct Field",
+  "stage": "parse",
+  "notes": "Formatter passthrough for invalid missing semicolon struct field source.",
+  "expectedDiagnosticContains": "expected `;` or newline between struct fields"
+}

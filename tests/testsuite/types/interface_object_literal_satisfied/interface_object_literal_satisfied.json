@@ -1,0 +1,5 @@
+{
+  "title": "Object literal satisfies a simple interface",
+  "stage": "run",
+  "notes": "Object literals with matching fields are accepted for interface parameters."
+}

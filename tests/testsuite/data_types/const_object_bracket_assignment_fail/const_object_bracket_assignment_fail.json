@@ -1,0 +1,5 @@
+{
+  "title": "Bracket assignment on const frozen object fails at runtime",
+  "stage": "run",
+  "notes": ""
+}

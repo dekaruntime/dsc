@@ -1,0 +1,6 @@
+{
+  "title": "Bare Object is not in scope",
+  "stage": "parse",
+  "expectedDiagnosticContains": "unknown identifier",
+  "notes": "deka#378: use unsafe { } if the host object is genuinely needed."
+}

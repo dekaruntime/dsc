@@ -1,0 +1,11 @@
+import { echo } from "io"
+fn okFn() number {
+  panic("inner")
+}
+
+fn catchFn(e: string) number {
+  return 99
+}
+
+const x = deka.unsafe(okFn, catchFn)
+echo(x)

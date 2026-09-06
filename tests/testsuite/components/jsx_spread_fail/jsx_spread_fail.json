@@ -1,0 +1,6 @@
+{
+  "title": "JSX spread is rejected",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "Invalid JSX attribute name '...'."
+}

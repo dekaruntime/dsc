@@ -1,0 +1,5 @@
+{
+  "title": "Calling a non-callable object at runtime fails",
+  "stage": "parse",
+  "notes": ""
+}

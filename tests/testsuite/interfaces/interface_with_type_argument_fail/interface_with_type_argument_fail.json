@@ -1,0 +1,6 @@
+{
+  "title": "Generic type parameters on interfaces are not supported",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "unknown type `T`"
+}

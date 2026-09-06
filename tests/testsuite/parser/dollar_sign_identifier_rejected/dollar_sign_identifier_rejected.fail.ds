@@ -1,0 +1,3 @@
+import { echo } from "io"
+const $x = 1
+echo($x)

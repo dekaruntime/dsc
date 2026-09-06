@@ -1,0 +1,6 @@
+{
+  "title": "Unclosed JSX attribute string",
+  "stage": "parse",
+  "notes": "A JSX attribute value with a missing closing quote is a parse error.",
+  "expectedDiagnosticContains": "unterminated string literal"
+}

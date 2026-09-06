@@ -1,0 +1,5 @@
+{
+  "title": "Mutable interface method on immutable object fails",
+  "stage": "run",
+  "notes": ""
+}

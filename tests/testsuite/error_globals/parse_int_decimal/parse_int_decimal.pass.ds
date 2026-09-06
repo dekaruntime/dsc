@@ -1,0 +1,11 @@
+import { echo } from "io"
+
+// `parseInt` is gone (deka#378). `number(s)` is the replacement and is
+// strictly better: it yields `Option<number>` where `parseInt` yielded `NaN`,
+// so a string that is not a number is a case rather than a value that poisons
+// the arithmetic downstream.
+let parsed = unwrap(number("42")) or { 0 }
+echo(string(parsed))
+
+let bad = unwrap(number("nope")) or { -1 }
+echo(string(bad))

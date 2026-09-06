@@ -1,0 +1,4 @@
+import { echo } from "io"
+import { sha256 } from "crypto"
+const r = sha256("abc")
+echo(r)

@@ -1,0 +1,8 @@
+import { echo } from "io"
+const person = { name: "Deka", age: 3 }
+echo(string(person.name))
+echo(string(person.age))
+
+let next = person
+next = { name: person.name, age: person.age + 1 }
+echo(string(next.age))

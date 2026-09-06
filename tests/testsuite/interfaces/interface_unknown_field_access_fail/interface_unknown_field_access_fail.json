@@ -1,0 +1,5 @@
+{
+  "title": "Accessing unknown field through interface fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "interface `Named` has no field `age`"
+}

@@ -1,0 +1,6 @@
+{
+  "title": "Interface method signature must not include a body",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "expected `,` or newline between interface members"
+}

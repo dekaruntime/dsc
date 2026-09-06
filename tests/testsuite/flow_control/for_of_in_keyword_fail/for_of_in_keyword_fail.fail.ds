@@ -1,0 +1,4 @@
+import { echo } from "io"
+for (const x in [1, 2]) {
+  echo(x)
+}

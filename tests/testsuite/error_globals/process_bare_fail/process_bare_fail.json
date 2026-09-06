@@ -1,0 +1,6 @@
+{
+  "title": "Bare process is not in scope",
+  "stage": "parse",
+  "expectedDiagnosticContains": "unknown identifier",
+  "notes": "deka#378: process left the ambient globals. Use unsafe { } with an env grant."
+}

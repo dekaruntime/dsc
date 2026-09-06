@@ -1,0 +1,2 @@
+console.assert(true, "ok")
+console.log("after")

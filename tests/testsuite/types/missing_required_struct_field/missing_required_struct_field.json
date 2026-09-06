@@ -1,0 +1,6 @@
+{
+  "title": "Missing required struct field in literal fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "missing required field `y` in struct literal for `Point`",
+  "notes": "Struct literals must include every non-optional field."
+}

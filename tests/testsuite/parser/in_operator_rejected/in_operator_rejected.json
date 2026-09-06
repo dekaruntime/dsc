@@ -1,0 +1,5 @@
+{
+  "title": "in operator is rejected",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected ``)``, found `identifier`"
+}

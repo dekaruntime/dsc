@@ -1,0 +1,10 @@
+import { echo } from "io"
+let thrown = unsafe {
+  throw new Error("boom");
+  // the wrapper closes after this comment
+}
+const label: string = match (thrown) {
+  Ok(value) => "ok",
+  Err(error) => "caught"
+}
+echo(label)

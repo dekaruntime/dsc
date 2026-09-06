@@ -1,0 +1,12 @@
+import { echo } from "io"
+alias Adder = fn(number, number) number
+
+const add = fn(a: number, b: number) number {
+  return a + b
+}
+
+fn callAdder(f: Adder, a: number, b: number) number {
+  return f(a, b)
+}
+
+echo(string(callAdder(add, 20, 22)))

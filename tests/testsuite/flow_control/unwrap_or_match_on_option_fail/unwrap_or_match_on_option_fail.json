@@ -1,0 +1,6 @@
+{
+  "title": "or match on an Option is rejected",
+  "stage": "parse",
+  "expectedDiagnosticContains": "nothing to match on",
+  "notes": "deka#445: point at `or { … }` instead."
+}

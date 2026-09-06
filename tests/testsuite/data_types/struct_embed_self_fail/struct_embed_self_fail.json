@@ -1,0 +1,6 @@
+{
+  "title": "Struct cannot embed itself",
+  "stage": "parse",
+  "expectedDiagnosticContains": "Struct cannot embed itself",
+  "notes": ""
+}

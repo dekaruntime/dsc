@@ -1,0 +1,11 @@
+enum Color {
+  Red,
+  Green,
+  Blue,
+}
+fn name(c: Color) string {
+  return match (c) {
+    Color.Red => "red",
+    Color.Green => "green",
+  }
+}

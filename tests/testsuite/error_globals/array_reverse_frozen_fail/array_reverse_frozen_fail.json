@@ -1,0 +1,5 @@
+{
+  "title": "Reversing a frozen array fails",
+  "stage": "run",
+  "notes": "Array literals are frozen, so reverse cannot mutate."
+}

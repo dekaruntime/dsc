@@ -1,0 +1,4 @@
+import { echo } from "io"
+const s = "hello"
+echo(string(s.toUpperCase()))
+echo(string(s.length))

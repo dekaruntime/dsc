@@ -1,0 +1,15 @@
+import { echo } from "io"
+alias Mapper = fn(number) number
+
+fn transform(values: Array<number>, f: Mapper) Array<number> {
+  let result = []
+  for (const v of values) {
+    result.push(f(v))
+  }
+  return result
+}
+
+const doubled = transform([1, 2, 3], fn(n: number) number {
+  return n * 2
+})
+echo(string(doubled.length))

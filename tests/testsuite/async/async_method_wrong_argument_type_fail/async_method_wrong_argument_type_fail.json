@@ -1,0 +1,5 @@
+{
+  "title": "Passing a wrong-typed argument to an async method fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected argument type `number`, found type `string`"
+}

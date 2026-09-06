@@ -1,0 +1,6 @@
+{
+  "title": "Object missing required interface field fails",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "expected argument type `Named`, found type `{}`"
+}

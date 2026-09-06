@@ -1,0 +1,6 @@
+{
+  "title": "unsafe<T> result is not assignable to an unrelated type",
+  "stage": "parse",
+  "expectedDiagnosticContains": "found type `Result<string, JsError>`",
+  "notes": "deka#460."
+}

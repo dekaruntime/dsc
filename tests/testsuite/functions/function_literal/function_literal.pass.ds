@@ -1,0 +1,5 @@
+import { echo } from "io"
+const double = fn(n: number) number {
+  return n * 2
+}
+echo(string(double(21)))

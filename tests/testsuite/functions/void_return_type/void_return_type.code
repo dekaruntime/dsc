@@ -1,0 +1,6 @@
+import { echo } from "io"
+fn log(x: number) void {
+  echo(x)
+}
+
+log(5)

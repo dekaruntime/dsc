@@ -1,0 +1,6 @@
+{
+  "title": "A generic enum constructor infers its argument, and mismatches are caught",
+  "stage": "parse",
+  "expectedDiagnosticContains": "found type `Box<string>`",
+  "notes": "deka#372: the inferred type appears in the diagnostic, so Box.Full(\"s\") is Box<string> rather than a bare Box."
+}

@@ -1,0 +1,11 @@
+{
+  "title": "HMAC-SHA256 known-answer vector",
+  "stage": "run",
+  "hosts": [
+    "native"
+  ],
+  "packages": [
+    "crypto"
+  ],
+  "notes": "Native-only. Code lives in the package from the index (`deka add`), not in this fixture."
+}

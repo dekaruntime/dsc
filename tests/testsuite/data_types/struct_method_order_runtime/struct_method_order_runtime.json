@@ -1,0 +1,5 @@
+{
+  "title": "Struct method used before definition is available at runtime",
+  "stage": "run",
+  "notes": ""
+}

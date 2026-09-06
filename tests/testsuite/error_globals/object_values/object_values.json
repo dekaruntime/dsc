@@ -1,0 +1,5 @@
+{
+  "title": "Object is reachable through unsafe, not ambiently",
+  "stage": "run",
+  "notes": "deka#378."
+}

@@ -1,0 +1,38 @@
+import { echo } from "io"
+import { Suspense } from "ui/suspense"
+
+async fn Slow() Promise<Component> {
+  return <p>ready</p>
+}
+
+async fn htmlAsync(node: Component) Promise<string> {
+  const boxed = unsafe { deka.ui.renderToStringAsync(node) }
+  const prom = match (boxed) {
+    Ok(p) => p,
+    Err(e) => e.message,
+    _ => "nomatch",
+  }
+  const resolved = await prom
+  return resolved.html
+}
+
+const tree = <Suspense fallback={<p>wait</p>}><Slow /></Suspense>
+
+const syncResult = unsafe { deka.ui.renderToString(tree) }
+match (syncResult) {
+  Ok(r) => echo(r.html),
+  Err(e) => echo(e.message),
+  _ => echo("sync-nomatch"),
+}
+
+echo(await htmlAsync(tree))
+
+const bareTree = <Slow />
+const bare = unsafe { deka.ui.renderToString(bareTree) }
+match (bare) {
+  Ok(r) => echo(r.html),
+  Err(e) => echo(e.message),
+  _ => echo("bare-nomatch"),
+}
+
+

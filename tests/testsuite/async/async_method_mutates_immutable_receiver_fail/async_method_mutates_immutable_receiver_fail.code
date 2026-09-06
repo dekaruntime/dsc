@@ -1,0 +1,9 @@
+struct Counter {
+  count: number;
+}
+
+async fn (c Counter) inc() Promise<void> {
+  c.count = c.count + 1
+}
+
+await Counter { count: 0 }.inc()

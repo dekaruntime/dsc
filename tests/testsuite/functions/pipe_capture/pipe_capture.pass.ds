@@ -1,0 +1,6 @@
+import { echo } from "io"
+fn append(s: string, suffix: string) string {
+  return s + suffix
+}
+const result = "1" |> append("3", _)
+echo(result)

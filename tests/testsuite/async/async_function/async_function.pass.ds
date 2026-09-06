@@ -1,0 +1,6 @@
+import { echo } from "io"
+async fn fetch() Promise<string> {
+  return "data"
+}
+const result = fetch()
+echo("ok")

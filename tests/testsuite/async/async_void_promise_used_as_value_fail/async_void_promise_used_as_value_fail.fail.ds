@@ -1,0 +1,14 @@
+import { echo } from "io"
+async fn work() Promise<void> {
+  echo("ok")
+}
+
+fn takesNumber(n: number) {
+  echo(n)
+}
+
+async fn main() {
+  takesNumber(work())
+}
+
+await main()

@@ -1,0 +1,6 @@
+{
+  "title": "Property access on undefined fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "unknown identifier `undefined`",
+  "notes": ""
+}

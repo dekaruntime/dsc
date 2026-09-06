@@ -1,0 +1,16 @@
+import { echo } from "io"
+async fn double(x: number) Promise<number> {
+  return x * 2
+}
+
+async fn main() {
+  const arr = [10, 20, 30]
+  for (const x of arr) {
+    if (x > 10) {
+      break
+    }
+    echo(string(await double(x)))
+  }
+}
+
+await main()

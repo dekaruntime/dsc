@@ -1,0 +1,5 @@
+{
+  "title": "Reserved keyword used as identifier is rejected",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected identifier, found ``match``"
+}

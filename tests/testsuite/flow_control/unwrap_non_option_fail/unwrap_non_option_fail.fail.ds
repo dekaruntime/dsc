@@ -1,0 +1,6 @@
+// `unwrap` is about a value that might be absent, and there are exactly two of
+// those. Anything else should say so rather than leave the reader guessing.
+fn f(n: number): number {
+  let v = unwrap(n) or { 0 }
+  return v
+}

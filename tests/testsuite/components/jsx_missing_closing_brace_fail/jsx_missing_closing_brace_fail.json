@@ -1,0 +1,5 @@
+{
+  "title": "Missing closing brace in JSX expression fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected expression, found ``/``"
+}

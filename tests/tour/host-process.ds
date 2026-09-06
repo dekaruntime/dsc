@@ -1,0 +1,23 @@
+import { echo } from "io"
+
+// Host globals are not part of DekaScript. `process` has no name in plain
+// code — writing `process.cwd()` here is `unknown identifier`, the same as
+// `console` or `fetch`.
+//
+// Two independent gates stand between a program and the host process object,
+// and BOTH are required:
+//
+//   1. the `env` capability must be granted in deka.json
+//   2. the call must be inside `unsafe { }`
+//
+// Neither is sufficient alone. Without the grant the global is never installed,
+// so even the `unsafe` call fails — the escape hatch does not outrank the
+// capability.
+let cwd = unsafe<string> { process.cwd() }
+
+// This lesson runs without an `env` grant, so the result is `Err`. Add
+// `"env": ["HOME"]` under `security.allow` and the same line returns `Ok`.
+echo(match (cwd) {
+  Ok(path) => "reached the host",
+  Err(_) => "denied: no env capability"
+})

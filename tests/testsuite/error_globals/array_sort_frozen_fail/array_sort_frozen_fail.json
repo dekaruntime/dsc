@@ -1,0 +1,5 @@
+{
+  "title": "Array.sort on frozen array fails",
+  "stage": "run",
+  "notes": "Array literals are frozen, so in-place sort throws."
+}

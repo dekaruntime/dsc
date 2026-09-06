@@ -1,0 +1,6 @@
+{
+  "title": "Interface method with wrong return type fails",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "expected argument type `Greeter`, found type `Person`"
+}

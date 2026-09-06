@@ -1,0 +1,5 @@
+import { echo } from "io"
+fn Card(title: string) {
+  return <div class="card>{title}</div>
+}
+echo(Card("hi"))

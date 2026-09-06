@@ -1,0 +1,6 @@
+import { echo } from "io"
+
+type Cents number
+const a = Cents(1)
+const b = Cents(1)
+echo(string(a == b))

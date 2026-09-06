@@ -1,0 +1,4 @@
+import { echo } from "io"
+fn add(n: number, x: number) number { return n + x }
+const n = 5 |> add(1)
+echo(string(n))

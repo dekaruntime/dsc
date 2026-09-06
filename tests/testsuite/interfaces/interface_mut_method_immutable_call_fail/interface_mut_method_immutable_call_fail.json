@@ -1,0 +1,7 @@
+{
+  "title": "Calling a mutable interface method on an immutable receiver fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "cannot call mutable method `increment` on an immutable receiver",
+  "notes": "Interface methods declare mutability explicitly with `mut fn`. v2-only because v1 does not support `mut` in interface method signatures.",
+  "compiler": "v2"
+}

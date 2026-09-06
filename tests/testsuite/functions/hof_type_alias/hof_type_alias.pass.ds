@@ -1,0 +1,7 @@
+import { echo } from "io"
+alias ProcessFunc = fn(string) string
+fn shout(s: string) string {
+  return s + "!"
+}
+const f: ProcessFunc = shout
+echo(f("hi"))

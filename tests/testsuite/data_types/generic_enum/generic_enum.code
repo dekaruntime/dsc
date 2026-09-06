@@ -1,0 +1,25 @@
+import { echo } from "io"
+enum Box<T> {
+  Empty
+  Full(T)
+}
+enum Pair<A, B> {
+  Left(A)
+  Right(B)
+}
+fn unwrap(b: Box<number>): number {
+  return match (b) {
+    Full(value) => value,
+    Empty => 0
+  }
+}
+fn side(p: Pair<number, string>): string {
+  return match (p) {
+    Left(a) => string(a),
+    Right(b) => b
+  }
+}
+echo(string(unwrap(Box.Full(5))))
+echo(string(unwrap(Box.Empty)))
+echo(side(Pair.Right("right")))
+echo(side(Pair.Left(2)))

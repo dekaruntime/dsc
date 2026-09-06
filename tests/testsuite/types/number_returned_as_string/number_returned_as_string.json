@@ -1,0 +1,6 @@
+{
+  "title": "Returning a number from a string-typed function fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected return type `string`, found type `number`",
+  "notes": "Return type mismatch is caught even for primitive types."
+}

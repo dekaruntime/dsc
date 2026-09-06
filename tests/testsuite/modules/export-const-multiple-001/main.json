@@ -1,0 +1,4 @@
+{
+  "title": "multiple export const declarations are importable",
+  "stage": "run"
+}

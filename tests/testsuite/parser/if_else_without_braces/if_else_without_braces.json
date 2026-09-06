@@ -1,0 +1,5 @@
+{
+  "title": "if/else without braces is rejected",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected ``{``, found `identifier`"
+}

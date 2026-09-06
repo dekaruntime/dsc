@@ -1,0 +1,5 @@
+{
+  "title": "JSX comment syntax is rejected",
+  "stage": "parse",
+  "expectedDiagnosticContains": "unknown identifier `globalThis`"
+}

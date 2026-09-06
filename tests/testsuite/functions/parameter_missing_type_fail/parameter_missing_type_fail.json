@@ -1,0 +1,6 @@
+{
+  "title": "Parameter missing a type annotation fails",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "parameter `name` is missing a type annotation"
+}

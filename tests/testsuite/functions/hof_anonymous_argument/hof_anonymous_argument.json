@@ -1,0 +1,5 @@
+{
+  "title": "Anonymous fn literal can be passed as a callback",
+  "stage": "run",
+  "notes": ""
+}

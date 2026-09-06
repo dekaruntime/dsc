@@ -1,0 +1,35 @@
+import { echo } from "io"
+
+// Enums take type parameters too. `Box<T>` is a container whose
+// contents are chosen at the use site.
+enum Box<T> {
+  Empty
+  Full(T)
+}
+
+// Write the argument where you use the type: Box<number>, Box<string>.
+fn size(b: Box<number>): number {
+  return match (b) {
+    Full(value) => value,
+    Empty => 0
+  }
+}
+
+// Box.Full(5) infers Box<number> from the payload.
+echo(string(size(Box.Full(5))))
+echo(string(size(Box.Empty)))
+
+enum Either<A, B> {
+  Left(A)
+  Right(B)
+}
+
+fn describe(e: Either<number, string>): string {
+  return match (e) {
+    Left(n) => string(n),
+    Right(s) => s
+  }
+}
+
+echo(describe(Either.Left(1)))
+echo(describe(Either.Right("two")))

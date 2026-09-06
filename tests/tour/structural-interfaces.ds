@@ -1,0 +1,20 @@
+import { echo } from "io"
+interface Named {
+  name: string
+  fn displayName() string
+}
+
+struct Person {
+  name: string
+}
+
+fn (p Person) displayName() string {
+  return p.name
+}
+
+fn printName(n: Named) {
+  echo(n.displayName())
+}
+
+let p = Person { name: "DekaScript" }
+printName(p)

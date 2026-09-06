@@ -1,0 +1,13 @@
+{
+  "title": "parse_url default path is /",
+  "stage": "run",
+  "hosts": [
+    "native"
+  ],
+  "packages": [
+    "http",
+    "tcp",
+    "tls"
+  ],
+  "notes": "Native-only. Code lives in the package from the index (`deka add`), not in this fixture."
+}

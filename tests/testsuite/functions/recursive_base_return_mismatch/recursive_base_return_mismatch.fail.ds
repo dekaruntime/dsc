@@ -1,0 +1,8 @@
+import { echo } from "io"
+fn sum(n: number) number {
+  if (n <= 0) {
+    return "done"
+  }
+  return n + sum(n - 1)
+}
+echo(sum(3))

@@ -1,0 +1,5 @@
+// this is a single-line comment
+/* this is
+   a block comment */
+import { echo } from "io"
+echo(string(1))

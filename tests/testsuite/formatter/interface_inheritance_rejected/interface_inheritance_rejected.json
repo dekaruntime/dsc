@@ -1,0 +1,6 @@
+{
+  "title": "Interface inheritance is rejected",
+  "stage": "parse",
+  "notes": "DekaScript interfaces do not support extends clauses; this is a parse error.",
+  "expectedDiagnosticContains": "expected ``{``, found `identifier`"
+}

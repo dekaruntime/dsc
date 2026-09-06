@@ -1,0 +1,14 @@
+import { echo } from "io"
+import { format_request } from "http"
+fn utf8(value: string): bytes {
+  let encoded = unsafe<bytes> { new TextEncoder().encode(value) }
+  return match (encoded) {
+    Ok(buf) => buf,
+    Err(err) => utf8("")
+  }
+}
+const req = format_request("GET", "/", "example.com", {}, utf8(""))
+echo(match (unsafe<boolean> { req.indexOf("Host: example.com") >= 0 }) {
+  Ok(v) => v,
+  Err(e) => false
+})

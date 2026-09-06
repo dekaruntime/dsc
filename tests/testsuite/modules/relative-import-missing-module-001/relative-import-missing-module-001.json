@@ -1,0 +1,5 @@
+{
+  "title": "relative-import-missing-module-001",
+  "expectedDiagnosticContains": "Failed to read module '<entry>': operation not supported on this platform",
+  "stage": "parse"
+}

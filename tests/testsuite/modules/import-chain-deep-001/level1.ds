@@ -1,0 +1,2 @@
+import { value } from "./level2.ds";
+export { value };

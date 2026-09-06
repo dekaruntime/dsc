@@ -1,0 +1,6 @@
+{
+  "title": "Returning the wrong interface type fails",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "expected return type `A`, found type `{y: string}`"
+}

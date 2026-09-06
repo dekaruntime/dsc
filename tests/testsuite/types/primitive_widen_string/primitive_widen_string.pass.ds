@@ -1,0 +1,5 @@
+import { echo } from "io"
+
+echo(string(42))
+echo(string(true))
+echo(string(3.14))

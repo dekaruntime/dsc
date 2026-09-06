@@ -1,0 +1,6 @@
+{
+  "title": "Enum duplicate payload type fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected ``)``, found ``,``",
+  "notes": ""
+}

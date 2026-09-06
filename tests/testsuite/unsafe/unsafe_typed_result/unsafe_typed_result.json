@@ -1,0 +1,5 @@
+{
+  "title": "unsafe<T> declares the success type",
+  "stage": "run",
+  "notes": "deka#460: unsafe was Result<Infer, Infer>, the load-bearing source of Infer in the language (deka#252)."
+}

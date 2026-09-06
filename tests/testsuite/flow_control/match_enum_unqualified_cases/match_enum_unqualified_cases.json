@@ -1,0 +1,5 @@
+{
+  "title": "Unqualified payload-free cases select the right arm",
+  "stage": "run",
+  "notes": "deka#450: they used to bind, making the first arm match everything."
+}

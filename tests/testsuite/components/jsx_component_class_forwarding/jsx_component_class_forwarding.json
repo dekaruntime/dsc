@@ -1,0 +1,8 @@
+{
+  "title": "Function component forwards class to root element",
+  "stage": "run",
+  "notes": "Covers deka#172: utility-CSS scanning relies on class reaching the emitted HTML root.",
+  "hosts": [
+    "browser"
+  ]
+}

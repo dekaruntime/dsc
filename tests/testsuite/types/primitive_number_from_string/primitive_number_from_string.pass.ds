@@ -1,0 +1,12 @@
+import { echo } from "io"
+
+const good = number("3.14")
+match (good) {
+  Some(v) => echo(string(v)),
+  None => echo("none"),
+}
+const bad = number("abc")
+match (bad) {
+  Some(v) => echo(string(v)),
+  None => echo("none"),
+}

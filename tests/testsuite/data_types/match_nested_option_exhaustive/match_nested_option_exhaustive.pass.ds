@@ -1,0 +1,16 @@
+import { echo } from "io"
+fn read(hit: boolean): Result<Option<number>, string> {
+  if (hit) {
+    return Ok(Some(4))
+  }
+  return Ok(None)
+}
+fn value(hit: boolean): number {
+  return match (read(hit)) {
+    Err(e) => 0,
+    Ok(None) => 1,
+    Ok(Some(v)) => v
+  }
+}
+echo(string(value(true)))
+echo(string(value(false)))

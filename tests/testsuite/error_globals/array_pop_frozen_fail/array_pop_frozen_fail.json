@@ -1,0 +1,5 @@
+{
+  "title": "Popping a frozen array fails",
+  "stage": "run",
+  "notes": "Array literals are frozen, so pop cannot mutate."
+}

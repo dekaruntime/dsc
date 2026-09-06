@@ -1,0 +1,6 @@
+import { echo } from "io"
+import { parse } from "json"
+echo(match (parse("12")) {
+  Ok(v) => v,
+  Err(e) => -1
+})

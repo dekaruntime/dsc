@@ -1,0 +1,10 @@
+import { echo } from "io"
+import { parse } from "json"
+const v = match (parse("{\"x\":2}")) {
+  Ok(o) => o,
+  Err(e) => { x: 0 }
+}
+echo(match (unsafe<number> { Number(v.x) }) {
+  Ok(n) => n,
+  Err(e) => -1
+})

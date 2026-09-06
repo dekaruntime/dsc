@@ -35,7 +35,7 @@ use std::sync::OnceLock;
 
 mod terrace_font;
 
-const BRAND_BLUE: &str = "\x1b[38;5;39m";
+const BRAND_ORANGE: &str = "\x1b[38;2;224;140;11m";
 const BOLD: &str = "\x1b[1m";
 const RESET: &str = "\x1b[0m";
 
@@ -300,7 +300,7 @@ pub fn ascii(text: &str) -> String {
         .unwrap_or_else(|| text.to_string())
         .trim_end()
         .to_string();
-    format!("{BRAND_BLUE}{BOLD}{art}{RESET}")
+    format!("{BRAND_ORANGE}{BOLD}{art}{RESET}")
 }
 
 // ============================================================

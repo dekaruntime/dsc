@@ -199,3 +199,44 @@ fn self_contained_inlines_prelude_for_separate_scopes() {
         "self-contained emit should not be smaller than detached"
     );
 }
+
+#[test]
+fn self_contained_file_out_dir_writes_the_whole_graph() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().join("src");
+    write(
+        &root.join("point.ds"),
+        "struct Point {\n  x: number;\n}\nexport const origin = Point { x: 0 }\n",
+    );
+    write(
+        &root.join("main.ds"),
+        "import { origin } from './point.ds'\nexport const x = origin.x\n",
+    );
+    std::fs::write(root.join("deka.json"), "{}\n").expect("deka.json");
+    let out = temp.path().join("graph");
+    let result = Command::new(cli_bin())
+        .args([
+            "transpile",
+            "--self-contained",
+            root.join("main.ds").to_str().unwrap(),
+            "--out",
+        ])
+        .arg(&out)
+        .output()
+        .expect("transpile graph");
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let main_js = fs::read_to_string(out.join("main.js")).expect("graph main");
+    let point_js = fs::read_to_string(out.join("point.js")).expect("graph point");
+    assert!(
+        main_js.contains("./point.ds"),
+        "graph dump must keep .ds specifiers: {main_js}"
+    );
+    assert!(
+        point_js.contains("origin") || point_js.contains("Point"),
+        "graph dump must include the imported module: {point_js}"
+    );
+}

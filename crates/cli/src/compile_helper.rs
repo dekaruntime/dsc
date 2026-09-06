@@ -1,5 +1,6 @@
 //! Shared compile-and-report helper for CLI commands.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use deka_compile::module_graph::{self, GraphCompileOptions};
@@ -72,14 +73,32 @@ pub fn compile_source_js(
     client: bool,
     self_contained: bool,
 ) -> Result<String, String> {
+    let (entry, modules) = compile_graph_modules(input, cwd, client, self_contained)?;
+    modules
+        .get(&entry)
+        .cloned()
+        .ok_or_else(|| "module graph did not emit entry module".to_string())
+}
+
+/// Compile the entry's reachable graph. Keys are canonical source paths.
+/// Isolate hosts (`--self-contained --out <dir>`) write every module, not
+/// just the entry, so package imports (`http`, `jwt`) stay in the map.
+pub fn compile_graph_modules(
+    input: &Path,
+    cwd: &Path,
+    client: bool,
+    self_contained: bool,
+) -> Result<(PathBuf, HashMap<PathBuf, String>), String> {
     let source = std::fs::read_to_string(input)
         .map_err(|err| format!("failed to read {}: {err}", input.display()))?;
     let input_name = input
         .to_str()
         .ok_or_else(|| format!("input path is not valid UTF-8: {}", input.display()))?;
+    let entry = std::fs::canonicalize(input).unwrap_or_else(|_| input.to_path_buf());
     let meta = deka_compile::parse_source_module_meta(&source);
     if meta.imports.is_empty() {
-        return compile_js_or_report(&source, input_name);
+        let js = compile_js_or_report(&source, input_name)?;
+        return Ok((entry.clone(), HashMap::from([(entry, js)])));
     }
 
     let project_root = find_project_root(cwd, input)
@@ -100,10 +119,7 @@ pub fn compile_source_js(
     } else {
         graph.modules
     };
-    modules
-        .get(&graph.entry)
-        .cloned()
-        .ok_or_else(|| "module graph did not emit entry module".to_string())
+    Ok((graph.entry, modules))
 }
 
 /// Preserve-mode emit keeps source specifiers; only relative `.ds` / `.dsx`

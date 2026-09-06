@@ -36,6 +36,12 @@ jobs:
       - name: Where am I
         uses: ./.github/actions/where-am-i
 
+      # rust-toolchain installs rustup if `rustup` is not on PATH. Non-login
+      # runner shells often have ~/.cargo/bin missing, then the installer
+      # hits static.rust-lang.org and flakes on DNS.
+      - name: Cargo bin on PATH
+        run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.96.0
         with:
@@ -57,6 +63,17 @@ jobs:
 
       - name: Test workspace
         run: cargo test --locked --workspace
+
+      # rfd#38: this repo owns tests/tour + tests/testsuite. cargo test
+      # already runs fmt corpus + wasm tour; name the gate and refuse an
+      # empty tree (the wasm test used to return on a missing manifest).
+      - name: Language fixtures
+        run: |
+          test -f tests/tour/manifest.json
+          n=$(find tests/testsuite \( -name '*.pass.ds' -o -name '*.pass.dsx' \) | wc -l)
+          test "$n" -gt 100
+          cargo test --locked -p deka-fmt --test corpus_roundtrip
+          cargo test --locked -p deka_compiler_wasm all_website_tour_sources_match_the_native_abi_contract
 
       - name: Check wasm32 compiler + diagnostics
         run: |

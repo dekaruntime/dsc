@@ -130,11 +130,24 @@ function findCliBinary() {
     }
     return resolved;
   }
-  const candidate = join(repoRoot, "target", "release", "cli");
-  try {
-    const stat = statSync(candidate);
-    if (stat.isFile() && (stat.mode & 0o111)) return candidate;
-  } catch {}
+  if (process.env.DSC) {
+    const resolved = isAbsolute(process.env.DSC)
+      ? process.env.DSC
+      : resolve(process.cwd(), process.env.DSC);
+    if (!existsSync(resolved)) {
+      throw new Error(`DSC is set to ${process.env.DSC} but that file does not exist`);
+    }
+    return resolved;
+  }
+  for (const candidate of [
+    join(repoRoot, "target", "release", "dsc"),
+    join(repoRoot, "target", "release", "cli"),
+  ]) {
+    try {
+      const stat = statSync(candidate);
+      if (stat.isFile() && (stat.mode & 0o111)) return candidate;
+    } catch {}
+  }
   return null;
 }
 
@@ -220,7 +233,7 @@ function main() {
 
   const cliBinary = findCliBinary();
   if (!cliBinary) {
-    console.error("error: could not find deka CLI (build with: cargo build --release -p cli)");
+    console.error("error: could not find dsc (build with: cargo build --release -p cli)");
     process.exit(1);
   }
 

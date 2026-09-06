@@ -1,6 +1,7 @@
 use core::Registry;
 
 pub mod cli;
+pub mod compile_helper;
 
 pub fn build_registry() -> Registry {
     let mut registry = Registry::new();

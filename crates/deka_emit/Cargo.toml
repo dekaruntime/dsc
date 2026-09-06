@@ -1,0 +1,15 @@
+[package]
+name = "deka_emit"
+version.workspace = true
+edition = "2021"
+description = "DekaScript JavaScript emitter (Compiler v2)"
+license = "MIT"
+
+[dependencies]
+deka_syntax = { path = "../deka_syntax" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+insta = "1.40"
+bumpalo = "3.16"

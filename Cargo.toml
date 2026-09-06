@@ -5,6 +5,9 @@ members = [
     "crates/stdio",
     "crates/cli",
     "crates/deka_syntax",
+    "crates/deka_compile",
+    "crates/deka_emit",
+    "crates/deka_project",
 ]
 
 [workspace.package]

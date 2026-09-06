@@ -1,0 +1,17 @@
+[package]
+name = "deka_compile"
+version.workspace = true
+edition = "2021"
+description = "DekaScript compiler orchestrator (Compiler v2)"
+license = "MIT"
+
+[dependencies]
+deka_syntax = { path = "../deka_syntax" }
+deka_emit = { path = "../deka_emit" }
+deka_project = { path = "../deka_project" }
+bumpalo = "3.16"
+serde = { workspace = true }
+
+[dev-dependencies]
+insta = "1.40"
+tempfile = "3.14"

@@ -12,7 +12,7 @@ Same shape as `deka`: a `Registry` in `crates/core`, commands that `register(&mu
 dsc --help
 ```
 
-Commands land as compiler crates are pulled over. They are registered in `crates/cli/src/lib.rs`.
+Commands (`check`, `transpile`, `fmt`, `lsp`) are registered in `crates/cli/src/lib.rs`.
 
 ## CI
 

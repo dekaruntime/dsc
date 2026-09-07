@@ -19,6 +19,13 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    environment: release
+    env:
+      SCCACHE_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      SCCACHE_REGION: auto
+      SCCACHE_BUCKET: dsc-sccache-linux-x64
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -50,10 +57,25 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Verify sccache can reach R2
+        run: |
+          command -v aws >/dev/null 2>&1 || pip install --break-system-packages awscli
+          echo "SCCACHE_ENDPOINT=$SCCACHE_ENDPOINT"
+          echo "SCCACHE_BUCKET=$SCCACHE_BUCKET"
+          sccache --show-stats
+          aws s3 ls "s3://${SCCACHE_BUCKET}/" --endpoint-url="${SCCACHE_ENDPOINT}"
+
       - name: Test workspace
+        env:
+          RUSTC_WRAPPER: sccache
         run: cargo test --locked --workspace
 
       - name: Check wasm32 compiler + diagnostics
+        env:
+          RUSTC_WRAPPER: sccache
         run: |
           cargo check --locked --target wasm32-unknown-unknown -p deka_compiler_wasm
           cargo check --locked --target wasm32-unknown-unknown -p dekascript_lsp_wasm --no-default-features
@@ -71,6 +93,13 @@ jobs:
     name: Build browser compiler + diagnostics WASM
     needs: [test]
     runs-on: ubuntu-latest
+    environment: release
+    env:
+      SCCACHE_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      SCCACHE_REGION: auto
+      SCCACHE_BUCKET: dsc-sccache-linux-x64
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     steps:
       - uses: actions/checkout@v5
 
@@ -82,7 +111,20 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Verify sccache can reach R2
+        run: |
+          command -v aws >/dev/null 2>&1 || pip install --break-system-packages awscli
+          echo "SCCACHE_ENDPOINT=$SCCACHE_ENDPOINT"
+          echo "SCCACHE_BUCKET=$SCCACHE_BUCKET"
+          sccache --show-stats
+          aws s3 ls "s3://${SCCACHE_BUCKET}/" --endpoint-url="${SCCACHE_ENDPOINT}"
+
       - name: Build WASM artifacts
+        env:
+          RUSTC_WRAPPER: sccache
         run: scripts/build-wasm.sh dist/wasm
 
       - name: Upload WASM artifacts
@@ -101,11 +143,21 @@ jobs:
         include:
           - platform: linux-x64
             runner: ubuntu-latest
+            sccache_bucket: dsc-sccache-linux-x64
           - platform: darwin-x64
             runner: macos-15-intel
+            sccache_bucket: dsc-sccache-darwin-x64
           - platform: darwin-arm64
             runner: macos-14
+            sccache_bucket: dsc-sccache-darwin-arm64
     runs-on: ${{ matrix.runner }}
+    environment: release
+    env:
+      SCCACHE_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      SCCACHE_REGION: auto
+      SCCACHE_BUCKET: ${{ matrix.sccache_bucket }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     steps:
       - uses: actions/checkout@v5
 
@@ -115,7 +167,20 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.96.0
 
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Verify sccache can reach R2
+        run: |
+          command -v aws >/dev/null 2>&1 || pip install --break-system-packages awscli
+          echo "SCCACHE_ENDPOINT=$SCCACHE_ENDPOINT"
+          echo "SCCACHE_BUCKET=$SCCACHE_BUCKET"
+          sccache --show-stats
+          aws s3 ls "s3://${SCCACHE_BUCKET}/" --endpoint-url="${SCCACHE_ENDPOINT}"
+
       - name: Build CLI
+        env:
+          RUSTC_WRAPPER: sccache
         run: cargo build --locked --release -p cli
 
       - name: Prepare binary

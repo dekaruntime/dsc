@@ -102,7 +102,7 @@ jobs:
           - platform: linux-x64
             runner: ubuntu-latest
           - platform: darwin-x64
-            runner: macos-13
+            runner: [self-hosted, macos, x64]
           - platform: darwin-arm64
             runner: macos-14
     runs-on: ${{ matrix.runner }}

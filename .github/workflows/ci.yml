@@ -69,6 +69,11 @@ jobs:
     if: ${{ always() }}
     runs-on: ubuntu-latest
     environment: public-ci
+    env:
+      SCCACHE_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+      SCCACHE_REGION: auto
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_SCCACHE_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SCCACHE_SECRET_ACCESS_KEY }}
     steps:
       - name: Require successful change classification
         if: ${{ needs.changes.result != 'success' }}
@@ -93,6 +98,24 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Install sccache
+        if: ${{ env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != '' && env.SCCACHE_ENDPOINT != '' }}
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache
+        run: |
+          if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ] || [ -z "$SCCACHE_ENDPOINT" ]; then
+            echo "::notice::R2 cache is not configured for this run; building without sccache."
+            exit 0
+          fi
+          if ! command -v sccache >/dev/null 2>&1; then
+            echo "::warning::sccache is unavailable; building without a compiler cache."
+            exit 0
+          fi
+          echo "SCCACHE_BUCKET=dsc-sccache-linux-x64" >> "$GITHUB_ENV"
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "sccache enabled for dsc-sccache-linux-x64"
+
       - name: Cache Rust dependencies
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
         uses: Swatinem/rust-cache@v2
@@ -106,6 +129,10 @@ jobs:
       - name: Test workspace
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
         run: cargo test --locked --workspace
+
+      - name: Report sccache statistics
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != '' && env.SCCACHE_ENDPOINT != '' }}
+        run: sccache --show-stats
 
       # rfd#38: this repo owns tests/tour + tests/testsuite. cargo test
       # already runs fmt corpus + wasm tour; name the gate and refuse an

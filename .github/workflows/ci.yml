@@ -70,7 +70,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: public-ci
     env:
-      SCCACHE_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+      SCCACHE_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
       SCCACHE_REGION: auto
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_SCCACHE_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SCCACHE_SECRET_ACCESS_KEY }}

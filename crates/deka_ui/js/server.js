@@ -14,6 +14,27 @@ function escapeHtml(text) {
     .replace(/'/g, "&#39;");
 }
 
+function escapeUnsafeScriptChars(text) {
+  return String(text).replace(/[<>\/\\\u2028\u2029]/g, (ch) => {
+    switch (ch) {
+      case "<":
+        return "\\u003C";
+      case ">":
+        return "\\u003E";
+      case "/":
+        return "\\u002F";
+      case "\\":
+        return "\\\\";
+      case "\u2028":
+        return "\\u2028";
+      case "\u2029":
+        return "\\u2029";
+      default:
+        return ch;
+    }
+  });
+}
+
 function utf8Bytes(str) {
   if (typeof TextEncoder === "function") return Array.from(new TextEncoder().encode(String(str)));
   const s = String(str);
@@ -645,8 +666,8 @@ export async function renderToStringAsync(node, request) {
 
 function swapChunk(id, html) {
   const templateId = "deka-swap-" + id;
-  const tid = JSON.stringify(templateId);
-  const sid = JSON.stringify(id);
+  const tid = escapeUnsafeScriptChars(JSON.stringify(templateId));
+  const sid = escapeUnsafeScriptChars(JSON.stringify(id));
   return `<template id="${escapeHtml(templateId)}">${html}</template><script>(() => { const t = document.getElementById(${tid}); const slot = document.getElementById(${sid}); if (slot && t) slot.replaceWith(t.content.cloneNode(true)); t && t.remove(); document.currentScript && document.currentScript.remove(); })();</script>`;
 }
 

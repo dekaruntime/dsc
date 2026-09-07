@@ -126,6 +126,10 @@ jobs:
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
         run: cargo update --workspace --locked
 
+      - name: Test UI runtime JavaScript
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
+        run: node --test crates/deka_ui/js/server.test.mjs
+
       - name: Test workspace
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
         run: cargo test --locked --workspace

@@ -73,7 +73,8 @@ fn plan_prints_dev_slots_without_executing_them() {
     assert!(output.status.success(), "{}", combined(&output));
     let plan: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("plan must be JSON");
-    assert_eq!(plan["version"], 1);
+    assert_eq!(plan["version"], 2);
+    assert!(plan.get("prerender").is_none(), "{plan}");
     assert_eq!(plan["slots"].as_array().map(Vec::len), Some(1));
     assert_eq!(plan["slots"][0]["binding"], "labels");
     assert_eq!(plan["slots"][0]["descriptor"]["node"], "array");
@@ -82,6 +83,38 @@ fn plan_prints_dev_slots_without_executing_them() {
             .as_str()
             .is_some_and(|entry| entry.contains("./dev-data.js")),
         "dev entry did not use the emitted peer module: {plan}"
+    );
+}
+
+#[test]
+fn plan_reports_literal_prerender_export() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    write(&root.join("main.ds"), "export const prerender = false\n");
+
+    let output = run_in(root, &["plan", "main.ds"]);
+    assert!(output.status.success(), "{}", combined(&output));
+    let plan: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("plan must be JSON");
+    assert_eq!(plan["version"], 2);
+    assert_eq!(plan["prerender"], false);
+}
+
+#[test]
+fn plan_rejects_non_literal_prerender_export() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    write(
+        &root.join("main.ds"),
+        "const flag: boolean = true\nexport const prerender = flag\n",
+    );
+
+    let output = run_in(root, &["plan", "main.ds"]);
+    assert!(!output.status.success(), "{}", combined(&output));
+    let text = combined(&output);
+    assert!(
+        text.contains("literal boolean"),
+        "missing literal diagnostic: {text}"
     );
 }
 

@@ -361,6 +361,12 @@ pub struct CompileResult {
 #[derive(Debug, Default, Serialize)]
 pub struct DevPlan {
     pub version: u32,
+    /// Literal `export const prerender = <bool>` disposition for this module,
+    /// if present (dsc#54). Hosts plan routes from the entry module's value;
+    /// an imported module's `prerender` export is not a route fact. Omitted
+    /// from the serialized plan when absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prerender: Option<bool>,
     pub slots: Vec<DevPlanSlot>,
 }
 
@@ -479,7 +485,39 @@ fn build_dev_plan<'a>(
             entry,
         });
     }
-    Ok(DevPlan { version: 1, slots })
+    let prerender = literal_prerender_export(program)?;
+    Ok(DevPlan {
+        version: 2,
+        prerender,
+        slots,
+    })
+}
+
+/// Literal `export const prerender = <bool>` export, if present. A non-literal
+/// `prerender` export is an error: the disposition must be statically known or
+/// the host cannot plan routes from the compiler contract (dsc#54).
+fn literal_prerender_export(program: &Program) -> Result<Option<bool>, Vec<Diagnostic>> {
+    for stmt in program.statements {
+        let Stmt::Export {
+            decl: deka_syntax::ExportDecl::Const { name, value, .. },
+            ..
+        } = stmt
+        else {
+            continue;
+        };
+        if *name != "prerender" {
+            continue;
+        }
+        return match value {
+            Expr::Boolean { value, .. } => Ok(Some(*value)),
+            _ => Err(vec![Diagnostic::error(
+                value.span().start.line,
+                value.span().start.column,
+                "`prerender` must be a literal boolean (true or false)".to_string(),
+            )]),
+        };
+    }
+    Ok(None)
 }
 
 /// Compile a DekaScript source to JavaScript using the v2 pipeline.
@@ -746,7 +784,8 @@ const users: Array<User> = build {
 const first = users[0]
 "#;
         let result = compile_to_js(source, "app/users.ds").expect("dev binding compiles");
-        assert_eq!(result.dev_plan.version, 1);
+        assert_eq!(result.dev_plan.version, 2);
+        assert_eq!(result.dev_plan.prerender, None);
         assert_eq!(result.dev_plan.slots.len(), 1);
         let slot = &result.dev_plan.slots[0];
         assert_eq!(slot.binding, "users");
@@ -800,6 +839,55 @@ const greeting = user.greet()
             result.js
         );
         assert!(result.js.contains("user.greet()"), "{}", result.js);
+    }
+
+    #[test]
+    fn prerender_false_export_appears_in_plan() {
+        let source = "export const prerender = false";
+        let result = compile_to_js(source, "app/page.ds").expect("prerender export compiles");
+        assert_eq!(result.dev_plan.version, 2);
+        assert_eq!(result.dev_plan.prerender, Some(false));
+        let json = serde_json::to_value(&result.dev_plan).expect("plan serializes");
+        assert_eq!(json["prerender"], false);
+    }
+
+    #[test]
+    fn prerender_true_export_appears_in_plan() {
+        let source = "export const prerender = true";
+        let result = compile_to_js(source, "app/page.ds").expect("prerender export compiles");
+        assert_eq!(result.dev_plan.prerender, Some(true));
+    }
+
+    #[test]
+    fn prerender_absent_is_omitted_from_serialized_plan() {
+        let result = compile_to_js("const x: number = 1", "app/page.ds").expect("compiles");
+        assert_eq!(result.dev_plan.prerender, None);
+        let json = serde_json::to_value(&result.dev_plan).expect("plan serializes");
+        assert!(json.get("prerender").is_none(), "{json}");
+    }
+
+    #[test]
+    fn prerender_non_literal_export_is_rejected() {
+        let errors = compile_to_js(
+            "const flag: boolean = true\nexport const prerender = flag",
+            "app/page.ds",
+        )
+        .expect_err("non-literal prerender is rejected");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message.contains("literal boolean")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn prerender_non_export_const_is_not_route_disposition() {
+        // Only the exported binding is a route fact; a local const named
+        // `prerender` must not leak into the plan.
+        let result = compile_to_js("const prerender: boolean = false", "app/page.ds")
+            .expect("compiles");
+        assert_eq!(result.dev_plan.prerender, None);
     }
 
     #[test]

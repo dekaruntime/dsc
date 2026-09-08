@@ -592,7 +592,7 @@ const labels: Array<string> = build {
         ))
         .expect("response JSON");
         assert_eq!(response["ok"], true, "{response}");
-        assert_eq!(response["output"]["devPlan"]["version"], 1, "{response}");
+        assert_eq!(response["output"]["devPlan"]["version"], 2, "{response}");
         assert_eq!(
             response["output"]["devPlan"]["slots"]
                 .as_array()

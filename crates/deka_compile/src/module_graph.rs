@@ -776,6 +776,10 @@ pub fn compile_module_graph_with_options(
     let mut demands: HashMap<PathBuf, deka_emit::prelude::PreludeDemand> =
         HashMap::with_capacity(plan.keep.len());
     let mut dev_slots = Vec::new();
+    // Route disposition is a fact about the entry module only; imported
+    // modules may export their own `prerender` without it meaning anything
+    // for this plan (dsc#54).
+    let mut entry_prerender: Option<bool> = None;
     for path in order {
         if !plan.keep.contains(&path) && !dev_keep.contains(&path) {
             continue;
@@ -812,6 +816,9 @@ pub fn compile_module_graph_with_options(
                     emitted.insert(path.clone(), result.js);
                 }
                 dev_slots.extend(result.dev_plan.slots);
+                if path == entry {
+                    entry_prerender = result.dev_plan.prerender;
+                }
             }
             Err(diagnostics) => {
                 for d in diagnostics {
@@ -862,7 +869,8 @@ pub fn compile_module_graph_with_options(
         module_preludes,
         imports: all_imports,
         dev_plan: crate::DevPlan {
-            version: 1,
+            version: 2,
+            prerender: entry_prerender,
             slots: dev_slots,
         },
     })
@@ -1708,7 +1716,8 @@ mod tests {
         aliases.insert((main.clone(), "./dev-data.ds".to_string()), dev_data);
         let result = compile_module_graph(&main, &InMemoryLoader { files, aliases })
             .expect("graph compiles");
-        assert_eq!(result.dev_plan.version, 1);
+        assert_eq!(result.dev_plan.version, 2);
+        assert_eq!(result.dev_plan.prerender, None);
         assert_eq!(result.dev_plan.slots.len(), 1);
         assert!(
             !result.modules[&main].contains("./dev-data.ds"),
@@ -1720,6 +1729,33 @@ mod tests {
             "{}",
             result.dev_plan.slots[0].entry
         );
+    }
+
+    #[test]
+    fn graph_reports_entry_prerender_only() {
+        let main = PathBuf::from("/project/page.ds");
+        let helper = PathBuf::from("/project/helper.ds");
+        let mut files = HashMap::new();
+        files.insert(
+            main.clone(),
+            "import { help } from \"./helper.ds\"\n\
+             export const prerender = false\n\
+             export fn Page() string { return help() }"
+                .to_string(),
+        );
+        // An imported module may export its own `prerender`; it is not a
+        // route fact for the entry and must not leak into the plan.
+        files.insert(
+            helper.clone(),
+            "export const prerender = true\nexport fn help() string { return \"hi\" }"
+                .to_string(),
+        );
+        let mut aliases = HashMap::new();
+        aliases.insert((main.clone(), "./helper.ds".to_string()), helper);
+        let result = compile_module_graph(&main, &InMemoryLoader { files, aliases })
+            .expect("graph compiles");
+        assert_eq!(result.dev_plan.version, 2);
+        assert_eq!(result.dev_plan.prerender, Some(false));
     }
 
     #[test]

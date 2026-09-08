@@ -680,6 +680,7 @@ pub fn compile_to_js_with_imports_and_options<'a>(
         &typeck_result.jsx_optional_props,
         &typeck_result.enum_case_patterns,
         &typeck_result.union_type_patterns,
+        &typeck_result.dev_blocks,
         file_path,
         options.used_exports.as_ref(),
         options.detached_prelude,
@@ -766,6 +767,39 @@ const first = users[0]
         );
         assert!(slot.entry.contains("Ada"), "{}", slot.entry);
         assert_eq!(slot.descriptor["node"], "array");
+    }
+
+    #[test]
+    fn compile_build_binding_hydrates_through_declared_factories() {
+        let source = r#"
+type Cents number
+enum Status { Active }
+struct User { name: string; balance: Cents; status: Status }
+fn (user User) greet() string { return "Hello " + user.name }
+const user: User = build {
+  return Ok(User { name: "Ada", balance: Cents(7), status: Status.Active })
+}
+const greeting = user.greet()
+"#;
+        let result = compile_to_js(source, "app/page.ds").expect("build binding compiles");
+        let slot = result.dev_plan.slots.first().expect("one build slot");
+        let import = format!("import {{ hydrate as __deka_build_{} }}", slot.id);
+        let binding = format!(
+            "const user = __deka_build_{}({{Cents, Status, User}});",
+            slot.id
+        );
+        assert!(result.js.contains(&import), "{}", result.js);
+        assert!(result.js.contains(&binding), "{}", result.js);
+        assert!(
+            result
+                .js
+                .find("User.impl(\"greet\"")
+                .zip(result.js.find(&binding))
+                .is_some_and(|(method, binding)| method < binding),
+            "build hydration must happen after receiver methods:\n{}",
+            result.js
+        );
+        assert!(result.js.contains("user.greet()"), "{}", result.js);
     }
 
     #[test]

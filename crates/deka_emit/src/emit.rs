@@ -6,7 +6,7 @@
 //! structs via the `__deka_struct` helper's embed map.
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use deka_syntax::{
     BinOp, ExportDecl, Expr, ForInit, NewtypeRepr, Pattern, Program, Span, Stmt, Type,
@@ -39,6 +39,23 @@ pub fn dev_slot_id(file_path: &str, binding: &str, span: Span) -> String {
         (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
     });
     format!("{hash:016x}")
+}
+
+/// Hash identity path for one source file. When `module_root` is set and the
+/// file lives under it, the hashed path is root-relative so build slot ids
+/// are stable across machine and checkout locations (dsc#61). Otherwise the
+/// path is returned unchanged, preserving the historical absolute-path hash
+/// for hosts with no known project root (playground, wasm).
+pub fn dev_slot_source_path(file_path: &str, module_root: Option<&Path>) -> String {
+    let Some(root) = module_root else {
+        return file_path.to_string();
+    };
+    match Path::new(file_path).strip_prefix(root) {
+        Ok(relative) if !relative.as_os_str().is_empty() => {
+            relative.to_string_lossy().replace('\\', "/")
+        }
+        _ => file_path.to_string(),
+    }
 }
 
 fn dev_binding<'a>(stmt: &'a Stmt<'a>) -> Option<(&'a str, &'a Expr<'a>, bool)> {
@@ -414,6 +431,7 @@ pub fn emit_js_with_options<'a>(
         &HashMap::new(),
         build_closure_names,
         file_path,
+        None,
         live_names,
         false,
     )?
@@ -466,6 +484,9 @@ pub fn emit_js_module_with_options<'a>(
     // closure export entirely.
     build_closure_names: &HashSet<String>,
     file_path: &str,
+    // Project root that build slot ids are hashed relative to (dsc#61).
+    // None preserves the historical absolute-path identity.
+    module_root: Option<PathBuf>,
     live_names: Option<&HashSet<String>>,
     detached: bool,
 ) -> Result<ModuleEmit, String> {
@@ -473,6 +494,7 @@ pub fn emit_js_module_with_options<'a>(
     emitter.module_base = module_base;
     emitter.source_path = file_path.to_string();
     emitter.file_stem = file_stem_from_path(file_path);
+    emitter.module_root = module_root;
     emitter.seed_imports(imports);
     emitter.unwrap_calls = unwrap_calls.clone();
     emitter.operator_rewrites = operator_rewrites.clone();
@@ -520,11 +542,13 @@ pub fn emit_dev_entry<'a>(
     body: &'a [Stmt<'a>],
     slot: &str,
     file_path: &str,
+    module_root: Option<PathBuf>,
 ) -> Result<String, String> {
     let mut emitter = Emitter::new(program);
     emitter.module_base = module_base;
     emitter.source_path = file_path.to_string();
     emitter.file_stem = file_stem_from_path(file_path);
+    emitter.module_root = module_root;
     emitter.seed_imports(imports);
     emitter.unwrap_calls = typeck.unwrap_calls.clone();
     emitter.operator_rewrites = typeck.operator_rewrites.clone();
@@ -1253,6 +1277,9 @@ struct Emitter<'a> {
     super_decl_trees: std::collections::HashMap<&'a str, deka_syntax::typeck::DescriptorTree<'a>>,
     source_path: String,
     file_stem: String,
+    /// Project root that build slot ids are relativized against before
+    /// hashing (dsc#61). None keeps the historical absolute-path identity.
+    module_root: Option<PathBuf>,
     /// Dev entries are JS modules written next to normal emitted modules.
     dev_entry: bool,
     fn_scope: String,
@@ -1313,6 +1340,7 @@ impl<'a> Emitter<'a> {
             super_decl_trees: std::collections::HashMap::new(),
             source_path: "module.ds".to_string(),
             file_stem: "module".to_string(),
+            module_root: None,
             dev_entry: false,
             fn_scope: "_".to_string(),
             jsx_path: Vec::new(),
@@ -1362,7 +1390,11 @@ impl<'a> Emitter<'a> {
             if !self.is_live(name) {
                 continue;
             }
-            let slot = dev_slot_id(&self.source_path, name, value.span());
+            let slot = dev_slot_id(
+                &dev_slot_source_path(&self.source_path, self.module_root.as_deref()),
+                name,
+                value.span(),
+            );
             if !first {
                 self.out.push('\n');
             }
@@ -1485,7 +1517,11 @@ impl<'a> Emitter<'a> {
             if !self.is_live(name) {
                 continue;
             }
-            let slot = dev_slot_id(&self.source_path, name, value.span());
+            let slot = dev_slot_id(
+                &dev_slot_source_path(&self.source_path, self.module_root.as_deref()),
+                name,
+                value.span(),
+            );
             if !first {
                 self.out.push('\n');
             }
@@ -4124,6 +4160,7 @@ impl<'a> Emitter<'a> {
                     newtypes: HashMap::new(),
                     receiver_methods: HashMap::new(),
                     module_base: self.module_base.clone(),
+                    module_root: self.module_root.clone(),
                     unwrap_calls: HashMap::new(),
                     jsx_optional_props: HashMap::new(),
                     enum_case_patterns: HashMap::new(),

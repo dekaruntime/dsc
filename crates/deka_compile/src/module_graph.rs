@@ -264,6 +264,10 @@ pub struct GraphCompileOptions {
     /// URLs. This mirrors the single-file compiler's `module_base` option for
     /// browser hosts that have no stdlib filesystem (deka#497).
     pub module_base: Option<String>,
+    /// Project root that build slot ids are hashed relative to (dsc#61).
+    /// Forwarded to [`CompileOptions::module_root`] for every module so plan
+    /// and graph emission agree on `deka:dev/<id>` identities.
+    pub module_root: Option<PathBuf>,
 }
 
 /// A discovered module and its outgoing dependencies.
@@ -930,6 +934,7 @@ pub fn compile_module_graph_with_options(
             used_exports: plan.live.get(&path).cloned().flatten(),
             client: options.client,
             module_base: options.module_base.clone(),
+            module_root: options.module_root.clone(),
             detached_prelude: true,
             // The private factory closure is emitted only when a live consumer
             // build reaches this module's factories (dsc#52).
@@ -1430,6 +1435,7 @@ mod tests {
             GraphCompileOptions {
                 client: false,
                 module_base: Some("https://hats.dump.invalid/modules".to_string()),
+                module_root: None,
             },
         )
         .expect("compile graph with module base");
@@ -2261,6 +2267,59 @@ mod tests {
             err.iter().any(|d| d.message.contains("ui/server")),
             "{:?}",
             err
+        );
+    }
+
+    #[test]
+    fn graph_dev_slot_ids_are_project_relative_and_match_single_file_plan() {
+        // The host correlates `dsc plan <file>` slot ids with the ids embedded
+        // in the graph-emitted runtime modules, so both paths must relativize
+        // identically when module_root is set (dsc#61).
+        let source = "const labels: Array<string> = build { return Ok([\"Ada\"]) }";
+        let compile_graph_at = |root: &str| {
+            let page = PathBuf::from(format!("{root}/app/page.ds"));
+            let files = HashMap::from([(page.clone(), source.to_string())]);
+            compile_module_graph_with_options(
+                &page,
+                &InMemoryLoader {
+                    files,
+                    aliases: HashMap::new(),
+                },
+                GraphCompileOptions {
+                    module_root: Some(PathBuf::from(root)),
+                    ..Default::default()
+                },
+            )
+            .expect("graph compiles")
+        };
+        let graph_a = compile_graph_at("/a/proj");
+        let graph_b = compile_graph_at("/b/proj");
+        assert_eq!(graph_a.dev_plan.slots.len(), 1);
+        assert_eq!(
+            graph_a.dev_plan.slots[0].id, graph_b.dev_plan.slots[0].id,
+            "slot ids must be stable across absolute checkout roots"
+        );
+
+        let page_a = PathBuf::from("/a/proj/app/page.ds");
+        let plan_a = crate::compile_to_js_with_options(
+            source,
+            &page_a.to_string_lossy(),
+            crate::CompileOptions {
+                module_root: Some(PathBuf::from("/a/proj")),
+                ..Default::default()
+            },
+        )
+        .expect("single-file plan compiles");
+        assert_eq!(
+            graph_a.dev_plan.slots[0].id,
+            plan_a.dev_plan.slots[0].id,
+            "graph and single-file plan must agree on the slot id"
+        );
+        let import = format!("deka:dev/{}", graph_a.dev_plan.slots[0].id);
+        assert!(
+            graph_a.modules[&page_a].contains(&import),
+            "emitted module must import the plan slot id:\n{}",
+            graph_a.modules[&page_a]
         );
     }
 

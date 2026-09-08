@@ -5,7 +5,9 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use deka_compile::module_graph::{self, GraphCompileOptions, ModuleLoader};
-use deka_compile::{compile_to_js, format_diagnostic, format_diagnostics};
+use deka_compile::{
+    compile_to_js, compile_to_js_with_options, format_diagnostic, format_diagnostics,
+};
 use sha2::{Digest, Sha256};
 
 pub use deka_compile::SourceModuleMeta as ModuleMeta;
@@ -82,6 +84,23 @@ pub fn compile_source_js(
         .ok_or_else(|| "module graph did not emit entry module".to_string())
 }
 
+/// Root that build slot ids are relativized against (dsc#61). The deka host
+/// runs dsc with cwd = project root and `DEKA_MODULE_ROOT` set; when the env
+/// var is absent, fall back to `deka.json`/`deka.lock` detection and then the
+/// input's directory. `compile_dev_plan` and `compile_graph_modules` share
+/// this so plan ids and graph-emitted `deka:dev/<id>` imports agree.
+pub fn slot_id_root(cwd: &Path, input: &Path) -> PathBuf {
+    slot_id_root_from(std::env::var_os("DEKA_MODULE_ROOT").map(PathBuf::from), cwd, input)
+}
+
+fn slot_id_root_from(env_root: Option<PathBuf>, cwd: &Path, input: &Path) -> PathBuf {
+    env_root
+        .filter(|root| !root.as_os_str().is_empty())
+        .or_else(|| find_project_root(cwd, input))
+        .or_else(|| input.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| cwd.to_path_buf())
+}
+
 /// Compile an entry and return only the build-time materialization contract.
 /// Dsc exposes this to its host, but never evaluates a plan entry itself.
 pub fn compile_dev_plan(input: &Path, cwd: &Path) -> Result<deka_compile::DevPlan, String> {
@@ -90,11 +109,19 @@ pub fn compile_dev_plan(input: &Path, cwd: &Path) -> Result<deka_compile::DevPla
     let input_name = input
         .to_str()
         .ok_or_else(|| format!("input path is not valid UTF-8: {}", input.display()))?;
+    let module_root = slot_id_root(cwd, input);
     let meta = deka_compile::parse_source_module_meta(&source);
     if meta.imports.is_empty() {
-        return compile_to_js(&source, input_name)
-            .map(|result| result.dev_plan)
-            .map_err(|diagnostics| format_diagnostics(&diagnostics));
+        return compile_to_js_with_options(
+            &source,
+            input_name,
+            deka_compile::CompileOptions {
+                module_root: Some(module_root),
+                ..Default::default()
+            },
+        )
+        .map(|result| result.dev_plan)
+        .map_err(|diagnostics| format_diagnostics(&diagnostics));
     }
 
     let project_root = find_project_root(cwd, input)
@@ -104,9 +131,16 @@ pub fn compile_dev_plan(input: &Path, cwd: &Path) -> Result<deka_compile::DevPla
         return Err(err);
     }
     let loader = module_graph::FsModuleLoader::new(project_root);
-    module_graph::compile_module_graph_with_options(input, &loader, GraphCompileOptions::default())
-        .map(|graph| graph.dev_plan)
-        .map_err(|diagnostics| format_diagnostics(&diagnostics))
+    module_graph::compile_module_graph_with_options(
+        input,
+        &loader,
+        GraphCompileOptions {
+            module_root: Some(module_root),
+            ..Default::default()
+        },
+    )
+    .map(|graph| graph.dev_plan)
+    .map_err(|diagnostics| format_diagnostics(&diagnostics))
 }
 
 /// Compile the entry's reachable graph. Keys are canonical source paths.
@@ -126,7 +160,16 @@ pub fn compile_graph_modules(
     let entry = std::fs::canonicalize(input).unwrap_or_else(|_| input.to_path_buf());
     let meta = deka_compile::parse_source_module_meta(&source);
     if meta.imports.is_empty() {
-        let js = compile_js_or_report(&source, input_name)?;
+        let js = compile_to_js_with_options(
+            &source,
+            input_name,
+            deka_compile::CompileOptions {
+                module_root: Some(slot_id_root(cwd, input)),
+                ..Default::default()
+            },
+        )
+        .map(|result| result.js)
+        .map_err(|diagnostics| format_diagnostics(&diagnostics))?;
         return Ok((entry.clone(), HashMap::from([(entry, js)])));
     }
 
@@ -142,6 +185,7 @@ pub fn compile_graph_modules(
         &loader,
         GraphCompileOptions {
             client,
+            module_root: Some(slot_id_root(cwd, input)),
             ..Default::default()
         },
     )
@@ -553,4 +597,35 @@ fn byte_to_line_col(source: &str, byte: usize) -> (usize, usize) {
         }
     }
     (line, column)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slot_id_root_prefers_env_over_markers() {
+        let cwd = Path::new("/repo");
+        let input = Path::new("/repo/app/page.ds");
+        let root = slot_id_root_from(Some(PathBuf::from("/env/root")), cwd, input);
+        assert_eq!(root, PathBuf::from("/env/root"));
+    }
+
+    #[test]
+    fn slot_id_root_ignores_empty_env() {
+        let cwd = Path::new("/repo");
+        let input = Path::new("/repo/app/page.ds");
+        let root = slot_id_root_from(Some(PathBuf::new()), cwd, input);
+        assert_eq!(root, cwd.join("app"));
+    }
+
+    #[test]
+    fn slot_id_root_falls_back_to_input_parent_without_markers() {
+        // No deka.json/deka.lock exists under /no-such-project on the test
+        // machine, so detection fails and the input's directory wins.
+        let cwd = Path::new("/no-such-project");
+        let input = Path::new("/no-such-project/app/page.ds");
+        let root = slot_id_root_from(None, cwd, input);
+        assert_eq!(root, PathBuf::from("/no-such-project/app"));
+    }
 }

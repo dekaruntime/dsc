@@ -4,10 +4,10 @@ pub mod module_graph;
 pub mod shake;
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use bumpalo::Bump;
-use deka_emit::{dev_slot_id, emit_dev_entry, emit_js_module_with_options};
+use deka_emit::{dev_slot_id, dev_slot_source_path, emit_dev_entry, emit_js_module_with_options};
 use deka_syntax::typeck::Type;
 use deka_syntax::{
     Diagnostic, Expr, ModuleExports, Program, Span, Stmt, check_program_with_imports, parse,
@@ -395,7 +395,9 @@ pub struct CompileOptions {
     /// stdlib imports are resolved against `<module_root>/ds_modules` before
     /// falling back to the current working directory. This removes the need
     /// for the process-global `DEKA_MODULE_ROOT` environment variable in the
-    /// v2 compiler path.
+    /// v2 compiler path. Build slot ids are also hashed against this root so
+    /// `deka:dev/<id>` is stable across machine and checkout locations; when
+    /// absent the historical absolute-path identity is kept (dsc#61).
     pub module_root: Option<PathBuf>,
     /// Live top-level names after graph shaking. `None` keeps every name.
     pub used_exports: Option<HashSet<String>>,
@@ -445,6 +447,7 @@ fn build_dev_plan<'a>(
     typeck: &deka_syntax::typeck::TypeckResult<'a>,
     file_path: &str,
     module_base: Option<String>,
+    module_root: Option<&Path>,
 ) -> Result<DevPlan, Vec<Diagnostic>> {
     let mut slots = Vec::new();
     for stmt in program.statements {
@@ -458,7 +461,13 @@ fn build_dev_plan<'a>(
                 format!("internal compiler error: missing dev metadata for `{binding}`"),
             )]);
         };
-        let id = dev_slot_id(file_path, binding, value.span());
+        // Hash the project-relative identity when a root is known so the slot
+        // id is stable across machine/checkout locations (dsc#61).
+        let id = dev_slot_id(
+            &dev_slot_source_path(file_path, module_root),
+            binding,
+            value.span(),
+        );
         let entry = emit_dev_entry(
             program,
             source,
@@ -468,6 +477,7 @@ fn build_dev_plan<'a>(
             info.body,
             &id,
             file_path,
+            module_root.map(Path::to_path_buf),
         )
         .map_err(|message| {
             vec![Diagnostic::error(
@@ -705,6 +715,7 @@ pub fn compile_to_js_with_imports_and_options<'a>(
         &typeck_result,
         file_path,
         options.module_base.clone(),
+        options.module_root.as_deref(),
     )?;
 
     let emitted = emit_js_module_with_options(
@@ -728,6 +739,7 @@ pub fn compile_to_js_with_imports_and_options<'a>(
         &typeck_result.dev_blocks,
         &options.build_closure_names,
         file_path,
+        options.module_root.clone(),
         options.used_exports.as_ref(),
         options.detached_prelude,
     )
@@ -890,12 +902,50 @@ const greeting = user.greet()
     }
 
     #[test]
+    fn compile_dev_slot_id_is_stable_across_project_roots() {
+        // The same file at the same project-relative location must produce
+        // the same build slot id regardless of the absolute checkout root
+        // (dsc#61), and the emitted runtime import must reference that id.
+        let source = "const labels: Array<string> = build { return Ok([\"Ada\"]) }";
+        let compile_at = |root: &str| {
+            compile_to_js_with_options(
+                source,
+                &format!("{root}/app/page.ds"),
+                CompileOptions {
+                    module_root: Some(PathBuf::from(root)),
+                    ..Default::default()
+                },
+            )
+            .expect("build binding compiles")
+        };
+        let a = compile_at("/a/proj");
+        let b = compile_at("/b/proj");
+        assert_eq!(a.dev_plan.slots[0].id, b.dev_plan.slots[0].id);
+        let import = format!("deka:dev/{}", a.dev_plan.slots[0].id);
+        assert!(
+            a.js.contains(&import),
+            "emitted JS must import the plan slot id:\n{}",
+            a.js
+        );
+    }
+
+    #[test]
     fn prerender_non_export_const_is_not_route_disposition() {
         // Only the exported binding is a route fact; a local const named
         // `prerender` must not leak into the plan.
         let result = compile_to_js("const prerender: boolean = false", "app/page.ds")
             .expect("compiles");
         assert_eq!(result.dev_plan.prerender, None);
+    }
+
+    #[test]
+    fn compile_dev_slot_id_keeps_absolute_identity_without_root() {
+        // Playground/wasm callers pass no module root: the historical
+        // absolute-path identity is preserved (dsc#61).
+        let source = "const labels: Array<string> = build { return Ok([\"Ada\"]) }";
+        let a = compile_to_js(source, "/a/proj/app/page.ds").expect("compiles");
+        let b = compile_to_js(source, "/b/proj/app/page.ds").expect("compiles");
+        assert_ne!(a.dev_plan.slots[0].id, b.dev_plan.slots[0].id);
     }
 
     #[test]

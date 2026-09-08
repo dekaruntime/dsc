@@ -9,6 +9,48 @@ use super::Checker;
 use super::types::Type;
 
 impl<'a> Checker<'a> {
+    /// Build a descriptor fragment for every describable declared factory.
+    /// See [`super::build_module_build_fragments`] for the contract.
+    pub(super) fn build_declared_build_fragments(
+        &mut self,
+    ) -> HashMap<&'a str, super::DescriptorTree<'a>> {
+        self.collect_declarations();
+        let mut declared: Vec<Type<'a>> = Vec::new();
+        for stmt in self.program.statements {
+            match stmt {
+                ast::Stmt::Struct {
+                    name, type_params, ..
+                } if type_params.is_empty() => {
+                    declared.push(Type::Struct { name: *name });
+                }
+                ast::Stmt::Enum {
+                    name, type_params, ..
+                } if type_params.is_empty() => {
+                    declared.push(Type::Named { name: *name });
+                }
+                ast::Stmt::Newtype { name, repr, .. } => {
+                    declared.push(Type::Newtype {
+                        name: *name,
+                        repr: *repr,
+                    });
+                }
+                _ => {}
+            }
+        }
+        let span = ast::Span::dummy();
+        let mut fragments = HashMap::new();
+        for ty in declared {
+            let name = match &ty {
+                Type::Struct { name } | Type::Named { name } | Type::Newtype { name, .. } => *name,
+                _ => continue,
+            };
+            if let Ok(tree) = self.descriptor_tree(&ty, span) {
+                fragments.insert(name, tree);
+            }
+        }
+        fragments
+    }
+
     pub(super) fn check_program(&mut self) {
         self.collect_declarations();
         self.collect_module_value_bindings();

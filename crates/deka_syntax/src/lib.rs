@@ -17,6 +17,6 @@ pub use diagnostics::{Diagnostic, Severity};
 pub use lexer::Lexer;
 pub use parse::{parse, ParseResult};
 pub use typeck::{
-    check_program, check_program_with_imports, collect_module_exports, EnumInfo, MethodInfo,
-    ModuleExports, StructInfo, TypeError,
+    build_module_build_fragments, check_program, check_program_with_imports,
+    collect_module_exports, EnumInfo, MethodInfo, ModuleExports, StructInfo, TypeError,
 };

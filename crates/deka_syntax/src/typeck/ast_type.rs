@@ -50,6 +50,12 @@ impl<'a> Checker<'a> {
                         let resolved = self.resolve_ast_type_rec(&alias, seen);
                         seen.remove(name);
                         resolved
+                    } else if let Some(kind) = self.build_factory_kinds.get(name).copied() {
+                        // A factory private to an imported module, named here
+                        // only through its descriptor fragment (dsc#52). It
+                        // has no local declaration to check against, so the
+                        // kind from the declaring module stands in.
+                        kind.to_type(name)
                     } else {
                         self.error_span(*span, format!("unknown type `{name}`"));
                         Type::Error

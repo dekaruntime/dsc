@@ -409,6 +409,13 @@ pub struct CompileOptions {
     /// Single-module compilation leaves this false: the module stays
     /// self-contained.
     pub detached_prelude: bool,
+    /// Factories this module's compiler-private `__deka_factories` closure
+    /// must capture for consumer build hydration: every descriptor-reachable
+    /// factory of this module's exported types, including types private to
+    /// this module (dsc#52). Empty (the default) disables the closure export.
+    /// Set by module-graph compilation when a live consumer build reaches
+    /// these factories.
+    pub build_closure_names: HashSet<String>,
 }
 
 fn dev_binding<'a>(stmt: &'a Stmt<'a>) -> Option<(&'a str, &'a Expr<'a>)> {
@@ -719,6 +726,7 @@ pub fn compile_to_js_with_imports_and_options<'a>(
         &typeck_result.enum_case_patterns,
         &typeck_result.union_type_patterns,
         &typeck_result.dev_blocks,
+        &options.build_closure_names,
         file_path,
         options.used_exports.as_ref(),
         options.detached_prelude,

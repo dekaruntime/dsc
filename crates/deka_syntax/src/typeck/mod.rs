@@ -179,6 +179,19 @@ pub struct ModuleExports<'a> {
     /// Names exported via `export { name }` that are not locally declared
     /// (i.e. re-exports of imports). These pass through to importers.
     pub re_exports: HashSet<&'a str>,
+    /// Compiler-private descriptor fragments for exported struct/enum/newtype
+    /// factories, keyed by exported name and computed in the declaring
+    /// module's own namespace (so private nested types are visible). Build
+    /// hydration in importing modules splices these instead of re-walking the
+    /// type through local bindings (dsc#52). Never consulted for ordinary
+    /// import validation, so it is invisible in DekaScript module metadata.
+    pub build_fragments: HashMap<&'a str, DescriptorTree<'a>>,
+    /// Compiler-private receiver methods declared on this module's types,
+    /// including types private to the module. Keyed by the declaring-module
+    /// receiver name so an importer can typecheck method calls on private
+    /// nested values it can name only through a fragment (dsc#52). Like
+    /// `build_fragments`, invisible in DekaScript module metadata.
+    pub build_receiver_methods: HashMap<(&'a str, &'a str), MethodInfo<'a>>,
 }
 
 impl<'a> Default for ModuleExports<'a> {
@@ -191,7 +204,75 @@ impl<'a> Default for ModuleExports<'a> {
             receiver_methods: HashMap::new(),
             values: HashMap::new(),
             re_exports: HashSet::new(),
+            build_fragments: HashMap::new(),
+            build_receiver_methods: HashMap::new(),
         }
+    }
+}
+
+/// The kind of a named factory an importer can reach only through a
+/// descriptor fragment (dsc#52). Lets the consumer's checker resolve field
+/// and receiver types that are private to the declaring module.
+#[derive(Clone, Copy, Debug)]
+enum BuildFactoryKind {
+    Struct,
+    Enum,
+    Newtype(crate::ast::NewtypeRepr),
+}
+
+impl BuildFactoryKind {
+    fn to_type<'a>(self, name: &'a str) -> Type<'a> {
+        match self {
+            BuildFactoryKind::Struct => Type::Struct { name },
+            BuildFactoryKind::Enum => Type::Named { name },
+            BuildFactoryKind::Newtype(repr) => Type::Newtype { name, repr },
+        }
+    }
+}
+
+/// Walk a descriptor fragment recording the kind of every named factory.
+fn collect_fragment_factory_kinds<'a>(
+    tree: &DescriptorTree<'a>,
+    out: &mut HashMap<&'a str, BuildFactoryKind>,
+) {
+    match tree {
+        DescriptorTree::Struct { name, fields } => {
+            out.entry(name).or_insert(BuildFactoryKind::Struct);
+            for field in fields {
+                collect_fragment_factory_kinds(&field.ty, out);
+            }
+        }
+        DescriptorTree::Newtype { name, repr } => {
+            let repr_kind = match **repr {
+                DescriptorTree::Leaf { kind, .. } => match kind {
+                    "number" => crate::ast::NewtypeRepr::Number,
+                    "boolean" => crate::ast::NewtypeRepr::Bool,
+                    _ => crate::ast::NewtypeRepr::String,
+                },
+                _ => crate::ast::NewtypeRepr::Number,
+            };
+            out.entry(name).or_insert(BuildFactoryKind::Newtype(repr_kind));
+            collect_fragment_factory_kinds(repr, out);
+        }
+        DescriptorTree::Enum { name, cases } => {
+            out.entry(name).or_insert(BuildFactoryKind::Enum);
+            for (_, payload) in cases {
+                if let Some(payload) = payload {
+                    collect_fragment_factory_kinds(payload, out);
+                }
+            }
+        }
+        DescriptorTree::Array { elem } | DescriptorTree::Option { inner: elem } => {
+            collect_fragment_factory_kinds(elem, out);
+        }
+        DescriptorTree::Union { members } => {
+            for member in members {
+                collect_fragment_factory_kinds(member, out);
+            }
+        }
+        DescriptorTree::Leaf { .. }
+        | DescriptorTree::Recurse { .. }
+        | DescriptorTree::Interface { .. } => {}
     }
 }
 
@@ -237,6 +318,25 @@ pub fn infer_module_function_signatures<'a>(
     let mut checker = Checker::new(program, &imports);
     checker.infer_all_function_signatures();
     checker.globals
+}
+
+/// Build compiler-private descriptor fragments for a module's declared
+/// factories, in the declaring module's own namespace.
+///
+/// A fragment is the descriptor tree of one declared struct/enum/newtype.
+/// Because it is computed here — where every type the declaration references
+/// is in scope, including types private to this module — a fragment can name
+/// factories that importers have no lexical binding for. Module-graph
+/// compilation stores these on [`ModuleExports::build_fragments`] under the
+/// exported name; an importer's build hydration splices them in place of a
+/// local re-walk (dsc#52). Generic and undescribable declarations are skipped:
+/// importers fall back to their local walk, which preserves today's behavior.
+pub fn build_module_build_fragments<'a>(
+    program: &'a Program<'a>,
+    imports: &HashMap<&str, &ModuleExports<'a>>,
+) -> HashMap<&'a str, DescriptorTree<'a>> {
+    let mut checker = Checker::new(program, imports);
+    checker.build_declared_build_fragments()
 }
 
 /// Collect the exported type information from a parsed module.
@@ -601,6 +701,17 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
 
     let mut exports = ModuleExports::default();
 
+    // Compiler-private receiver methods for every declared receiver type,
+    // including private ones (dsc#52): an importer can name a private nested
+    // type only through a descriptor fragment, and it needs these entries to
+    // typecheck method calls on such values. Keyed by declared name; the
+    // importer's checker re-keys promoted entries under the local binding.
+    for ((receiver, method), info) in receiver_methods.iter() {
+        exports
+            .build_receiver_methods
+            .insert((*receiver, *method), info.clone());
+    }
+
     for stmt in program.statements.iter() {
         let ast::Stmt::Export { decl, .. } = stmt else {
             continue;
@@ -866,6 +977,14 @@ struct Checker<'a> {
     union_type_patterns: HashMap<*const ast::Pattern<'a>, types::UnionMemberTest<'a>>,
     /// `build { ... }` bodies and type descriptors keyed by expression pointer.
     dev_blocks: HashMap<*const ast::Expr<'a>, DevBlock<'a>>,
+    /// Descriptor fragments for imported factories, keyed by the local import
+    /// binding. Spliced wholesale when a build descriptor (or any descriptor
+    /// walk) reaches an imported type, so private nested types of the
+    /// declaring module keep their real descriptor nodes (dsc#52).
+    build_fragments: HashMap<&'a str, DescriptorTree<'a>>,
+    /// Kinds of factories reachable only through imported descriptor
+    /// fragments, keyed by the declaring-module name (dsc#52).
+    build_factory_kinds: HashMap<&'a str, BuildFactoryKind>,
     /// Local scopes. The first scope is the top-level scope.
     scopes: Vec<HashMap<&'a str, Type<'a>>>,
     /// Bindings that were introduced with `let` and may be reassigned.
@@ -920,6 +1039,8 @@ impl<'a> Checker<'a> {
             enum_case_patterns: HashMap::new(),
             union_type_patterns: HashMap::new(),
             dev_blocks: HashMap::new(),
+            build_fragments: HashMap::new(),
+            build_factory_kinds: HashMap::new(),
             scopes: vec![HashMap::new()],
             mutables: vec![HashSet::new()],
             pending_module_bindings: HashSet::new(),
@@ -997,6 +1118,28 @@ impl<'a> Checker<'a> {
             let Some(exports) = imports.get(source) else {
                 continue;
             };
+            // Private factories named by the dependency's fragments are
+            // type-visible here for build hydration purposes (dsc#52), and so
+            // are the receiver methods declared on them.
+            let mut kinds = HashMap::new();
+            for tree in exports.build_fragments.values() {
+                collect_fragment_factory_kinds(tree, &mut kinds);
+            }
+            for (name, kind) in kinds {
+                self.build_factory_kinds.entry(name).or_insert(kind);
+            }
+            for ((receiver, method), info) in exports.build_receiver_methods.iter() {
+                self.receiver_methods
+                    .entry((*receiver, *method))
+                    .or_insert_with(|| info.clone());
+                if let Some(local) = specifiers
+                    .iter()
+                    .find(|spec| spec.imported == *receiver)
+                    .map(|spec| spec.local)
+                {
+                    self.receiver_methods.insert((local, *method), info.clone());
+                }
+            }
             for spec in specifiers.iter() {
                 let imported = spec.imported;
                 let local = spec.local;
@@ -1032,6 +1175,10 @@ impl<'a> Checker<'a> {
 
                 if let Some(ty) = exports.values.get(imported) {
                     self.declare_var(local, ty.clone());
+                }
+
+                if let Some(tree) = exports.build_fragments.get(imported) {
+                    self.build_fragments.insert(local, tree.clone());
                 }
             }
         }

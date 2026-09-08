@@ -182,6 +182,12 @@ impl<'a> Checker<'a> {
     ) -> Result<DescriptorTree<'a>, String> {
         match ty {
             Type::Named { name } => {
+                // An imported factory's fragment was computed in the
+                // declaring module's namespace; splice it instead of guessing
+                // through local bindings (dsc#52).
+                if let Some(tree) = self.build_fragments.get(name) {
+                    return Ok(tree.clone());
+                }
                 if self.enums.contains_key(name) {
                     return self.enum_tree(name, &[], span, seen, allow_recurse);
                 }
@@ -204,7 +210,12 @@ impl<'a> Checker<'a> {
                     name: kind.to_string(),
                 })
             }
-            Type::Struct { name } => self.struct_tree(name, &[], span, seen, allow_recurse),
+            Type::Struct { name } => {
+                if let Some(tree) = self.build_fragments.get(name) {
+                    return Ok(tree.clone());
+                }
+                self.struct_tree(name, &[], span, seen, allow_recurse)
+            }
             Type::Generic { base, args } => {
                 if self.structs.contains_key(base) {
                     self.struct_tree(base, args, span, seen, allow_recurse)
@@ -227,6 +238,9 @@ impl<'a> Checker<'a> {
                 }
             }
             Type::Newtype { name, repr } => {
+                if let Some(tree) = self.build_fragments.get(name) {
+                    return Ok(tree.clone());
+                }
                 let repr_tree = DescriptorTree::Leaf {
                     kind: match repr {
                         ast::NewtypeRepr::Number => "number",
@@ -294,6 +308,11 @@ impl<'a> Checker<'a> {
         seen: &mut HashSet<&'a str>,
         allow_recurse: bool,
     ) -> Result<DescriptorTree<'a>, String> {
+        if args.is_empty() {
+            if let Some(tree) = self.build_fragments.get(name) {
+                return Ok(tree.clone());
+            }
+        }
         if !seen.insert(name) {
             if allow_recurse {
                 // Recursive super declaration: reference the interned const
@@ -356,6 +375,11 @@ impl<'a> Checker<'a> {
         seen: &mut HashSet<&'a str>,
         allow_recurse: bool,
     ) -> Result<DescriptorTree<'a>, String> {
+        if args.is_empty() {
+            if let Some(tree) = self.build_fragments.get(name) {
+                return Ok(tree.clone());
+            }
+        }
         if !seen.insert(name) {
             if allow_recurse {
                 return Ok(DescriptorTree::Recurse { name });

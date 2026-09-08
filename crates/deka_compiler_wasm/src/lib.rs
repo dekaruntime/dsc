@@ -280,6 +280,9 @@ fn compile_request(source: &str, filename: &str, options_json: &str) -> String {
         // Single-file playground compilation stays self-contained; only the
         // module graph detaches the prelude (deka#595).
         detached_prelude: false,
+        // Build closures are emitted by the module graph; single-file
+        // playground compilation has no cross-module builds.
+        build_closure_names: std::collections::HashSet::new(),
     };
 
     match deka_compile::compile_to_js_with_options(source, filename, compile_options) {

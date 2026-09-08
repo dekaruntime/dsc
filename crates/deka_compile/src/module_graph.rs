@@ -663,7 +663,7 @@ pub fn compile_module_graph_with_options(
             )
         })
         .collect();
-    let plan: ShakePlan = shake::shake_graph(&entry, &shake_modules, &programs);
+    let mut plan: ShakePlan = shake::shake_graph(&entry, &shake_modules, &programs);
     if options.client && plan.reaches_ui_server {
         errors.push(diag(
             0,
@@ -671,6 +671,65 @@ pub fn compile_module_graph_with_options(
             format!("{}: client bundle cannot import ui/server", entry.display()),
         ));
         return Err(errors);
+    }
+
+    // A build entry can construct an imported struct/enum/newtype solely for
+    // its declared-type materializer. The runtime graph still needs that
+    // exported factory even though ordinary expression liveness sees it only
+    // inside `build { ... }`; retain the binding and its defining module.
+    let mut factory_queue: VecDeque<PathBuf> = plan.keep.iter().cloned().collect();
+    while let Some(path) = factory_queue.pop_front() {
+        let Some(program) = programs.get(&path) else {
+            continue;
+        };
+        let Some(module) = modules.get(&path) else {
+            continue;
+        };
+        for stmt in program.statements.iter() {
+            let deka_syntax::Stmt::Import {
+                specifiers, source, ..
+            } = stmt
+            else {
+                continue;
+            };
+            let Some(dep) = module.dependencies.get(*source) else {
+                continue;
+            };
+            let Some(dep_exports) = exports.get(dep) else {
+                continue;
+            };
+            for specifier in specifiers.iter() {
+                let is_factory = dep_exports.structs.contains_key(specifier.imported)
+                    || dep_exports.enums.contains_key(specifier.imported)
+                    || dep_exports.newtypes.contains_key(specifier.imported);
+                if !is_factory || !deka_emit::dev_uses_name(program, specifier.local) {
+                    continue;
+                }
+                match plan
+                    .live
+                    .entry(path.clone())
+                    .or_insert_with(|| Some(HashSet::new()))
+                {
+                    Some(live) => {
+                        live.insert(specifier.local.to_string());
+                    }
+                    None => {}
+                }
+                match plan
+                    .live
+                    .entry(dep.clone())
+                    .or_insert_with(|| Some(HashSet::new()))
+                {
+                    Some(live) => {
+                        live.insert(specifier.imported.to_string());
+                    }
+                    None => {}
+                }
+                if plan.keep.insert(dep.clone()) {
+                    factory_queue.push_back(dep.clone());
+                }
+            }
+        }
     }
 
     // Runtime shaking must not make a dev-only dependency disappear. Start
@@ -1660,6 +1719,80 @@ mod tests {
             result.dev_plan.slots[0].entry.contains("./dev-data.js"),
             "{}",
             result.dev_plan.slots[0].entry
+        );
+    }
+
+    #[test]
+    fn graph_keeps_build_factories_and_receiver_methods_live() {
+        let main = PathBuf::from("/project/page.ds");
+        let mut files = HashMap::new();
+        files.insert(
+            main.clone(),
+            "struct User { name: string }\n\
+             fn (user User) greet() string { return \"Hello \" + user.name }\n\
+             const user: User = build { return Ok(User { name: \"Ada\" }) }\n\
+             export fn Page() string { return user.greet() }"
+                .to_string(),
+        );
+        let result = compile_module_graph(
+            &main,
+            &InMemoryLoader {
+                files,
+                aliases: HashMap::new(),
+            },
+        )
+        .expect("graph compiles");
+        let emitted = &result.modules[&main];
+        assert!(emitted.contains("User.impl(\"greet\""), "{emitted}");
+        assert!(emitted.contains("const user = __deka_build_"), "{emitted}");
+        assert!(emitted.contains("({User});"), "{emitted}");
+        assert!(
+            emitted
+                .find("User.impl(\"greet\"")
+                .zip(emitted.find("const user = __deka_build_"))
+                .is_some_and(|(method, binding)| method < binding),
+            "factory hydration must follow receiver-method registration:\n{emitted}"
+        );
+        assert!(
+            result.prelude.contains("f.impl=(a,b)=>"),
+            "the detached prelude must include struct method support:\n{}",
+            result.prelude
+        );
+    }
+
+    #[test]
+    fn graph_keeps_imported_factory_used_only_by_build_hydration() {
+        let types = PathBuf::from("/project/types.ds");
+        let page = PathBuf::from("/project/page.ds");
+        let mut files = HashMap::new();
+        files.insert(
+            types.clone(),
+            "struct User { name: string }\n\
+             fn (user User) greet() string { return \"Hello \" + user.name }\n\
+             export { User }"
+                .to_string(),
+        );
+        files.insert(
+            page.clone(),
+            "import { User } from \"./types.ds\";\n\
+             const user: User = build { return Ok(User { name: \"Ada\" }) }\n\
+             export fn Page() string { return user.greet() }"
+                .to_string(),
+        );
+        let mut aliases = HashMap::new();
+        aliases.insert((page.clone(), "./types.ds".to_string()), types.clone());
+        let result = compile_module_graph(&page, &InMemoryLoader { files, aliases })
+            .expect("graph compiles");
+        let page_js = &result.modules[&page];
+        assert!(
+            page_js.contains("import { User } from \"./types.ds\";"),
+            "factory import must stay live for build hydration:\n{page_js}"
+        );
+        assert!(page_js.contains("({User});"), "{page_js}");
+        assert!(
+            result.modules[&types].contains("User.impl(\"greet\""),
+            "exported factory must retain receiver methods:\n{}",
+            result.modules[&types]
         );
     }
 

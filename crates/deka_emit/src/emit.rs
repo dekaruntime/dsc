@@ -61,6 +61,45 @@ fn dev_binding<'a>(stmt: &'a Stmt<'a>) -> Option<(&'a str, &'a Expr<'a>, bool)> 
     }
 }
 
+fn build_factory_names(
+    tree: &deka_syntax::typeck::DescriptorTree<'_>,
+    names: &mut HashSet<String>,
+) {
+    use deka_syntax::typeck::DescriptorTree;
+
+    match tree {
+        DescriptorTree::Struct { name, fields } => {
+            names.insert((*name).to_string());
+            for field in fields {
+                build_factory_names(&field.ty, names);
+            }
+        }
+        DescriptorTree::Newtype { name, repr } => {
+            names.insert((*name).to_string());
+            build_factory_names(repr, names);
+        }
+        DescriptorTree::Enum { name, cases } => {
+            names.insert((*name).to_string());
+            for (_, payload) in cases {
+                if let Some(payload) = payload {
+                    build_factory_names(payload, names);
+                }
+            }
+        }
+        DescriptorTree::Array { elem } | DescriptorTree::Option { inner: elem } => {
+            build_factory_names(elem, names);
+        }
+        DescriptorTree::Union { members } => {
+            for member in members {
+                build_factory_names(member, names);
+            }
+        }
+        DescriptorTree::Leaf { .. }
+        | DescriptorTree::Recurse { .. }
+        | DescriptorTree::Interface { .. } => {}
+    }
+}
+
 fn declared_name<'a>(stmt: &'a Stmt<'a>) -> Option<&'a str> {
     match stmt {
         Stmt::Const { name, .. }
@@ -135,6 +174,8 @@ pub fn dev_uses_name(program: &Program<'_>, target: &str) -> bool {
         for stmt in *body {
             visit_stmt_exprs(stmt, &mut |expr| {
                 if matches!(expr, Expr::Identifier { name, .. } if *name == target)
+                    || matches!(expr, Expr::StructLiteral { name, .. } if *name == target)
+                    || matches!(expr, Expr::EnumConstructor { enum_name: name, .. } if *name == target)
                     || matches!(expr, Expr::JsxElement { element, .. } if element.tag == target)
                 {
                     used = true;
@@ -286,6 +327,7 @@ pub fn emit_js_with_options<'a>(
         jsx_optional_props,
         enum_case_patterns,
         union_type_patterns,
+        &HashMap::new(),
         file_path,
         live_names,
         false,
@@ -333,6 +375,7 @@ pub fn emit_js_module_with_options<'a>(
         *const deka_syntax::Pattern<'a>,
         deka_syntax::typeck::UnionMemberTest<'a>,
     >,
+    build_blocks: &HashMap<*const Expr<'a>, deka_syntax::typeck::DevBlock<'a>>,
     file_path: &str,
     live_names: Option<&HashSet<String>>,
     detached: bool,
@@ -355,6 +398,10 @@ pub fn emit_js_module_with_options<'a>(
     emitter.jsx_optional_props = jsx_optional_props.clone();
     emitter.enum_case_patterns = enum_case_patterns.clone();
     emitter.union_type_patterns = union_type_patterns.clone();
+    emitter.build_blocks = build_blocks.clone();
+    for block in build_blocks.values() {
+        build_factory_names(&block.descriptor, &mut emitter.build_factory_names);
+    }
     emitter.live_names = live_names.cloned();
     emitter.detached = detached;
     if module_imports_side_effect_css(program) {
@@ -1068,6 +1115,10 @@ struct Emitter<'a> {
     /// the typechecker (rfd#42, deka#530).
     union_type_patterns:
         HashMap<*const deka_syntax::Pattern<'a>, deka_syntax::typeck::UnionMemberTest<'a>>,
+    /// Compiler descriptors for build-only bindings. These are used only to
+    /// retain the real factories needed by cache-only virtual modules.
+    build_blocks: HashMap<*const Expr<'a>, deka_syntax::typeck::DevBlock<'a>>,
+    build_factory_names: HashSet<String>,
     unwrap_id: usize,
     match_id: usize,
     /// Newtype operator rewrites lowered by the typechecker.
@@ -1144,6 +1195,8 @@ impl<'a> Emitter<'a> {
             jsx_optional_props: HashMap::new(),
             enum_case_patterns: HashMap::new(),
             union_type_patterns: HashMap::new(),
+            build_blocks: HashMap::new(),
+            build_factory_names: HashSet::new(),
             unwrap_id: 0,
             match_id: 0,
             operator_rewrites: HashMap::new(),
@@ -1199,7 +1252,7 @@ impl<'a> Emitter<'a> {
         // opaque value import from the compiler plan after executing the
         // matching dev-only entry.
         for stmt in self.program.statements.iter() {
-            let Some((name, value, exported)) = dev_binding(stmt) else {
+            let Some((name, value, _)) = dev_binding(stmt) else {
                 continue;
             };
             if !self.is_live(name) {
@@ -1210,17 +1263,11 @@ impl<'a> Emitter<'a> {
                 self.out.push('\n');
             }
             first = false;
-            self.out.push_str("import { value as ");
-            self.out.push_str(name);
+            self.out.push_str("import { hydrate as __deka_build_");
+            self.out.push_str(&slot);
             self.out.push_str(" } from \"deka:dev/");
             self.out.push_str(&slot);
             self.out.push_str("\";");
-            if exported {
-                self.out.push('\n');
-                self.out.push_str("export { ");
-                self.out.push_str(name);
-                self.out.push_str(" };");
-            }
         }
         if self.needs_jsx_helper() {
             if !first {
@@ -1270,6 +1317,60 @@ impl<'a> Emitter<'a> {
 
         // Register receiver methods after all struct factories are declared.
         self.emit_method_registrations()?;
+
+        // The host publishes only JSON-compatible build data. Materialize it
+        // through this module's declared factories after receiver methods are
+        // installed, preserving the same prototype identity as a source
+        // literal without exposing descriptors at runtime.
+        for stmt in self.program.statements.iter() {
+            let Some((name, value, exported)) = dev_binding(stmt) else {
+                continue;
+            };
+            if !self.is_live(name) {
+                continue;
+            }
+            let slot = dev_slot_id(&self.source_path, name, value.span());
+            if !first {
+                self.out.push('\n');
+            }
+            first = false;
+            self.out.push_str("const ");
+            self.out.push_str(name);
+            self.out.push_str(" = __deka_build_");
+            self.out.push_str(&slot);
+            self.out.push_str("({");
+            let mut names = HashSet::new();
+            if let Some(block) = self.build_blocks.get(&(value as *const Expr<'a>)) {
+                build_factory_names(&block.descriptor, &mut names);
+            }
+            let mut factories: Vec<_> = names
+                .into_iter()
+                .filter_map(|name| {
+                    self.build_factory_binding(&name)
+                        .map(|binding| (name, binding.to_string()))
+                })
+                .collect();
+            factories.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+            for (index, (factory, binding)) in factories.iter().enumerate() {
+                if index > 0 {
+                    self.out.push_str(", ");
+                }
+                if factory == binding {
+                    self.out.push_str(binding);
+                } else {
+                    self.out.push_str(&json_string(factory));
+                    self.out.push_str(": ");
+                    self.out.push_str(binding);
+                }
+            }
+            self.out.push_str("});");
+            if exported {
+                self.out.push('\n');
+                self.out.push_str("export { ");
+                self.out.push_str(name);
+                self.out.push_str(" };");
+            }
+        }
 
         // Second pass: emit executable top-level statements (const/let/expr).
         for stmt in self.program.statements.iter() {
@@ -1371,13 +1472,23 @@ impl<'a> Emitter<'a> {
         // compilation keeps every ordinary import by default, so it needs the
         // same distinction here: references nested in `build` do not make a
         // binding part of the runtime graph.
-        if self.live_names.is_some() {
-            return true;
-        }
         let Stmt::Import { specifiers, .. } = stmt else {
             return true;
         };
         if specifiers.is_empty() {
+            return true;
+        }
+
+        if self.live_names.is_some() {
+            return specifiers.iter().any(|specifier| {
+                self.is_live(specifier.local) || self.is_build_factory_import(specifier)
+            });
+        }
+
+        if specifiers
+            .iter()
+            .any(|specifier| self.is_build_factory_import(specifier))
+        {
             return true;
         }
 
@@ -1398,7 +1509,10 @@ impl<'a> Emitter<'a> {
             // Same rule as : kept when the bound name is live.
             Stmt::UnwrapLet { name, .. } => self.is_live(name),
             Stmt::Import { specifiers, .. } => {
-                specifiers.is_empty() || specifiers.iter().any(|spec| self.is_live(spec.local))
+                specifiers.is_empty()
+                    || specifiers
+                        .iter()
+                        .any(|spec| self.is_live(spec.local) || self.is_build_factory_import(spec))
             }
             Stmt::Export { decl, .. } => match decl {
                 ExportDecl::Const { name, .. } | ExportDecl::Function { name, .. } => {
@@ -1411,11 +1525,11 @@ impl<'a> Emitter<'a> {
             Stmt::Const { name, .. }
             | Stmt::Let { name, .. }
             | Stmt::Function { name, .. }
-            | Stmt::Struct { name, .. }
-            | Stmt::Enum { name, .. }
             | Stmt::TypeAlias { name, .. }
-            | Stmt::Newtype { name, .. }
             | Stmt::Interface { name, .. } => self.is_live(name),
+            Stmt::Struct { name, .. } | Stmt::Enum { name, .. } | Stmt::Newtype { name, .. } => {
+                self.is_live(name) || self.build_factory_names.contains(*name)
+            }
             Stmt::ReceiverMethod {
                 receiver_type,
                 name,
@@ -1427,7 +1541,7 @@ impl<'a> Emitter<'a> {
                 if is_primitive_receiver(receiver_type) {
                     self.is_live(&format!("{name}${receiver_type}"))
                 } else {
-                    self.is_live(receiver_type)
+                    self.is_live(receiver_type) || self.build_factory_names.contains(*receiver_type)
                 }
             }
             Stmt::Expr { .. }
@@ -1462,6 +1576,37 @@ impl<'a> Emitter<'a> {
                 | Stmt::Break { .. }
                 | Stmt::Continue { .. }
         )
+    }
+
+    /// Return the runtime binding that implements a descriptor factory in
+    /// this module. Imports may rename it, so hydration uses the descriptor
+    /// name as its object key rather than relying on JavaScript shorthand.
+    fn build_factory_binding(&self, factory: &str) -> Option<&str> {
+        for stmt in self.program.statements.iter() {
+            match stmt {
+                Stmt::Struct { name, .. }
+                | Stmt::Enum { name, .. }
+                | Stmt::Newtype { name, .. }
+                    if *name == factory =>
+                {
+                    return Some(name);
+                }
+                Stmt::Import { specifiers, .. } => {
+                    if let Some(specifier) = specifiers
+                        .iter()
+                        .find(|specifier| specifier.imported == factory)
+                    {
+                        return Some(specifier.local);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    fn is_build_factory_import(&self, specifier: &deka_syntax::ImportSpec<'a>) -> bool {
+        self.build_factory_names.contains(specifier.imported)
     }
 
     // ------------------------------------------------------------------
@@ -1765,7 +1910,7 @@ impl<'a> Emitter<'a> {
         if self.uses_struct {
             let mut parts = crate::prelude::StructDemand::default();
             for struct_name in &self.struct_order {
-                if !self.is_live(struct_name) {
+                if !self.is_live(struct_name) && !self.build_factory_names.contains(struct_name) {
                     continue;
                 }
                 let methods = self.collect_methods_for_struct(struct_name, &mut HashSet::new());
@@ -2194,7 +2339,9 @@ impl<'a> Emitter<'a> {
                 } else {
                     let kept: Vec<_> = specifiers
                         .iter()
-                        .filter(|spec| self.is_live(spec.local))
+                        .filter(|spec| {
+                            self.is_live(spec.local) || self.is_build_factory_import(spec)
+                        })
                         .collect();
                     if kept.is_empty() {
                         return Ok(());
@@ -2461,7 +2608,7 @@ impl<'a> Emitter<'a> {
     fn emit_method_registrations(&mut self) -> Result<(), String> {
         let order = self.struct_order.clone();
         for struct_name in order {
-            if !self.is_live(&struct_name) {
+            if !self.is_live(&struct_name) && !self.build_factory_names.contains(&struct_name) {
                 continue;
             }
             let methods = self.collect_methods_for_struct(&struct_name, &mut HashSet::new());
@@ -2505,7 +2652,7 @@ impl<'a> Emitter<'a> {
             .newtypes
             .keys()
             .filter_map(|name| {
-                if !self.is_live(name) {
+                if !self.is_live(name) && !self.build_factory_names.contains(name) {
                     return None;
                 }
                 self.receiver_methods
@@ -3691,6 +3838,8 @@ impl<'a> Emitter<'a> {
                     jsx_optional_props: HashMap::new(),
                     enum_case_patterns: HashMap::new(),
                     union_type_patterns: HashMap::new(),
+                    build_blocks: HashMap::new(),
+                    build_factory_names: HashSet::new(),
                     unwrap_id: 0,
                     match_id: 0,
                     operator_rewrites: HashMap::new(),

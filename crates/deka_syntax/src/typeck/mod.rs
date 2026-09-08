@@ -24,9 +24,7 @@ mod expr;
 mod stmt;
 mod types;
 
-pub use descriptor::{
-    DescriptorField, DescriptorTree, JsonCall, JsonOperation, StaticTypeCall,
-};
+pub use descriptor::{DescriptorField, DescriptorTree, JsonCall, JsonOperation, StaticTypeCall};
 pub use types::{
     ArrayAccess, NewtypeSide, NumberMath, OperatorRewrite, Type, UnionMemberTest, UnwrapKind,
 };
@@ -100,6 +98,15 @@ pub struct TypeckResult<'a> {
     /// Constructor patterns that are union member type-patterns (`string(s)`),
     /// mapped to the runtime predicate the emitter must emit (rfd#42).
     pub union_type_patterns: HashMap<*const ast::Pattern<'a>, types::UnionMemberTest<'a>>,
+    /// Typed build-only expressions consumed by the compiler into a dev plan.
+    pub dev_blocks: HashMap<*const ast::Expr<'a>, DevBlock<'a>>,
+}
+
+/// Compiler-owned information for one `build { ... }` initializer.
+#[derive(Debug, Clone)]
+pub struct DevBlock<'a> {
+    pub body: &'a [ast::Stmt<'a>],
+    pub descriptor: descriptor::DescriptorTree<'a>,
 }
 
 /// The `Option` materialisation for one JSX element.
@@ -214,6 +221,7 @@ pub fn check_program_with_imports<'a>(
         jsx_optional_props: checker.jsx_optional_props,
         enum_case_patterns: checker.enum_case_patterns,
         union_type_patterns: checker.union_type_patterns,
+        dev_blocks: checker.dev_blocks,
     }
 }
 
@@ -246,7 +254,12 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
     for stmt in program.statements.iter() {
         match stmt {
             ast::Stmt::Struct {
-                name, fields, embeds, type_params, is_super, ..
+                name,
+                fields,
+                embeds,
+                type_params,
+                is_super,
+                ..
             } => {
                 declared_structs.insert(
                     *name,
@@ -325,11 +338,7 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
         let mut worklist: Vec<&'a str> = marked.iter().cloned().collect();
         while let Some(name) = worklist.pop() {
             let member_types: Vec<&'a ast::Type<'a>> = match declared_structs.get(name) {
-                Some(info) => info
-                    .fields
-                    .iter()
-                    .map(|f| &f.ty)
-                    .collect(),
+                Some(info) => info.fields.iter().map(|f| &f.ty).collect(),
                 None => match declared_enums.get(name) {
                     Some(info) => info
                         .cases
@@ -341,7 +350,14 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
             };
             let mut refs = Vec::new();
             for ty in member_types {
-                export_type_ast_refs(ty, &declared_aliases, &declared_structs, &declared_enums, &mut refs, 0);
+                export_type_ast_refs(
+                    ty,
+                    &declared_aliases,
+                    &declared_structs,
+                    &declared_enums,
+                    &mut refs,
+                    0,
+                );
             }
             for referenced in refs {
                 if marked.insert(referenced) {
@@ -848,6 +864,8 @@ struct Checker<'a> {
     /// Union member type-pattern sites to lower, keyed by pattern pointer
     /// (rfd#42, deka#530).
     union_type_patterns: HashMap<*const ast::Pattern<'a>, types::UnionMemberTest<'a>>,
+    /// `build { ... }` bodies and type descriptors keyed by expression pointer.
+    dev_blocks: HashMap<*const ast::Expr<'a>, DevBlock<'a>>,
     /// Local scopes. The first scope is the top-level scope.
     scopes: Vec<HashMap<&'a str, Type<'a>>>,
     /// Bindings that were introduced with `let` and may be reassigned.
@@ -901,6 +919,7 @@ impl<'a> Checker<'a> {
             jsx_optional_props: HashMap::new(),
             enum_case_patterns: HashMap::new(),
             union_type_patterns: HashMap::new(),
+            dev_blocks: HashMap::new(),
             scopes: vec![HashMap::new()],
             mutables: vec![HashSet::new()],
             pending_module_bindings: HashSet::new(),
@@ -1634,10 +1653,10 @@ mod tests {
 
     #[test]
     fn match_option_number_passes() {
-        assert!(typeck(
-            "const o = Some(5); const x: number = match o { Some(n) => n, None => 0 };"
-        )
-        .is_empty());
+        assert!(
+            typeck("const o = Some(5); const x: number = match o { Some(n) => n, None => 0 };")
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1771,7 +1790,7 @@ mod tests {
     #[test]
     fn primitive_extension_wrong_receiver_names_both_types() {
         let errors = typeck(
-            "fn (s string) slugify() string { return s; } const n: number = 42; const bad: string = n.slugify();"
+            "fn (s string) slugify() string { return s; } const n: number = 42; const bad: string = n.slugify();",
         );
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(
@@ -1794,7 +1813,7 @@ mod tests {
     #[test]
     fn primitive_extension_wrong_arg_count_fails() {
         let errors = typeck(
-            "fn (s string) wrap(prefix: string) string { return prefix + s; } const w: string = \"x\".wrap();"
+            "fn (s string) wrap(prefix: string) string { return prefix + s; } const w: string = \"x\".wrap();",
         );
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(errors[0].message.contains("wrap"), "{}", errors[0].message);
@@ -1837,14 +1856,22 @@ mod tests {
         let errors = typeck("struct User { id: number }\nconst t = User.type();");
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(errors[0].message.contains("User"), "{}", errors[0].message);
-        assert!(errors[0].message.contains("super struct"), "{}", errors[0].message);
+        assert!(
+            errors[0].message.contains("super struct"),
+            "{}",
+            errors[0].message
+        );
     }
 
     #[test]
     fn super_type_on_plain_enum_fails_teaching_super() {
         let errors = typeck("enum Status { Active }\nconst t = Status.type();");
         assert_eq!(errors.len(), 1, "{errors:?}");
-        assert!(errors[0].message.contains("super enum"), "{}", errors[0].message);
+        assert!(
+            errors[0].message.contains("super enum"),
+            "{}",
+            errors[0].message
+        );
     }
 
     #[test]
@@ -1853,21 +1880,34 @@ mod tests {
         // The unknown name is reported on both the object and callee paths;
         // what matters is it stays an unknown-identifier error, not a
         // super-specific one.
-        assert!(errors.iter().any(|e| e.message.contains("unknown identifier")), "{errors:?}");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("unknown identifier")),
+            "{errors:?}"
+        );
     }
 
     #[test]
     fn super_type_on_newtype_explains_the_limit() {
         let errors = typeck("type Cents number\nconst t = Cents.type();");
         assert_eq!(errors.len(), 1, "{errors:?}");
-        assert!(errors[0].message.contains("only available"), "{}", errors[0].message);
+        assert!(
+            errors[0].message.contains("only available"),
+            "{}",
+            errors[0].message
+        );
     }
 
     #[test]
     fn super_type_with_args_fails() {
         let errors = typeck("super struct User { id: number }\nconst t = User.type(1);");
         assert_eq!(errors.len(), 1, "{errors:?}");
-        assert!(errors[0].message.contains("no arguments"), "{}", errors[0].message);
+        assert!(
+            errors[0].message.contains("no arguments"),
+            "{}",
+            errors[0].message
+        );
     }
 
     #[test]
@@ -1913,14 +1953,25 @@ mod tests {
         // the declaration and the field, even with no `.type()` call.
         let errors = typeck("super struct S { f: fn(number) number }");
         assert_eq!(errors.len(), 1, "{errors:?}");
-        assert!(errors[0].message.contains("cannot carry runtime type information"), "{}", errors[0].message);
-        assert!(errors[0].message.contains("field `f`"), "{}", errors[0].message);
+        assert!(
+            errors[0]
+                .message
+                .contains("cannot carry runtime type information"),
+            "{}",
+            errors[0].message
+        );
+        assert!(
+            errors[0].message.contains("field `f`"),
+            "{}",
+            errors[0].message
+        );
     }
 
     #[test]
     fn super_type_through_alias_resolves_to_decl() {
         let arena = Bump::new();
-        let source = "super struct User { id: number }\nalias Alias = User\nconst t = Alias.type();";
+        let source =
+            "super struct User { id: number }\nalias Alias = User\nconst t = Alias.type();";
         let result = parse(source, &arena);
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         let program = result.program.expect("parse produced no program");
@@ -1931,7 +1982,9 @@ mod tests {
 
     #[test]
     fn super_enum_type_call_passes() {
-        assert!(typeck("super enum Status { Active, Archived }\nconst t = Status.type();").is_empty());
+        assert!(
+            typeck("super enum Status { Active, Archived }\nconst t = Status.type();").is_empty()
+        );
     }
 
     #[test]
@@ -1961,14 +2014,16 @@ mod tests {
         assert!(typeck("const n: number = 1; const t: Type = n.getType();").is_empty());
         assert!(typeck("const b: boolean = true; const t: Type = b.getType();").is_empty());
         assert!(typeck("struct Point { x: number } const p: Point = Point { x: 1 }; const t: Type = p.getType();").is_empty());
-        assert!(typeck(
-            "type Cents number; const c: Cents = Cents(5); const t: Type = c.getType();"
-        )
-        .is_empty());
-        assert!(typeck(
-            "enum Color { Red, Green } const c: Color = Color.Red; const t: Type = c.getType();"
-        )
-        .is_empty());
+        assert!(
+            typeck("type Cents number; const c: Cents = Cents(5); const t: Type = c.getType();")
+                .is_empty()
+        );
+        assert!(
+            typeck(
+                "enum Color { Red, Green } const c: Color = Color.Red; const t: Type = c.getType();"
+            )
+            .is_empty()
+        );
         assert!(typeck("const t: Type = [1, 2].getType();").is_empty());
         assert!(typeck("const t: Type = Some(1).getType();").is_empty());
         assert!(
@@ -2001,10 +2056,12 @@ mod tests {
 
     #[test]
     fn signature_describes_interface_declaration() {
-        assert!(typeck(
-            "interface Named { name: string } fn f(v: Named) Type { return v.signature(); }"
-        )
-        .is_empty());
+        assert!(
+            typeck(
+                "interface Named { name: string } fn f(v: Named) Type { return v.signature(); }"
+            )
+            .is_empty()
+        );
     }
 
     #[test]
@@ -2106,13 +2163,26 @@ mod tests {
         let program = result.program.expect("parse produced no program");
         let checked = check_program(&program, source);
         assert!(checked.errors.is_empty(), "{:?}", checked.errors);
-        assert_eq!(checked.array_builtin_calls.len(), 2, "{:?}", checked.array_builtin_calls);
         assert_eq!(
-            checked.array_builtin_calls.values().filter(|k| matches!(k, ArrayAccess::Pop)).count(),
+            checked.array_builtin_calls.len(),
+            2,
+            "{:?}",
+            checked.array_builtin_calls
+        );
+        assert_eq!(
+            checked
+                .array_builtin_calls
+                .values()
+                .filter(|k| matches!(k, ArrayAccess::Pop))
+                .count(),
             1
         );
         assert_eq!(
-            checked.array_builtin_calls.values().filter(|k| matches!(k, ArrayAccess::Shift)).count(),
+            checked
+                .array_builtin_calls
+                .values()
+                .filter(|k| matches!(k, ArrayAccess::Shift))
+                .count(),
             1
         );
     }
@@ -2256,7 +2326,9 @@ mod tests {
                     matches!(**inner, Type::Named { name: "number" }),
                     "{name}: partial arm must return Option<number>"
                 ),
-                ref other => panic!("{name}: partial arm must return Option<number>, got {other:?}"),
+                ref other => {
+                    panic!("{name}: partial arm must return Option<number>, got {other:?}")
+                }
             }
         }
 
@@ -2342,10 +2414,12 @@ mod tests {
     fn gettype_interface_member_shadows_builtin() {
         // An interface declaring `getType` dispatches dynamically, as with
         // any declared member.
-        assert!(typeck(
-            "interface Has { fn getType() string } fn f(v: Has) string { return v.getType(); }"
-        )
-        .is_empty());
+        assert!(
+            typeck(
+                "interface Has { fn getType() string } fn f(v: Has) string { return v.getType(); }"
+            )
+            .is_empty()
+        );
     }
 
     #[test]
@@ -2367,7 +2441,7 @@ mod tests {
     #[test]
     fn primitive_extension_wrong_arg_type_fails() {
         let errors = typeck(
-            "fn (s string) repeat(n: number) string { return s; } const r: string = \"x\".repeat(\"three\");"
+            "fn (s string) repeat(n: number) string { return s; } const r: string = \"x\".repeat(\"three\");",
         );
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(
@@ -2401,7 +2475,7 @@ mod tests {
     #[test]
     fn primitive_extension_duplicate_fails() {
         let errors = typeck(
-            "fn (s string) slugify() string { return s; } fn (s string) slugify() string { return s; }"
+            "fn (s string) slugify() string { return s; } fn (s string) slugify() string { return s; }",
         );
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(
@@ -2430,10 +2504,12 @@ mod tests {
             "fn (s string) toUpperCase() string { return s; } const u: string = \"x\".toUpperCase();"
         ).is_empty());
         // ...while the builtin property `length` is untouched.
-        assert!(typeck(
-            "fn (s string) slugify() string { return s; } const n: number = \"abc\".length;"
-        )
-        .is_empty());
+        assert!(
+            typeck(
+                "fn (s string) slugify() string { return s; } const n: number = \"abc\".length;"
+            )
+            .is_empty()
+        );
     }
 
     #[test]
@@ -2637,10 +2713,12 @@ mod tests {
 
     #[test]
     fn return_on_both_branches_passes() {
-        assert!(typeck(
-            "fn both(x: number) string { if (x > 0) { return \"y\" } else { return \"n\" } }"
-        )
-        .is_empty());
+        assert!(
+            typeck(
+                "fn both(x: number) string { if (x > 0) { return \"y\" } else { return \"n\" } }"
+            )
+            .is_empty()
+        );
     }
 
     #[test]
@@ -2748,10 +2826,12 @@ mod tests {
 
     #[test]
     fn for_loop_break_continue_passes() {
-        assert!(typeck(
-            "for (let i = 0; i < 10; i = i + 1) { if (i == 5) { break } else { continue } }"
-        )
-        .is_empty());
+        assert!(
+            typeck(
+                "for (let i = 0; i < 10; i = i + 1) { if (i == 5) { break } else { continue } }"
+            )
+            .is_empty()
+        );
     }
 
     #[test]
@@ -2843,18 +2923,20 @@ mod tests {
 
     #[test]
     fn async_function_passes() {
-        assert!(typeck(
-            "async fn value() Promise<number> { return 1 } const p: Promise<number> = value();"
-        )
-        .is_empty());
+        assert!(
+            typeck(
+                "async fn value() Promise<number> { return 1 } const p: Promise<number> = value();"
+            )
+            .is_empty()
+        );
     }
 
     #[test]
     fn top_level_await_passes() {
-        assert!(typeck(
-            "async fn main() Promise<number> { return 1 } const n: number = await main();"
-        )
-        .is_empty());
+        assert!(
+            typeck("async fn main() Promise<number> { return 1 } const n: number = await main();")
+                .is_empty()
+        );
     }
 
     #[test]
@@ -2959,9 +3041,7 @@ mod tests {
 
     #[test]
     fn union_to_union_diagnostic_has_no_narrowing_hint() {
-        let errors = typeck(
-            "const x: string | number = 1; const y: string | boolean = x;",
-        );
+        let errors = typeck("const x: string | number = 1; const y: string | boolean = x;");
         assert_eq!(errors.len(), 1, "{:?}", errors);
         assert!(!errors[0].message.contains("narrow it with a match"));
     }

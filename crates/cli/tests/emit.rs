@@ -42,6 +42,7 @@ fn help_and_version_still_work_without_emitting() {
         text.contains("transpile"),
         "missing transpile in help: {text}"
     );
+    assert!(text.contains("plan"), "missing plan in help: {text}");
 
     let version = Command::new(cli_bin())
         .arg("--version")
@@ -52,6 +53,35 @@ fn help_and_version_still_work_without_emitting() {
     assert!(
         text.contains("dsc [version"),
         "unexpected version output: {text}"
+    );
+}
+
+#[test]
+fn plan_prints_dev_slots_without_executing_them() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    write(
+        &root.join("main.ds"),
+        "import { load } from \"./dev-data.ds\"\nconst labels: Array<string> = build { return Ok(load()) }\n",
+    );
+    write(
+        &root.join("dev-data.ds"),
+        "export fn load() Array<string> { return [\"Ada\"] }\n",
+    );
+
+    let output = run_in(root, &["plan", "main.ds"]);
+    assert!(output.status.success(), "{}", combined(&output));
+    let plan: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("plan must be JSON");
+    assert_eq!(plan["version"], 1);
+    assert_eq!(plan["slots"].as_array().map(Vec::len), Some(1));
+    assert_eq!(plan["slots"][0]["binding"], "labels");
+    assert_eq!(plan["slots"][0]["descriptor"]["node"], "array");
+    assert!(
+        plan["slots"][0]["entry"]
+            .as_str()
+            .is_some_and(|entry| entry.contains("./dev-data.js")),
+        "dev entry did not use the emitted peer module: {plan}"
     );
 }
 
@@ -253,10 +283,15 @@ fn installed_package_without_lock_entry_hard_fails() {
     assert!(!output.status.success(), "{}", combined(&output));
     let text = combined(&output);
     assert!(
-        text.contains("deka.lock") && text.contains("deka install") && text.contains("deka add json"),
+        text.contains("deka.lock")
+            && text.contains("deka install")
+            && text.contains("deka add json"),
         "missing lock-entry guidance: {text}"
     );
-    assert!(!root.join("deka.lock").exists(), "dsc must not write deka.lock");
+    assert!(
+        !root.join("deka.lock").exists(),
+        "dsc must not write deka.lock"
+    );
     assert!(!root.join("dist/app/main.js").exists());
 }
 
@@ -275,7 +310,9 @@ fn lock_entry_without_ds_modules_hard_fails() {
     assert!(!output.status.success(), "{}", combined(&output));
     let text = combined(&output);
     assert!(
-        text.contains("ds_modules") && text.contains("deka install") && text.contains("deka add json"),
+        text.contains("ds_modules")
+            && text.contains("deka install")
+            && text.contains("deka add json"),
         "missing ds_modules guidance: {text}"
     );
     assert!(!root.join("dist/app/main.js").exists());

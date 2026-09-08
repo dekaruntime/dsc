@@ -160,10 +160,7 @@ pub enum Stmt<'a> {
         span: Span,
     },
     /// `{ ... }` block statement introducing a new scope.
-    Block {
-        body: &'a [Stmt<'a>],
-        span: Span,
-    },
+    Block { body: &'a [Stmt<'a>], span: Span },
     /// An empty statement: just `;`.
     Empty { span: Span },
     /// `for (init; cond; step) { ... }`
@@ -183,13 +180,9 @@ pub enum Stmt<'a> {
         span: Span,
     },
     /// `break`
-    Break {
-        span: Span,
-    },
+    Break { span: Span },
     /// `continue`
-    Continue {
-        span: Span,
-    },
+    Continue { span: Span },
 }
 
 /// Primitive representation allowed for a newtype declaration.
@@ -427,6 +420,12 @@ pub enum Expr<'a> {
         result_type: Option<Type<'a>>,
         span: Span,
     },
+    /// Build-only DekaScript block. The parser retains its statements so the
+    /// compiler can typecheck and emit it separately from the runtime graph.
+    Build {
+        body: &'a [Stmt<'a>],
+        span: Span,
+    },
     Bridge {
         kind: &'a str,
         action: &'a str,
@@ -654,6 +653,7 @@ impl<'a> Expr<'a> {
             Expr::EnumConstructor { span, .. } => *span,
             Expr::Match { span, .. } => *span,
             Expr::Unsafe { span, .. } => *span,
+            Expr::Build { span, .. } => *span,
             Expr::Bridge { span, .. } => *span,
             Expr::Ternary { span, .. } => *span,
             Expr::Await { span, .. } => *span,

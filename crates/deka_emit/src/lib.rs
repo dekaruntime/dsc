@@ -10,8 +10,8 @@ pub mod prelude;
 mod util;
 
 pub use emit::{
-    ModuleEmit, css_scope_hash, emit_js, emit_js_module_with_options, emit_js_with_imports,
-    emit_js_with_options,
+    ModuleEmit, css_scope_hash, dev_slot_id, dev_uses_name, emit_dev_entry, emit_js,
+    emit_js_module_with_options, emit_js_with_imports, emit_js_with_options,
 };
 
 #[cfg(test)]
@@ -323,7 +323,9 @@ mod tests {
     /// embeds loop.
     #[test]
     fn emit_struct_helper_omits_undemanded_members() {
-        let out = parse_and_emit("struct Point { x: number; y: number }\nconst p = Point { x: 1, y: 2 };\nconst n = p.x;");
+        let out = parse_and_emit(
+            "struct Point { x: number; y: number }\nconst p = Point { x: 1, y: 2 };\nconst n = p.x;",
+        );
         assert!(out.contains("function __deka_struct"), "got: {}", out);
         assert!(!out.contains("implMut"), "got: {}", out);
         assert!(!out.contains("f.impl="), "got: {}", out);
@@ -426,7 +428,8 @@ mod tests {
 
     #[test]
     fn emit_array_object_index() {
-        let out = parse_and_emit("const a = [1, 2, 3]; const o = { x: 1 }; const v = a[0] + o[\"x\"];");
+        let out =
+            parse_and_emit("const a = [1, 2, 3]; const o = { x: 1 }; const v = a[0] + o[\"x\"];");
         // deka#590 step 2: const literals are no longer frozen at emit; the
         // checker (deka#591) rejects mutation of a const-bound collection.
         assert!(out.contains("const a = [1, 2, 3];"), "got: {}", out);
@@ -1028,7 +1031,8 @@ mod tests {
     fn emit_number_math_total_rewrite() {
         // JS numbers have no `floor`/`max`; verbatim passthrough would be a
         // runtime lie, so the call rewrites to a plain `Math.*` expression.
-        let out = parse_check_and_emit("const f: number = (3.7).floor();\nconst m: number = (1).max(2);");
+        let out =
+            parse_check_and_emit("const f: number = (3.7).floor();\nconst m: number = (1).max(2);");
         assert!(out.contains("Math.floor((3.7))"), "got: {}", out);
         assert!(out.contains("Math.max((1), 2)"), "got: {}", out);
         // Total calls produce no `Option`, so the enum prelude is not forced.
@@ -1452,14 +1456,28 @@ mod tests {
         let typeck = deka_syntax::typeck::check_program(&program, source);
         assert!(typeck.errors.is_empty(), "{:?}", typeck.errors);
         let live: std::collections::HashSet<String> = ["main".to_string()].into_iter().collect();
-        let out = emit_js_with_options(&program, source, &std::collections::HashMap::new(), None,
-            &typeck.unwrap_calls, &typeck.operator_rewrites, &typeck.method_calls,
-            &typeck.type_of_calls, &typeck.signature_calls, &typeck.json_calls,
+        let out = emit_js_with_options(
+            &program,
+            source,
+            &std::collections::HashMap::new(),
+            None,
+            &typeck.unwrap_calls,
+            &typeck.operator_rewrites,
+            &typeck.method_calls,
+            &typeck.type_of_calls,
+            &typeck.signature_calls,
+            &typeck.json_calls,
             &typeck.array_builtin_calls,
             &typeck.number_math_calls,
-            &typeck.static_type_calls, &typeck.super_trees,
-            &typeck.jsx_optional_props, &typeck.enum_case_patterns,
-            &typeck.union_type_patterns, "module.ds", Some(&live)).expect("emit failed");
+            &typeck.static_type_calls,
+            &typeck.super_trees,
+            &typeck.jsx_optional_props,
+            &typeck.enum_case_patterns,
+            &typeck.union_type_patterns,
+            "module.ds",
+            Some(&live),
+        )
+        .expect("emit failed");
         assert!(!out.contains("kind: \"union\""), "got: {}", out);
     }
 

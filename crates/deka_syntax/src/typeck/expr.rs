@@ -4,8 +4,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast;
 
-use super::types::Type;
 use super::Checker;
+use super::types::Type;
 
 fn is_panic_callee(callee: &ast::Expr<'_>) -> bool {
     match callee {
@@ -363,8 +363,7 @@ pub(super) fn primitive_member<'a>(
 /// so they live in `NUMBER_MATH_PARTIAL`. `max`/`min` are handled
 /// separately because they take one argument.
 pub(super) const NUMBER_MATH_TOTAL: &[&str] = &[
-    "abs", "ceil", "floor", "round", "trunc", "sign", "cbrt", "exp", "atan", "sinh", "cosh",
-    "tanh",
+    "abs", "ceil", "floor", "round", "trunc", "sign", "cbrt", "exp", "atan", "sinh", "cosh", "tanh",
 ];
 
 /// Partial `Math` functions: some inputs make JavaScript produce `NaN`, so
@@ -581,7 +580,16 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            ast::Expr::Bridge { kind, action, args, .. } => {
+            ast::Expr::Build { .. } => {
+                self.error_at_expr(
+                    expr,
+                    "`build` is only valid as the initializer of a module-level explicitly typed `const`",
+                );
+                Type::Error
+            }
+            ast::Expr::Bridge {
+                kind, action, args, ..
+            } => {
                 // Host bridge calls are validated by the runtime catalog. The
                 // result shape is always Result<T, E>; async ops (deka#578)
                 // resolve through a Promise, so `await bridge fs.read_file(p)`
@@ -1553,7 +1561,9 @@ impl<'a> Checker<'a> {
                         self.error_at_expr(
                             &arm.body,
                             super::with_union_narrowing_hint(
-                                format!("match arm has type `{arm_type}`, expected type `{expected}`"),
+                                format!(
+                                    "match arm has type `{arm_type}`, expected type `{expected}`"
+                                ),
                                 expected,
                                 &arm_type,
                             ),
@@ -2393,13 +2403,7 @@ impl<'a> Checker<'a> {
                         let object_type = self.check_expr(object);
                         let field_mutable = self.field_is_mutable(&object_type, field);
                         if !self.is_mutable_expr(object) && !field_mutable {
-                            self.error_at_expr(
-                                left,
-                                self.immutable_field_message(
-                                    object,
-                                    field,
-                                ),
-                            );
+                            self.error_at_expr(left, self.immutable_field_message(object, field));
                         }
                     }
                     _ => {
@@ -2503,7 +2507,9 @@ impl<'a> Checker<'a> {
                 Mul | Mod => {
                     self.error_span(
                         span,
-                        format!("cannot multiply or modulo two `{name}` values; use the payload instead"),
+                        format!(
+                            "cannot multiply or modulo two `{name}` values; use the payload instead"
+                        ),
                     );
                     return Some(Type::Error);
                 }
@@ -2743,7 +2749,9 @@ impl<'a> Checker<'a> {
                         self.error_at_expr(
                             arg,
                             super::with_union_narrowing_hint(
-                                format!("expected argument type `{expected}`, found type `{arg_type}`"),
+                                format!(
+                                    "expected argument type `{expected}`, found type `{arg_type}`"
+                                ),
                                 expected,
                                 &arg_type,
                             ),
@@ -3552,7 +3560,8 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|p| unsolved_params_to_var(&substitute_type(p, &subst), &subst))
                     .collect();
-                let substituted_ret = unsolved_params_to_var(&substitute_type(&ret, &subst), &subst);
+                let substituted_ret =
+                    unsolved_params_to_var(&substitute_type(&ret, &subst), &subst);
 
                 let hole_positions: Vec<usize> = args
                     .iter()

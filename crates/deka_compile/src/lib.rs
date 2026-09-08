@@ -7,12 +7,13 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use bumpalo::Bump;
-use deka_emit::emit_js_module_with_options;
+use deka_emit::{dev_slot_id, emit_dev_entry, emit_js_module_with_options};
 use deka_syntax::typeck::Type;
 use deka_syntax::{
-    check_program_with_imports, parse, resolve_imported_enum_constructors, Diagnostic, Expr,
-    ModuleExports, Program, Stmt,
+    Diagnostic, Expr, ModuleExports, Program, Span, Stmt, check_program_with_imports, parse,
+    resolve_imported_enum_constructors,
 };
+use serde::Serialize;
 
 /// Bare specifiers that are treated as stdlib modules in the single-file WASM
 /// compiler path. Imports from these modules are accepted with `Type::Infer`
@@ -324,10 +325,13 @@ pub fn parse_source_module_meta(source: &str) -> SourceModuleMeta {
                     if let Some(source) = source {
                         imports.push(ImportDecl {
                             path: source.to_string(),
-                            specs: names.iter().map(|name| ImportSpec {
-                                name: name.name.to_string(),
-                                alias: name.alias.map(str::to_string),
-                            }).collect(),
+                            specs: names
+                                .iter()
+                                .map(|name| ImportSpec {
+                                    name: name.name.to_string(),
+                                    alias: name.alias.map(str::to_string),
+                                })
+                                .collect(),
                         });
                     }
                 }
@@ -348,6 +352,30 @@ pub struct CompileResult {
     /// [`CompileOptions::detached_prelude`]). Always populated; only
     /// meaningful when the prelude was detached.
     pub demand: deka_emit::prelude::PreludeDemand,
+    /// Build-only entries and descriptors. This is a compiler artifact only:
+    /// Dsc produces it but never executes the entries.
+    pub dev_plan: DevPlan,
+}
+
+/// Versioned compiler-to-host contract for build-only values.
+#[derive(Debug, Default, Serialize)]
+pub struct DevPlan {
+    pub version: u32,
+    pub slots: Vec<DevPlanSlot>,
+}
+
+/// One materialization request in a [`DevPlan`].
+#[derive(Debug, Serialize)]
+pub struct DevPlanSlot {
+    pub id: String,
+    pub binding: String,
+    pub file: String,
+    pub span: Span,
+    /// Private type descriptor. Deka validates the returned `Ok(value)` from
+    /// this data rather than reimplementing DekaScript type walking.
+    pub descriptor: serde_json::Value,
+    /// Separate async ES module. It is not part of the runtime output graph.
+    pub entry: String,
 }
 
 /// Options controlling compiler emission and module resolution.
@@ -375,6 +403,83 @@ pub struct CompileOptions {
     /// Single-module compilation leaves this false: the module stays
     /// self-contained.
     pub detached_prelude: bool,
+}
+
+fn dev_binding<'a>(stmt: &'a Stmt<'a>) -> Option<(&'a str, &'a Expr<'a>)> {
+    match stmt {
+        Stmt::Const {
+            name,
+            value: value @ Expr::Build { .. },
+            ..
+        } => Some((name, value)),
+        Stmt::Export {
+            decl:
+                deka_syntax::ExportDecl::Const {
+                    name,
+                    value: value @ Expr::Build { .. },
+                    ..
+                },
+            ..
+        } => Some((name, value)),
+        _ => None,
+    }
+}
+
+fn build_dev_plan<'a>(
+    program: &'a Program<'a>,
+    source: &str,
+    imports: &HashMap<&str, &ModuleExports<'a>>,
+    typeck: &deka_syntax::typeck::TypeckResult<'a>,
+    file_path: &str,
+    module_base: Option<String>,
+) -> Result<DevPlan, Vec<Diagnostic>> {
+    let mut slots = Vec::new();
+    for stmt in program.statements {
+        let Some((binding, value)) = dev_binding(stmt) else {
+            continue;
+        };
+        let Some(info) = typeck.dev_blocks.get(&(value as *const Expr<'a>)) else {
+            return Err(vec![Diagnostic::error(
+                value.span().start.line,
+                value.span().start.column,
+                format!("internal compiler error: missing dev metadata for `{binding}`"),
+            )]);
+        };
+        let id = dev_slot_id(file_path, binding, value.span());
+        let entry = emit_dev_entry(
+            program,
+            source,
+            imports,
+            module_base.clone(),
+            typeck,
+            info.body,
+            &id,
+            file_path,
+        )
+        .map_err(|message| {
+            vec![Diagnostic::error(
+                value.span().start.line,
+                value.span().start.column,
+                message,
+            )]
+        })?;
+        let descriptor = serde_json::to_value(&info.descriptor).map_err(|error| {
+            vec![Diagnostic::error(
+                value.span().start.line,
+                value.span().start.column,
+                format!("failed to serialize dev descriptor: {error}"),
+            )]
+        })?;
+        slots.push(DevPlanSlot {
+            id,
+            binding: binding.to_string(),
+            file: file_path.to_string(),
+            span: value.span(),
+            descriptor,
+            entry,
+        });
+    }
+    Ok(DevPlan { version: 1, slots })
 }
 
 /// Compile a DekaScript source to JavaScript using the v2 pipeline.
@@ -548,6 +653,15 @@ pub fn compile_to_js_with_imports_and_options<'a>(
         return Err(typeck_result.errors);
     }
 
+    let dev_plan = build_dev_plan(
+        &program,
+        source,
+        imports,
+        &typeck_result,
+        file_path,
+        options.module_base.clone(),
+    )?;
+
     let emitted = emit_js_module_with_options(
         &program,
         source,
@@ -576,6 +690,7 @@ pub fn compile_to_js_with_imports_and_options<'a>(
         js: emitted.js,
         diagnostics: typeck_result.warnings,
         demand: emitted.demand,
+        dev_plan,
     })
 }
 
@@ -617,6 +732,121 @@ mod tests {
             result.js.contains("const x = 42;"),
             "expected emitted JS to contain 'const x = 42;', got:\n{}",
             result.js
+        );
+    }
+
+    #[test]
+    fn compile_dev_binding_emits_virtual_value_and_separate_entry() {
+        let source = r#"
+struct User { name: string }
+const users: Array<User> = build {
+  return Ok([User { name: "Ada" }])
+}
+const first = users[0]
+"#;
+        let result = compile_to_js(source, "app/users.ds").expect("dev binding compiles");
+        assert_eq!(result.dev_plan.version, 1);
+        assert_eq!(result.dev_plan.slots.len(), 1);
+        let slot = &result.dev_plan.slots[0];
+        assert_eq!(slot.binding, "users");
+        assert!(
+            result.js.contains(&format!("deka:dev/{}", slot.id)),
+            "{}",
+            result.js
+        );
+        assert!(
+            !result.js.contains("Ada"),
+            "runtime output leaked dev body:\n{}",
+            result.js
+        );
+        assert!(
+            slot.entry.contains("export default async function"),
+            "{}",
+            slot.entry
+        );
+        assert!(slot.entry.contains("Ada"), "{}", slot.entry);
+        assert_eq!(slot.descriptor["node"], "array");
+    }
+
+    #[test]
+    fn compile_dev_binding_requires_result_return() {
+        let source = r#"
+const labels: Array<string> = build {
+  return ["Ada"]
+}
+"#;
+        let errors = compile_to_js(source, "app/users.ds").expect_err("raw dev value is rejected");
+        assert!(
+            errors.iter().any(|error| error
+                .message
+                .contains("expected return type `Result<Array<string>, string>`")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn compile_dev_binding_requires_explicit_declared_type() {
+        let errors = compile_to_js(
+            "const labels = build { return Ok([\"Ada\"]) }",
+            "app/users.ds",
+        )
+        .expect_err("untyped dev binding is rejected");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message.contains("explicit declared type")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn build_is_keyword_and_dev_remains_an_identifier() {
+        let result = compile_to_js(
+            "const dev: string = \"local name\"\nconst value: string = build { return Ok(dev) }",
+            "app/users.ds",
+        )
+        .expect("build binding compiles");
+        assert_eq!(result.dev_plan.slots.len(), 1);
+        assert!(
+            result.js.contains("const dev = \"local name\""),
+            "{}",
+            result.js
+        );
+    }
+
+    #[test]
+    fn compile_dev_binding_keeps_dev_imports_out_of_runtime_output() {
+        let source = r#"
+import { load } from "./dev-data.ds"
+import { greeting } from "./runtime.ds"
+const users: Array<string> = build {
+  return Ok(load())
+}
+const message: string = greeting()
+"#;
+        let result = compile_to_js(source, "app/users.ds").expect("dev binding compiles");
+        let slot = result.dev_plan.slots.first().expect("one dev slot");
+        assert!(!result.js.contains("./dev-data.ds"), "{}", result.js);
+        assert!(result.js.contains("./runtime.ds"), "{}", result.js);
+        assert!(slot.entry.contains("./dev-data.js"), "{}", slot.entry);
+        assert!(!slot.entry.contains("./runtime.ds"), "{}", slot.entry);
+    }
+
+    #[test]
+    fn compile_dev_binding_requires_typed_module_const() {
+        let source = r#"
+fn load() string {
+  const value: string = build { return Ok("Ada") }
+  return value
+}
+"#;
+        let errors =
+            compile_to_js(source, "app/users.ds").expect_err("nested dev binding is rejected");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message.contains("module-level `const`")),
+            "{errors:?}"
         );
     }
 
@@ -674,7 +904,11 @@ mod tests {
             "got:\n{}",
             with_struct.js
         );
-        assert!(!with_struct.js.contains("v.__enum"), "got:\n{}", with_struct.js);
+        assert!(
+            !with_struct.js.contains("v.__enum"),
+            "got:\n{}",
+            with_struct.js
+        );
     }
 
     #[test]
@@ -731,12 +965,16 @@ mod tests {
         )
         .expect("compile should succeed");
         assert!(
-            result.js.contains("__deka_match_scrutinee_1?.__deka_struct === \"Point\""),
+            result
+                .js
+                .contains("__deka_match_scrutinee_1?.__deka_struct === \"Point\""),
             "got: {}",
             result.js
         );
         assert!(
-            result.js.contains("typeof __deka_match_scrutinee_1 === \"string\""),
+            result
+                .js
+                .contains("typeof __deka_match_scrutinee_1 === \"string\""),
             "got: {}",
             result.js
         );
@@ -760,8 +998,16 @@ mod tests {
             "test.ds",
         )
         .expect("compile should succeed");
-        assert!(result.js.contains("const Point = __deka_struct"), "got: {}", result.js);
-        assert!(result.js.contains("Point.impl(\"distance\""), "got: {}", result.js);
+        assert!(
+            result.js.contains("const Point = __deka_struct"),
+            "got: {}",
+            result.js
+        );
+        assert!(
+            result.js.contains("Point.impl(\"distance\""),
+            "got: {}",
+            result.js
+        );
         assert!(result.js.contains("p1.distance(p2)"), "got: {}", result.js);
     }
 
@@ -888,10 +1134,18 @@ mod tests {
         .expect("compile should succeed");
         // The importing module constructs through the imported binding — the
         // factory is declared once, in the declaring module.
-        assert!(result.js.contains("User({ id: 1, name: \"D\" })"), "got:\n{}", result.js);
+        assert!(
+            result.js.contains("User({ id: 1, name: \"D\" })"),
+            "got:\n{}",
+            result.js
+        );
         // getType() rewrites to the module-local tag read; the brand id is
         // the struct name, so cross-module identity is by value, not object.
-        assert!(result.js.contains("__deka_type_of(u)"), "got:\n{}", result.js);
+        assert!(
+            result.js.contains("__deka_type_of(u)"),
+            "got:\n{}",
+            result.js
+        );
         // The importing module must not re-instantiate the factory with its
         // own brand: it constructs through the imported `User` binding. (The
         // module-local `__deka_struct` HELPER is emitted per module by design,
@@ -921,7 +1175,11 @@ mod tests {
         let lib_program = lib_parse.program.unwrap();
         let lib_exports = collect_module_exports(&lib_program, &arena);
         assert!(
-            lib_exports.structs.get("User").map(|i| i.is_super).unwrap_or(false),
+            lib_exports
+                .structs
+                .get("User")
+                .map(|i| i.is_super)
+                .unwrap_or(false),
             "lib must export User as a super struct"
         );
 
@@ -935,7 +1193,11 @@ mod tests {
         // The importer references the descriptor const emitted for the super
         // group; a per-call-site structural literal would bloat N calls into
         // N copies and was the rejected design.
-        assert!(result.js.contains("__deka_super_desc$User"), "got:\n{}", result.js);
+        assert!(
+            result.js.contains("__deka_super_desc$User"),
+            "got:\n{}",
+            result.js
+        );
         // The factory stays declared once, in lib; the importer constructs
         // through the imported binding (same invariant as the baseline).
         assert!(
@@ -989,13 +1251,21 @@ mod tests {
         .expect("compile should succeed");
         // deka#590 step 2: const literals are no longer frozen at emit; the
         // checker (deka#591) rejects mutation of a const-bound collection.
-        assert!(result.js.contains("const a = [1, 2, 3];"), "got: {}", result.js);
+        assert!(
+            result.js.contains("const a = [1, 2, 3];"),
+            "got: {}",
+            result.js
+        );
         assert!(
             !result.js.contains("Object.freeze([1, 2, 3])"),
             "got: {}",
             result.js
         );
-        assert!(result.js.contains("const o = {x: 1};"), "got: {}", result.js);
+        assert!(
+            result.js.contains("const o = {x: 1};"),
+            "got: {}",
+            result.js
+        );
         assert!(
             !result.js.contains("Object.freeze({x: 1})"),
             "got: {}",
@@ -1053,9 +1323,23 @@ mod tests {
             "test.ds",
         )
         .expect("compile should succeed");
-        assert!(result.js.contains("const Legs = __deka_struct"), "got: {}", result.js);
-        assert!(result.js.contains("const Robot = __deka_struct(\"Robot\", { Legs: Legs })"), "got: {}", result.js);
-        assert!(result.js.contains("Legs.impl(\"move\""), "got: {}", result.js);
+        assert!(
+            result.js.contains("const Legs = __deka_struct"),
+            "got: {}",
+            result.js
+        );
+        assert!(
+            result
+                .js
+                .contains("const Robot = __deka_struct(\"Robot\", { Legs: Legs })"),
+            "got: {}",
+            result.js
+        );
+        assert!(
+            result.js.contains("Legs.impl(\"move\""),
+            "got: {}",
+            result.js
+        );
         assert!(result.js.contains("r.move()"), "got: {}", result.js);
     }
 

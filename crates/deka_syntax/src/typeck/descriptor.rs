@@ -18,23 +18,31 @@
 
 use std::collections::HashSet;
 
+use serde::Serialize;
+
 use crate::ast;
 
-use super::types::Type;
 use super::Checker;
+use super::types::Type;
 
 /// A fully-resolved static type descriptor.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "node", rename_all = "camelCase")]
 pub enum DescriptorTree<'a> {
     /// Scalar / marker node: `{kind, name}` with `kind` drawn from the same
     /// vocabulary `__deka_type_of` uses (`number`, `string`, `struct`, …).
-    Leaf { kind: &'a str, name: String },
+    Leaf {
+        kind: &'a str,
+        name: String,
+    },
     /// A reference back to a `super` declaration's own interned descriptor
     /// const (`__deka_super_desc$<Name>`), produced when a declaration's
     /// tree revisits a type already on the walk stack — i.e. a recursive
     /// type. Only the super-declaration path (which allows recursion) can
     /// produce these; `.signature()` keeps erroring on recursive types.
-    Recurse { name: &'a str },
+    Recurse {
+        name: &'a str,
+    },
     Struct {
         name: &'a str,
         fields: Vec<DescriptorField<'a>>,
@@ -62,7 +70,7 @@ pub enum DescriptorTree<'a> {
 }
 
 /// One struct field in a descriptor tree.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DescriptorField<'a> {
     pub name: &'a str,
     pub optional: bool,
@@ -78,7 +86,7 @@ pub fn collect_recurse_refs<'a>(tree: &DescriptorTree<'a>, out: &mut Vec<&'a str
             for field in fields.iter() {
                 collect_recurse_refs(&field.ty, out);
             }
-            }
+        }
         DescriptorTree::Enum { cases, .. } => {
             for (_, payload) in cases.iter() {
                 if let Some(payload) = payload {
@@ -426,7 +434,7 @@ impl<'a> Checker<'a> {
             None => {
                 return Err(format!(
                     "cannot describe type `{name}`: its shape is not visible here"
-                ))
+                ));
             }
         };
         let mut seen = HashSet::new();
@@ -470,7 +478,7 @@ impl<'a> Checker<'a> {
             None => {
                 return Err(format!(
                     "cannot describe type `{name}`: its shape is not visible here"
-                ))
+                ));
             }
         };
         let mut seen = HashSet::new();
@@ -612,7 +620,10 @@ impl<'a> Checker<'a> {
         for stmt in self.program.statements {
             match stmt {
                 ast::Stmt::Struct {
-                    name, is_super, span, ..
+                    name,
+                    is_super,
+                    span,
+                    ..
                 } => {
                     spans.insert(name, *span);
                     kinds.insert(name, "struct");
@@ -621,7 +632,10 @@ impl<'a> Checker<'a> {
                     }
                 }
                 ast::Stmt::Enum {
-                    name, is_super, span, ..
+                    name,
+                    is_super,
+                    span,
+                    ..
                 } => {
                     spans.insert(name, *span);
                     kinds.insert(name, "enum");

@@ -1,10 +1,10 @@
 //! Expression parsing (Pratt parser).
 
-use crate::ast::{alloc, alloc_slice, Expr, StructLiteralField, Type, UnOp};
+use crate::ast::{Expr, StructLiteralField, Type, UnOp, alloc, alloc_slice};
 use crate::lexer::TokenKind;
 
-use super::util::{infix_info, token_name};
 use super::Parser;
+use super::util::{infix_info, token_name};
 
 impl<'a> Parser<'a> {
     pub(super) fn parse_expression(&mut self) -> Option<Expr<'a>> {
@@ -95,12 +95,16 @@ impl<'a> Parser<'a> {
                 // Built-in prelude enum constructors: Some/Ok/Err take one payload.
                 if type_args.is_empty() {
                     if let Expr::Identifier { name, .. } = &left {
-                        if let Some((enum_name, _requires_payload)) = builtin_enum_constructor(name) {
+                        if let Some((enum_name, _requires_payload)) = builtin_enum_constructor(name)
+                        {
                             if args.len() == 1 {
                                 left = Expr::EnumConstructor {
                                     enum_name: self.bump_str(enum_name),
                                     case_name: name,
-                                    payload: Some(alloc(self.arena, args.into_iter().next().unwrap())),
+                                    payload: Some(alloc(
+                                        self.arena,
+                                        args.into_iter().next().unwrap(),
+                                    )),
                                     span,
                                 };
                                 continue;
@@ -351,6 +355,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Fn => self.parse_fn_expression(start, start_byte),
             TokenKind::Unsafe => self.parse_unsafe_expression(start, start_byte),
+            TokenKind::Build => self.parse_build_expression(start, start_byte),
             TokenKind::Bridge => self.parse_bridge_expression(start, start_byte),
             TokenKind::Lt => self.parse_jsx(start, start_byte),
             TokenKind::LBracket => {
@@ -512,6 +517,22 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// Parse a build-phase DekaScript block. `unsafe` is deliberately not
+    /// reused here: its body is raw JavaScript, whereas `build` retains a typed
+    /// DekaScript statement list for the compiler's separate build graph.
+    fn parse_build_expression(
+        &mut self,
+        start: crate::ast::Pos,
+        start_byte: usize,
+    ) -> Option<Expr<'a>> {
+        self.advance(); // `build`
+        let body = self.parse_block()?;
+        Some(Expr::Build {
+            body,
+            span: self.span_from(start, start_byte),
+        })
+    }
+
     /// Parse a host bridge expression: `bridge kind.action(arg1, arg2)`.
     fn parse_bridge_expression(
         &mut self,
@@ -608,7 +629,9 @@ impl<'a> Parser<'a> {
     fn expect_object_key(&mut self) -> Option<&'a str> {
         match self.current_kind() {
             kind if super::kind_is_name_capable(kind) => {
-                if kind != TokenKind::Identifier && self.tokens.get(self.pos + 1).map(|t| t.kind) != Some(TokenKind::Colon) {
+                if kind != TokenKind::Identifier
+                    && self.tokens.get(self.pos + 1).map(|t| t.kind) != Some(TokenKind::Colon)
+                {
                     self.error(format!(
                         "expected object key, found `{}`",
                         token_name(self.current_kind())

@@ -1,14 +1,14 @@
 //! Statement parsing.
 
 use crate::ast::{
-    alloc, alloc_slice, EnumCase, ExportDecl, Expr, ForInit, InterfaceMember, NewtypeRepr, Param,
-    Pos, Program, StructField, Stmt, TemplatePart, Type, TypeParam,
+    EnumCase, ExportDecl, Expr, ForInit, InterfaceMember, NewtypeRepr, Param, Pos, Program, Stmt,
+    StructField, TemplatePart, Type, TypeParam, alloc, alloc_slice,
 };
 use crate::diagnostics::Diagnostic;
 use crate::lexer::TokenKind;
 
-use super::util::token_name;
 use super::Parser;
+use super::util::token_name;
 
 /// User code cannot declare type parameters (deka#561). Generics stay in the
 /// compiler, reserved for the builtin containers. The diagnostic teaches the
@@ -73,7 +73,8 @@ impl<'a> Parser<'a> {
                 // `unwrap(x) or { … }` (deka#445). Recognised positionally so
                 // `unwrap` and `or` stay ordinary identifiers everywhere else.
                 if self.at_unwrap_binding() {
-                    return self.parse_unwrap_binding(name, ty, is_const, start, start_byte, in_block);
+                    return self
+                        .parse_unwrap_binding(name, ty, is_const, start, start_byte, in_block);
                 }
 
                 let value = self.parse_expression()?;
@@ -99,17 +100,22 @@ impl<'a> Parser<'a> {
 
             TokenKind::Fn => {
                 if in_block {
-                    self.error("function declarations are only allowed at the top level in DekaScript");
+                    self.error(
+                        "function declarations are only allowed at the top level in DekaScript",
+                    );
                     return None;
                 }
                 self.parse_fn_statement(start, start_byte)
             }
 
             TokenKind::Async => {
-                let next_is_fn = self.tokens.get(self.pos + 1).map(|t| t.kind) == Some(TokenKind::Fn);
+                let next_is_fn =
+                    self.tokens.get(self.pos + 1).map(|t| t.kind) == Some(TokenKind::Fn);
                 if next_is_fn {
                     if in_block {
-                        self.error("function declarations are only allowed at the top level in DekaScript");
+                        self.error(
+                            "function declarations are only allowed at the top level in DekaScript",
+                        );
                         return None;
                     }
                     self.parse_fn_statement(start, start_byte)
@@ -174,7 +180,9 @@ impl<'a> Parser<'a> {
 
             TokenKind::Struct => {
                 if in_block {
-                    self.error("struct declarations are only allowed at the top level in DekaScript");
+                    self.error(
+                        "struct declarations are only allowed at the top level in DekaScript",
+                    );
                     return None;
                 }
                 self.parse_struct_statement(start, start_byte, false)
@@ -190,7 +198,9 @@ impl<'a> Parser<'a> {
 
             TokenKind::Interface => {
                 if in_block {
-                    self.error("interface declarations are only allowed at the top level in DekaScript");
+                    self.error(
+                        "interface declarations are only allowed at the top level in DekaScript",
+                    );
                     return None;
                 }
                 self.parse_interface_statement(start, start_byte)
@@ -422,7 +432,12 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_struct_statement(&mut self, start: Pos, start_byte: usize, is_super: bool) -> Option<Stmt<'a>> {
+    fn parse_struct_statement(
+        &mut self,
+        start: Pos,
+        start_byte: usize,
+        is_super: bool,
+    ) -> Option<Stmt<'a>> {
         self.advance(); // `struct`
 
         let name = self.expect_identifier()?;
@@ -483,7 +498,9 @@ impl<'a> Parser<'a> {
                 break;
             }
             if self.at(TokenKind::Comma) {
-                self.error("Missing semicolon: struct fields must be separated by ';' or a newline");
+                self.error(
+                    "Missing semicolon: struct fields must be separated by ';' or a newline",
+                );
                 return None;
             }
             if self.eat(TokenKind::Semicolon) {
@@ -517,7 +534,12 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_enum_statement(&mut self, start: Pos, start_byte: usize, is_super: bool) -> Option<Stmt<'a>> {
+    fn parse_enum_statement(
+        &mut self,
+        start: Pos,
+        start_byte: usize,
+        is_super: bool,
+    ) -> Option<Stmt<'a>> {
         self.advance(); // `enum`
 
         let name = self.expect_identifier()?;
@@ -905,13 +927,18 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::RBrace)?;
                 let source = if self.eat(TokenKind::From) {
                     if !self.at(TokenKind::String) {
-                        self.error(format!("expected module path string, found `{}`", token_name(self.current_kind())));
+                        self.error(format!(
+                            "expected module path string, found `{}`",
+                            token_name(self.current_kind())
+                        ));
                         return None;
                     }
                     let source = self.bump_str(self.current_text());
                     self.advance();
                     Some(source)
-                } else { None };
+                } else {
+                    None
+                };
                 self.expect_statement_end(false)?;
                 Some(Stmt::Export {
                     decl: crate::ast::ExportDecl::NamedGroup {
@@ -1093,9 +1120,9 @@ pub(crate) fn program_has_top_level_await(statements: &[Stmt<'_>]) -> bool {
 
 fn stmt_has_top_level_await(stmt: &Stmt<'_>) -> bool {
     match stmt {
-        Stmt::Const { value, .. }
-        | Stmt::Let { value, .. }
-        | Stmt::Expr { expr: value, .. } => expr_has_top_level_await(value),
+        Stmt::Const { value, .. } | Stmt::Let { value, .. } | Stmt::Expr { expr: value, .. } => {
+            expr_has_top_level_await(value)
+        }
         Stmt::UnwrapLet {
             scrutinee,
             alternative,
@@ -1111,7 +1138,9 @@ fn stmt_has_top_level_await(stmt: &Stmt<'_>) -> bool {
                     }
                 }
         }
-        Stmt::Return { value: Some(value), .. } => expr_has_top_level_await(value),
+        Stmt::Return {
+            value: Some(value), ..
+        } => expr_has_top_level_await(value),
         Stmt::Return { value: None, .. } => false,
         // Top-level function declarations are boundaries: await inside them is
         // not top-level await.
@@ -1142,8 +1171,9 @@ fn stmt_has_top_level_await(stmt: &Stmt<'_>) -> bool {
                 ForInit::Const { value, .. }
                 | ForInit::Let { value, .. }
                 | ForInit::Expr(value) => expr_has_top_level_await(value),
-            })
-                || condition.as_ref().map_or(false, |e| expr_has_top_level_await(e))
+            }) || condition
+                .as_ref()
+                .map_or(false, |e| expr_has_top_level_await(e))
                 || step.as_ref().map_or(false, |e| expr_has_top_level_await(e))
                 || body.iter().any(|s| stmt_has_top_level_await(s))
         }
@@ -1170,8 +1200,7 @@ fn expr_has_top_level_await(expr: &Expr<'_>) -> bool {
         }
         Expr::Unary { operand, .. } => expr_has_top_level_await(operand),
         Expr::Call { callee, args, .. } => {
-            expr_has_top_level_await(callee)
-                || args.iter().any(|a| expr_has_top_level_await(a))
+            expr_has_top_level_await(callee) || args.iter().any(|a| expr_has_top_level_await(a))
         }
         Expr::FieldAccess { object, .. }
         | Expr::IndexAccess { object, .. }
@@ -1180,10 +1209,12 @@ fn expr_has_top_level_await(expr: &Expr<'_>) -> bool {
         Expr::StructLiteral { fields, .. } => {
             fields.iter().any(|f| expr_has_top_level_await(&f.value))
         }
-        Expr::EnumConstructor { payload, .. } => {
-            payload.as_ref().map_or(false, |p| expr_has_top_level_await(p))
-        }
-        Expr::Match { scrutinee, arms, .. } => {
+        Expr::EnumConstructor { payload, .. } => payload
+            .as_ref()
+            .map_or(false, |p| expr_has_top_level_await(p)),
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
             expr_has_top_level_await(scrutinee)
                 || arms.iter().any(|arm| {
                     arm.guard
@@ -1202,17 +1233,15 @@ fn expr_has_top_level_await(expr: &Expr<'_>) -> bool {
                 || expr_has_top_level_await(then_branch)
                 || expr_has_top_level_await(else_branch)
         }
-        Expr::Array { elements, .. } => {
-            elements.iter().any(|e| expr_has_top_level_await(e))
-        }
-        Expr::Object { fields, .. } => {
-            fields.iter().any(|f| expr_has_top_level_await(&f.value))
-        }
+        Expr::Array { elements, .. } => elements.iter().any(|e| expr_has_top_level_await(e)),
+        Expr::Object { fields, .. } => fields.iter().any(|f| expr_has_top_level_await(&f.value)),
         Expr::TemplateLiteral { parts, .. } => parts.iter().any(|p| match p {
             TemplatePart::Text(_) => false,
             TemplatePart::Expr(e) => expr_has_top_level_await(e),
         }),
-        Expr::Unsafe { .. } | Expr::Bridge { .. } => false,
+        // A dev block has its own async entry; its awaits never make the
+        // surrounding runtime module top-level async.
+        Expr::Unsafe { .. } | Expr::Build { .. } | Expr::Bridge { .. } => false,
         Expr::JsxElement { element, .. } => {
             element.attributes.iter().any(|attr| {
                 attr.value
@@ -1220,9 +1249,7 @@ fn expr_has_top_level_await(expr: &Expr<'_>) -> bool {
                     .map_or(false, |v| expr_has_top_level_await(v))
             }) || element.children.iter().any(|c| expr_has_top_level_await(c))
         }
-        Expr::JsxFragment { children, .. } => {
-            children.iter().any(|c| expr_has_top_level_await(c))
-        }
+        Expr::JsxFragment { children, .. } => children.iter().any(|c| expr_has_top_level_await(c)),
         Expr::JsxText { .. }
         | Expr::Number { .. }
         | Expr::BigInt { .. }

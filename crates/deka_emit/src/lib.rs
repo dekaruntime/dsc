@@ -10,8 +10,9 @@ pub mod prelude;
 mod util;
 
 pub use emit::{
-    ModuleEmit, css_scope_hash, dev_slot_id, dev_uses_name, emit_dev_entry, emit_js,
-    emit_js_module_with_options, emit_js_with_imports, emit_js_with_options,
+    ModuleEmit, build_factory_names, css_scope_hash, dev_slot_id, dev_uses_name, emit_dev_entry,
+    emit_js, emit_js_module_with_options, emit_js_with_imports, emit_js_with_options,
+    live_dev_uses_name,
 };
 
 #[cfg(test)]
@@ -55,6 +56,7 @@ mod tests {
             &typeck.jsx_optional_props,
             &typeck.enum_case_patterns,
             &typeck.union_type_patterns,
+            &std::collections::HashSet::new(),
             "module.ds",
             None,
         )
@@ -1270,6 +1272,7 @@ mod tests {
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            &std::collections::HashSet::new(),
             "module.ds",
             None,
         )
@@ -1400,6 +1403,7 @@ mod tests {
             &typeck.jsx_optional_props,
             &typeck.enum_case_patterns,
             &typeck.union_type_patterns,
+            &std::collections::HashSet::new(),
             "module.ds",
             Some(&std::collections::HashSet::new()),
         )
@@ -1474,6 +1478,7 @@ mod tests {
             &typeck.jsx_optional_props,
             &typeck.enum_case_patterns,
             &typeck.union_type_patterns,
+            &std::collections::HashSet::new(),
             "module.ds",
             Some(&live),
         )

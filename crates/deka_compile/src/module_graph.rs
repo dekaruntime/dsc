@@ -523,6 +523,64 @@ pub fn compile_module_graph_with_options(
         );
     }
 
+    // ------------------------------------------------------------------
+    // Compiler-private build fragments (dsc#52). Each module's exported
+    // factories get a descriptor computed in the declaring module's own
+    // namespace — the only place private nested types are visible — so a
+    // consumer's build hydration can reach factories it has no lexical
+    // binding for. The per-module closure set (every factory named by those
+    // fragments) drives the private `__deka_factories` export decision.
+    // ------------------------------------------------------------------
+    let mut build_closures: HashMap<PathBuf, HashSet<String>> = HashMap::new();
+    for (path, program) in programs.iter() {
+        let module = modules.get(path).expect("module in graph");
+        let inferred = crate::infer_stdlib_imports_for_source(&module.source, &arena);
+        let mut combined: HashMap<&str, &deka_syntax::ModuleExports> = HashMap::new();
+        for (spec, dep) in module.dependencies.iter() {
+            if let Some(dep_exports) = exports.get(dep) {
+                combined.insert(spec.as_str(), dep_exports);
+            }
+        }
+        for (spec, dep_exports) in &inferred {
+            combined.insert(*spec, dep_exports);
+        }
+        let fragments = deka_syntax::build_module_build_fragments(program, &combined);
+        if fragments.is_empty() {
+            continue;
+        }
+        // Map declared names to the names this module exports them under
+        // (`export { User as Person }` stores the fragment under `Person`).
+        let mut export_names: HashMap<&str, &str> = HashMap::new();
+        for stmt in program.statements.iter() {
+            if let deka_syntax::Stmt::Export {
+                decl: deka_syntax::ExportDecl::NamedGroup { names, .. },
+                ..
+            } = stmt
+            {
+                for name in names.iter() {
+                    export_names.insert(name.name, name.alias.unwrap_or(name.name));
+                }
+            }
+        }
+        let mut closure_names = HashSet::new();
+        let module_exports = exports.get_mut(path).expect("module exports collected");
+        for (declared, tree) in fragments {
+            let Some(external) = export_names.get(declared) else {
+                continue;
+            };
+            if module_exports.structs.contains_key(external)
+                || module_exports.enums.contains_key(external)
+                || module_exports.newtypes.contains_key(external)
+            {
+                deka_emit::build_factory_names(&tree, &mut closure_names);
+                module_exports.build_fragments.insert(external, tree);
+            }
+        }
+        if !closure_names.is_empty() {
+            build_closures.insert(path.clone(), closure_names);
+        }
+    }
+
     // `collect_module_exports` can identify a re-export name, but the graph
     // must resolve that name through the barrel's import edge so downstream
     // modules receive the actual signature and runtime export metadata.
@@ -677,6 +735,7 @@ pub fn compile_module_graph_with_options(
     // its declared-type materializer. The runtime graph still needs that
     // exported factory even though ordinary expression liveness sees it only
     // inside `build { ... }`; retain the binding and its defining module.
+    let mut closure_needed: HashSet<PathBuf> = HashSet::new();
     let mut factory_queue: VecDeque<PathBuf> = plan.keep.iter().cloned().collect();
     while let Some(path) = factory_queue.pop_front() {
         let Some(program) = programs.get(&path) else {
@@ -702,7 +761,13 @@ pub fn compile_module_graph_with_options(
                 let is_factory = dep_exports.structs.contains_key(specifier.imported)
                     || dep_exports.enums.contains_key(specifier.imported)
                     || dep_exports.newtypes.contains_key(specifier.imported);
-                if !is_factory || !deka_emit::dev_uses_name(program, specifier.local) {
+                // A build entry can reference a factory from its body or only
+                // from its declared type — the latter is how private nested
+                // types reach hydration at all (dsc#52).
+                if !is_factory
+                    || !(deka_emit::dev_uses_name(program, specifier.local)
+                        || deka_emit::live_dev_uses_name(program, None, specifier.local))
+                {
                     continue;
                 }
                 match plan
@@ -727,6 +792,71 @@ pub fn compile_module_graph_with_options(
                 }
                 if plan.keep.insert(dep.clone()) {
                     factory_queue.push_back(dep.clone());
+                }
+                // Only a build binding that survived shaking may retain the
+                // dependency's compiler-private factory closure (dsc#52).
+                if deka_emit::live_dev_uses_name(
+                    program,
+                    plan.live.get(&path).cloned().flatten().as_ref(),
+                    specifier.local,
+                ) {
+                    closure_needed.insert(dep.clone());
+                }
+            }
+        }
+    }
+
+    // A module that emits the factory closure must keep every import the
+    // closure captures — e.g. a factory declared in a third module that an
+    // exported type references by import. Follow those edges and retain the
+    // defining modules; their own closures are not needed, only the bindings.
+    let mut closure_queue: VecDeque<PathBuf> = closure_needed.iter().cloned().collect();
+    while let Some(path) = closure_queue.pop_front() {
+        let Some(program) = programs.get(&path) else {
+            continue;
+        };
+        let Some(module) = modules.get(&path) else {
+            continue;
+        };
+        let Some(names) = build_closures.get(&path) else {
+            continue;
+        };
+        for stmt in program.statements.iter() {
+            let deka_syntax::Stmt::Import {
+                specifiers, source, ..
+            } = stmt
+            else {
+                continue;
+            };
+            let Some(dep) = module.dependencies.get(*source) else {
+                continue;
+            };
+            for specifier in specifiers.iter() {
+                if !names.contains(specifier.local) {
+                    continue;
+                }
+                match plan
+                    .live
+                    .entry(path.clone())
+                    .or_insert_with(|| Some(HashSet::new()))
+                {
+                    Some(live) => {
+                        live.insert(specifier.local.to_string());
+                    }
+                    None => {}
+                }
+                match plan
+                    .live
+                    .entry(dep.clone())
+                    .or_insert_with(|| Some(HashSet::new()))
+                {
+                    Some(live) => {
+                        live.insert(specifier.imported.to_string());
+                    }
+                    None => {}
+                }
+                if plan.keep.insert(dep.clone()) {
+                    closure_queue.push_back(dep.clone());
                 }
             }
         }
@@ -797,6 +927,13 @@ pub fn compile_module_graph_with_options(
             client: options.client,
             module_base: options.module_base.clone(),
             detached_prelude: true,
+            // The private factory closure is emitted only when a live consumer
+            // build reaches this module's factories (dsc#52).
+            build_closure_names: if closure_needed.contains(&path) {
+                build_closures.get(&path).cloned().unwrap_or_default()
+            } else {
+                HashSet::new()
+            },
             ..Default::default()
         };
         match compile_to_js_with_imports_and_options(
@@ -893,6 +1030,12 @@ fn copy_export<'a>(
     }
     if let Some(info) = source.newtypes.get(imported) {
         changed |= dest.newtypes.insert(external, info.clone()).is_none();
+    }
+    if let Some(tree) = source.build_fragments.get(imported) {
+        // Compiler-private descriptor fragments ride re-export chains so a
+        // barrel's consumers splice the declaring module's own namespace
+        // (dsc#52). Invisible to ordinary import validation.
+        changed |= dest.build_fragments.insert(external, tree.clone()).is_none();
     }
     for ((receiver, method), info) in &source.receiver_methods {
         if *receiver == imported {
@@ -1793,6 +1936,178 @@ mod tests {
             result.modules[&types].contains("User.impl(\"greet\""),
             "exported factory must retain receiver methods:\n{}",
             result.modules[&types]
+        );
+    }
+
+    #[test]
+    fn graph_build_closure_exposes_private_nested_struct_with_methods() {
+        let types = PathBuf::from("/project/types.ds");
+        let page = PathBuf::from("/project/page.ds");
+        let mut files = HashMap::new();
+        files.insert(
+            types.clone(),
+            "struct Profile { bio: string }\n\
+             fn (profile Profile) greet() string { return \"Hello \" + profile.bio }\n\
+             struct User { name: string; profile: Profile }\n\
+             export { User }\n\
+             export fn ada() User { return User { name: \"Ada\", profile: Profile { bio: \"engineer\" } } }"
+                .to_string(),
+        );
+        files.insert(
+            page.clone(),
+            "import { User, ada } from \"./types.ds\";\n\
+             const user: User = build { return Ok(ada()) }\n\
+             export fn Page() string { return user.profile.greet() }"
+                .to_string(),
+        );
+        let mut aliases = HashMap::new();
+        aliases.insert((page.clone(), "./types.ds".to_string()), types.clone());
+        let result = compile_module_graph(&page, &InMemoryLoader { files, aliases })
+            .expect("graph compiles");
+        let types_js = &result.modules[&types];
+        let page_js = &result.modules[&page];
+        assert!(
+            types_js.contains("const __deka_factories = () => ({Profile, User});"),
+            "the declaring module must close over its private factories:\n{types_js}"
+        );
+        assert!(
+            !types_js.contains("export { Profile"),
+            "the private struct must not leak into module exports:\n{types_js}"
+        );
+        assert!(
+            types_js
+                .find("Profile.impl(\"greet\"")
+                .zip(types_js.find("const __deka_factories"))
+                .is_some_and(|(method, closure)| method < closure),
+            "receiver methods must register before the closure captures the factory:\n{types_js}"
+        );
+        assert!(
+            page_js.contains(
+                "import { __deka_factories as __deka_factories_0 } from \"./types.ds\";"
+            ),
+            "the consumer must import the declaring module's factory closure:\n{page_js}"
+        );
+        assert!(
+            page_js.contains("{...__deka_factories_0(), User})"),
+            "build hydration must splice the closure fragments:\n{page_js}"
+        );
+        assert!(page_js.contains("user.profile.greet()"), "{page_js}");
+        assert!(
+            result.dev_plan.slots[0]
+                .descriptor
+                .to_string()
+                .contains("\"name\":\"Profile\",\"node\":\"struct\""),
+            "the build descriptor must carry the private struct node:\n{}",
+            result.dev_plan.slots[0].descriptor
+        );
+    }
+
+    #[test]
+    fn graph_build_closure_exposes_private_newtype_and_enum() {
+        let types = PathBuf::from("/project/types.ds");
+        let page = PathBuf::from("/project/page.ds");
+        let mut files = HashMap::new();
+        files.insert(
+            types.clone(),
+            "type Cents number\n\
+             fn (c Cents) tag() string { return \"cents\" }\n\
+             enum Status { Active, Inactive }\n\
+             struct Invoice { total: Cents; status: Status }\n\
+             export { Invoice }\n\
+             export fn inv() Invoice { return Invoice { total: Cents(5), status: Status.Active } }"
+                .to_string(),
+        );
+        files.insert(
+            page.clone(),
+            "import { Invoice, inv } from \"./types.ds\";\n\
+             const invoice: Invoice = build { return Ok(inv()) }\n\
+             export fn Page() string { return invoice.total.tag() }"
+                .to_string(),
+        );
+        let mut aliases = HashMap::new();
+        aliases.insert((page.clone(), "./types.ds".to_string()), types.clone());
+        let result = compile_module_graph(&page, &InMemoryLoader { files, aliases })
+            .expect("graph compiles");
+        let types_js = &result.modules[&types];
+        let page_js = &result.modules[&page];
+        let closure_names = types_js
+            .split("const __deka_factories = () => (")
+            .nth(1)
+            .and_then(|rest| rest.split("})").next())
+            .expect("factory closure must be emitted");
+        for name in ["Cents", "Invoice", "Status"] {
+            assert!(
+                closure_names.contains(name),
+                "factory closure must capture {name}:\n{types_js}"
+            );
+        }
+        assert!(
+            types_js.contains("Cents$proto.tag = function("),
+            "the private newtype must retain receiver methods:\n{types_js}"
+        );
+        assert!(
+            page_js.contains("{...__deka_factories_0(), Invoice})"),
+            "build hydration must splice the closure fragments:\n{page_js}"
+        );
+        let descriptor = result.dev_plan.slots[0].descriptor.to_string();
+        assert!(
+            descriptor.contains("\"name\":\"Cents\",\"node\":\"newtype\""),
+            "the build descriptor must carry the private newtype node:\n{descriptor}"
+        );
+        assert!(
+            descriptor.contains("\"name\":\"Status\",\"node\":\"enum\""),
+            "the build descriptor must carry the private enum node:\n{descriptor}"
+        );
+    }
+
+    #[test]
+    fn graph_shakes_build_closure_when_build_binding_is_dead() {
+        // The build binding lives in a non-entry module: entry modules seed
+        // every top-level statement as live (shake.rs), so only a dead
+        // binding in a dependency actually shakes away.
+        let types = PathBuf::from("/project/types.ds");
+        let page = PathBuf::from("/project/page.ds");
+        let main = PathBuf::from("/project/main.ds");
+        let mut files = HashMap::new();
+        files.insert(
+            types.clone(),
+            "struct Profile { bio: string }\n\
+             struct User { name: string; profile: Profile }\n\
+             export { User }\n\
+             export fn ada() User { return User { name: \"Ada\", profile: Profile { bio: \"engineer\" } } }"
+                .to_string(),
+        );
+        files.insert(
+            page.clone(),
+            "import { User, ada } from \"./types.ds\";\n\
+             const user: User = build { return Ok(ada()) }\n\
+             export fn Page() string { return ada().name }"
+                .to_string(),
+        );
+        files.insert(
+            main.clone(),
+            "import { Page } from \"./page.ds\";\n\
+             export fn Main() string { return Page() }"
+                .to_string(),
+        );
+        let mut aliases = HashMap::new();
+        aliases.insert((page.clone(), "./types.ds".to_string()), types.clone());
+        aliases.insert((main.clone(), "./page.ds".to_string()), page.clone());
+        let result = compile_module_graph(&main, &InMemoryLoader { files, aliases })
+            .expect("graph compiles");
+        let types_js = &result.modules[&types];
+        let page_js = &result.modules[&page];
+        assert!(
+            !page_js.contains("__deka_build"),
+            "a dead build binding must not hydrate:\n{page_js}"
+        );
+        assert!(
+            !page_js.contains("__deka_factories"),
+            "a dead build binding must not import the closure:\n{page_js}"
+        );
+        assert!(
+            !types_js.contains("__deka_factories"),
+            "no live consumer build means no factory closure:\n{types_js}"
         );
     }
 

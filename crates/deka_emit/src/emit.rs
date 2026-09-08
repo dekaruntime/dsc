@@ -61,7 +61,10 @@ fn dev_binding<'a>(stmt: &'a Stmt<'a>) -> Option<(&'a str, &'a Expr<'a>, bool)> 
     }
 }
 
-fn build_factory_names(
+/// Collect every named struct/newtype/enum factory a descriptor tree needs
+/// for build hydration. Shared with module-graph compilation, which derives
+/// a module's factory closure from its exported fragments (dsc#52).
+pub fn build_factory_names(
     tree: &deka_syntax::typeck::DescriptorTree<'_>,
     names: &mut HashSet<String>,
 ) {
@@ -171,20 +174,96 @@ pub fn dev_uses_name(program: &Program<'_>, target: &str) -> bool {
         let Some((_, Expr::Build { body, .. }, _)) = dev_binding(stmt) else {
             continue;
         };
-        for stmt in *body {
-            visit_stmt_exprs(stmt, &mut |expr| {
-                if matches!(expr, Expr::Identifier { name, .. } if *name == target)
-                    || matches!(expr, Expr::StructLiteral { name, .. } if *name == target)
-                    || matches!(expr, Expr::EnumConstructor { enum_name: name, .. } if *name == target)
-                    || matches!(expr, Expr::JsxElement { element, .. } if element.tag == target)
-                {
-                    used = true;
-                }
-            });
-        }
-        if used {
+        if build_body_uses_name(body, target) {
+            used = true;
             break;
         }
+    }
+    used
+}
+
+/// Like [`dev_uses_name`], but only counts build bindings that survived
+/// graph shaking. Module-graph compilation uses this to decide whether a
+/// dependency must emit its compiler-private factory closure (dsc#52): a
+/// shaken build binding must not retain the closure. A binding's declared
+/// type counts as usage: the build materializes that type even when the
+/// body never names it.
+pub fn live_dev_uses_name(
+    program: &Program<'_>,
+    live: Option<&HashSet<String>>,
+    target: &str,
+) -> bool {
+    for stmt in program.statements.iter() {
+        let Some((name, Expr::Build { body, .. }, _)) = dev_binding(stmt) else {
+            continue;
+        };
+        if live.is_some_and(|live| !live.contains(name)) {
+            continue;
+        }
+        if build_body_uses_name(body, target) || build_declares_name(stmt, target) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Whether a build binding's declared type annotation names `target`.
+fn build_declares_name(stmt: &Stmt<'_>, target: &str) -> bool {
+    let deka_syntax::Stmt::Const {
+        ty: Some(ty),
+        value: Expr::Build { .. },
+        ..
+    } = stmt
+    else {
+        return false;
+    };
+    let mut found = false;
+    fn visit(ty: &deka_syntax::Type<'_>, target: &str, found: &mut bool) {
+        match ty {
+            deka_syntax::Type::Named { name, .. } => {
+                if *name == target {
+                    *found = true;
+                }
+            }
+            deka_syntax::Type::Generic { base, args, .. } => {
+                if *base == target {
+                    *found = true;
+                }
+                for arg in args.iter() {
+                    visit(arg, target, found);
+                }
+            }
+            deka_syntax::Type::Function { params, ret, .. } => {
+                for param in params.iter() {
+                    visit(param, target, found);
+                }
+                visit(ret, target, found);
+            }
+            deka_syntax::Type::Option { inner, .. } => visit(inner, target, found),
+            deka_syntax::Type::Union { members, .. } => {
+                for member in members.iter() {
+                    visit(member, target, found);
+                }
+            }
+            _ => {}
+        }
+    }
+    visit(ty, target, &mut found);
+    found
+}
+
+fn build_body_uses_name(body: &[Stmt<'_>], target: &str) -> bool {
+    let mut used = false;
+    for stmt in body {
+        visit_stmt_exprs(stmt, &mut |expr| {
+            if matches!(expr, Expr::Identifier { name, .. } if *name == target)
+                || matches!(expr, Expr::StructLiteral { name, .. } if *name == target)
+                || matches!(expr, Expr::EnumConstructor { enum_name: name, .. } if *name == target)
+                || matches!(expr, Expr::JsxElement { element, .. } if element.tag == target)
+            {
+                used = true;
+            }
+        });
     }
     used
 }
@@ -209,6 +288,7 @@ pub fn emit_js(program: &Program, _source: &str) -> Result<String, String> {
         &HashMap::new(),
         &HashMap::new(),
         &HashMap::new(),
+        &HashSet::new(),
         "module.ds",
         None,
     )
@@ -247,6 +327,7 @@ pub fn emit_js_with_imports<'a>(
         &HashMap::new(),
         &HashMap::new(),
         &HashMap::new(),
+        &HashSet::new(),
         "module.ds",
         None,
     )
@@ -306,6 +387,9 @@ pub fn emit_js_with_options<'a>(
         *const deka_syntax::Pattern<'a>,
         deka_syntax::typeck::UnionMemberTest<'a>,
     >,
+    // Factories captured by this module's compiler-private
+    // `__deka_factories` closure for consumer build hydration (dsc#52).
+    build_closure_names: &HashSet<String>,
     file_path: &str,
     live_names: Option<&HashSet<String>>,
 ) -> Result<String, String> {
@@ -328,6 +412,7 @@ pub fn emit_js_with_options<'a>(
         enum_case_patterns,
         union_type_patterns,
         &HashMap::new(),
+        build_closure_names,
         file_path,
         live_names,
         false,
@@ -376,6 +461,10 @@ pub fn emit_js_module_with_options<'a>(
         deka_syntax::typeck::UnionMemberTest<'a>,
     >,
     build_blocks: &HashMap<*const Expr<'a>, deka_syntax::typeck::DevBlock<'a>>,
+    // Factories this module's compiler-private `__deka_factories` closure
+    // must capture for consumer build hydration (dsc#52). Empty disables the
+    // closure export entirely.
+    build_closure_names: &HashSet<String>,
     file_path: &str,
     live_names: Option<&HashSet<String>>,
     detached: bool,
@@ -402,6 +491,7 @@ pub fn emit_js_module_with_options<'a>(
     for block in build_blocks.values() {
         build_factory_names(&block.descriptor, &mut emitter.build_factory_names);
     }
+    emitter.build_closure_names = build_closure_names.clone();
     emitter.live_names = live_names.cloned();
     emitter.detached = detached;
     if module_imports_side_effect_css(program) {
@@ -1119,6 +1209,17 @@ struct Emitter<'a> {
     /// retain the real factories needed by cache-only virtual modules.
     build_blocks: HashMap<*const Expr<'a>, deka_syntax::typeck::DevBlock<'a>>,
     build_factory_names: HashSet<String>,
+    /// Factories this module's compiler-private `__deka_factories` closure
+    /// must provide to consumer modules' build hydration (dsc#52): every
+    /// descriptor-reachable factory of this module's exported types,
+    /// including types private to this module. Empty when module-graph
+    /// compilation determined no consumer build needs the closure.
+    build_closure_names: HashSet<String>,
+    /// Per-source factory closures available to this module's build
+    /// hydration, derived from imported modules' descriptor fragments. A
+    /// descriptor-reachable factory with no local binding is obtained by
+    /// spreading the defining module's closure (dsc#52).
+    closure_sources: HashMap<String, HashSet<String>>,
     unwrap_id: usize,
     match_id: usize,
     /// Newtype operator rewrites lowered by the typechecker.
@@ -1197,6 +1298,8 @@ impl<'a> Emitter<'a> {
             union_type_patterns: HashMap::new(),
             build_blocks: HashMap::new(),
             build_factory_names: HashSet::new(),
+            build_closure_names: HashSet::new(),
+            closure_sources: HashMap::new(),
             unwrap_id: 0,
             match_id: 0,
             operator_rewrites: HashMap::new(),
@@ -1251,6 +1354,7 @@ impl<'a> Emitter<'a> {
         // Runtime code never contains a dev body. The host resolves this
         // opaque value import from the compiler plan after executing the
         // matching dev-only entry.
+        let mut closure_sources: Vec<String> = Vec::new();
         for stmt in self.program.statements.iter() {
             let Some((name, value, _)) = dev_binding(stmt) else {
                 continue;
@@ -1267,6 +1371,26 @@ impl<'a> Emitter<'a> {
             self.out.push_str(&slot);
             self.out.push_str(" } from \"deka:dev/");
             self.out.push_str(&slot);
+            self.out.push_str("\";");
+            // Build descriptors can reach factories private to an imported
+            // module; hydration obtains those through the module's
+            // compiler-private closure (dsc#52). Collect the needed sources
+            // here so the synthesized imports stay hoisted with the others.
+            for source in self.build_binding_spreads(name, value)? {
+                if !closure_sources.contains(&source) {
+                    closure_sources.push(source);
+                }
+            }
+        }
+        for (index, source) in closure_sources.iter().enumerate() {
+            if !first {
+                self.out.push('\n');
+            }
+            first = false;
+            self.out.push_str("import { __deka_factories as __deka_factories_");
+            self.out.push_str(&index.to_string());
+            self.out.push_str(" } from \"");
+            self.out.push_str(&self.resolve_module_source(source));
             self.out.push_str("\";");
         }
         if self.needs_jsx_helper() {
@@ -1318,6 +1442,38 @@ impl<'a> Emitter<'a> {
         // Register receiver methods after all struct factories are declared.
         self.emit_method_registrations()?;
 
+        // Compiler-private factory closure for cross-module build hydration
+        // (dsc#52). It captures every descriptor-reachable factory of this
+        // module's exported types — including types private to this module —
+        // so a consumer's hydration call can obtain factories it has no
+        // lexical binding for. Module-graph compilation only asks for this
+        // export when a live consumer build reaches these factories; the
+        // export is never part of DekaScript module metadata, and an unused
+        // one is dropped by ordinary bundler tree-shaking.
+        if !self.build_closure_names.is_empty() {
+            if !first {
+                self.out.push('\n');
+            }
+            first = false;
+            let mut closure: Vec<(String, String)> = self
+                .build_closure_names
+                .iter()
+                .filter_map(|name| {
+                    self.build_factory_binding(name)
+                        .map(|binding| (name.clone(), binding.to_string()))
+                })
+                .collect();
+            closure.sort();
+            self.out.push_str("const __deka_factories = () => ({");
+            for (index, (_, binding)) in closure.iter().enumerate() {
+                if index > 0 {
+                    self.out.push_str(", ");
+                }
+                self.out.push_str(binding);
+            }
+            self.out.push_str("});\nexport { __deka_factories };");
+        }
+
         // The host publishes only JSON-compatible build data. Materialize it
         // through this module's declared factories after receiver methods are
         // installed, preserving the same prototype identity as a source
@@ -1343,26 +1499,45 @@ impl<'a> Emitter<'a> {
             if let Some(block) = self.build_blocks.get(&(value as *const Expr<'a>)) {
                 build_factory_names(&block.descriptor, &mut names);
             }
+            // Local bindings cover factories this module can name; anything
+            // else must come from an imported module's closure spread. A
+            // factory in neither place is a build error — hydration would
+            // silently downgrade identity otherwise (dsc#52).
+            let spreads = self.build_binding_spreads(name, value)?;
             let mut factories: Vec<_> = names
-                .into_iter()
+                .iter()
                 .filter_map(|name| {
                     self.build_factory_binding(&name)
-                        .map(|binding| (name, binding.to_string()))
+                        .map(|binding| ((*name).to_string(), binding.to_string()))
                 })
                 .collect();
             factories.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
-            for (index, (factory, binding)) in factories.iter().enumerate() {
-                if index > 0 {
-                    self.out.push_str(", ");
+            let mut entries = String::new();
+            for source in &spreads {
+                let alias = format!(
+                    "__deka_factories_{}",
+                    closure_sources.iter().position(|s| s == source).unwrap()
+                );
+                if !entries.is_empty() {
+                    entries.push_str(", ");
+                }
+                entries.push_str("...");
+                entries.push_str(&alias);
+                entries.push_str("()");
+            }
+            for (factory, binding) in &factories {
+                if !entries.is_empty() {
+                    entries.push_str(", ");
                 }
                 if factory == binding {
-                    self.out.push_str(binding);
+                    entries.push_str(binding);
                 } else {
-                    self.out.push_str(&json_string(factory));
-                    self.out.push_str(": ");
-                    self.out.push_str(binding);
+                    entries.push_str(&json_string(factory));
+                    entries.push_str(": ");
+                    entries.push_str(binding);
                 }
             }
+            self.out.push_str(&entries);
             self.out.push_str("});");
             if exported {
                 self.out.push('\n');
@@ -1528,7 +1703,7 @@ impl<'a> Emitter<'a> {
             | Stmt::TypeAlias { name, .. }
             | Stmt::Interface { name, .. } => self.is_live(name),
             Stmt::Struct { name, .. } | Stmt::Enum { name, .. } | Stmt::Newtype { name, .. } => {
-                self.is_live(name) || self.build_factory_names.contains(*name)
+                self.is_live(name) || self.is_build_retained(name)
             }
             Stmt::ReceiverMethod {
                 receiver_type,
@@ -1541,7 +1716,7 @@ impl<'a> Emitter<'a> {
                 if is_primitive_receiver(receiver_type) {
                     self.is_live(&format!("{name}${receiver_type}"))
                 } else {
-                    self.is_live(receiver_type) || self.build_factory_names.contains(*receiver_type)
+                    self.is_live(receiver_type) || self.is_build_retained(receiver_type)
                 }
             }
             Stmt::Expr { .. }
@@ -1607,6 +1782,62 @@ impl<'a> Emitter<'a> {
 
     fn is_build_factory_import(&self, specifier: &deka_syntax::ImportSpec<'a>) -> bool {
         self.build_factory_names.contains(specifier.imported)
+            || self.build_closure_names.contains(specifier.imported)
+            || self.build_closure_names.contains(specifier.local)
+    }
+
+    /// Whether a type declaration is retained for build materialization:
+    /// either its own module's build bindings need it, or this module's
+    /// compiler-private factory closure must provide it to consumers (dsc#52).
+    fn is_build_retained(&self, name: &str) -> bool {
+        self.build_factory_names.contains(name) || self.build_closure_names.contains(name)
+    }
+
+    /// Import sources whose compiler-private factory closure a build
+    /// binding's hydration call must spread (dsc#52). Factories with a local
+    /// binding need no closure; a factory with neither a local binding nor a
+    /// covering closure is a build error — hydration must never fall back to
+    /// a lookalike object.
+    fn build_binding_spreads(&self, binding: &str, value: &Expr<'a>) -> Result<Vec<String>, String> {
+        let mut names = HashSet::new();
+        if let Some(block) = self.build_blocks.get(&(value as *const Expr<'a>)) {
+            build_factory_names(&block.descriptor, &mut names);
+        }
+        let missing: Vec<&String> = names
+            .iter()
+            .filter(|name| self.build_factory_binding(name).is_none())
+            .collect();
+        if missing.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut sources: Vec<String> = Vec::new();
+        for stmt in self.program.statements.iter() {
+            let Stmt::Import { source, .. } = stmt else {
+                continue;
+            };
+            if sources.iter().any(|seen| seen.as_str() == *source) {
+                continue;
+            }
+            let Some(closure) = self.closure_sources.get(*source) else {
+                continue;
+            };
+            if missing.iter().any(|name| closure.contains(*name)) {
+                sources.push((*source).to_string());
+            }
+        }
+        for name in missing {
+            let covered = sources.iter().any(|source| {
+                self.closure_sources
+                    .get(source)
+                    .is_some_and(|closure| closure.contains(name.as_str()))
+            });
+            if !covered {
+                return Err(format!(
+                    "build binding `{binding}` cannot obtain the factory `{name}` required by its declared type"
+                ));
+            }
+        }
+        Ok(sources)
     }
 
     // ------------------------------------------------------------------
@@ -1721,6 +1952,19 @@ impl<'a> Emitter<'a> {
     }
 
     fn seed_imports(&mut self, imports: &HashMap<&str, &deka_syntax::ModuleExports<'a>>) {
+        for (source, exports) in imports.iter() {
+            // A dependency's descriptor fragments name factories in the
+            // dependency's own namespace; their union is the closure its
+            // compiler-private `__deka_factories` export provides (dsc#52).
+            let mut names = HashSet::new();
+            for tree in exports.build_fragments.values() {
+                build_factory_names(tree, &mut names);
+            }
+            if !names.is_empty() {
+                self.closure_sources
+                    .insert((*source).to_string(), names);
+            }
+        }
         for exports in imports.values() {
             for (name, info) in exports.structs.iter() {
                 if self.structs.contains_key(*name) {
@@ -1910,7 +2154,7 @@ impl<'a> Emitter<'a> {
         if self.uses_struct {
             let mut parts = crate::prelude::StructDemand::default();
             for struct_name in &self.struct_order {
-                if !self.is_live(struct_name) && !self.build_factory_names.contains(struct_name) {
+                if !self.is_live(struct_name) && !self.is_build_retained(struct_name) {
                     continue;
                 }
                 let methods = self.collect_methods_for_struct(struct_name, &mut HashSet::new());
@@ -2608,7 +2852,7 @@ impl<'a> Emitter<'a> {
     fn emit_method_registrations(&mut self) -> Result<(), String> {
         let order = self.struct_order.clone();
         for struct_name in order {
-            if !self.is_live(&struct_name) && !self.build_factory_names.contains(&struct_name) {
+            if !self.is_live(&struct_name) && !self.is_build_retained(&struct_name) {
                 continue;
             }
             let methods = self.collect_methods_for_struct(&struct_name, &mut HashSet::new());
@@ -2652,7 +2896,7 @@ impl<'a> Emitter<'a> {
             .newtypes
             .keys()
             .filter_map(|name| {
-                if !self.is_live(name) && !self.build_factory_names.contains(name) {
+                if !self.is_live(name) && !self.is_build_retained(name) {
                     return None;
                 }
                 self.receiver_methods
@@ -3840,6 +4084,8 @@ impl<'a> Emitter<'a> {
                     union_type_patterns: HashMap::new(),
                     build_blocks: HashMap::new(),
                     build_factory_names: HashSet::new(),
+                    build_closure_names: HashSet::new(),
+                    closure_sources: HashMap::new(),
                     unwrap_id: 0,
                     match_id: 0,
                     operator_rewrites: HashMap::new(),

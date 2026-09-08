@@ -10,9 +10,9 @@ pub mod prelude;
 mod util;
 
 pub use emit::{
-    ModuleEmit, build_factory_names, css_scope_hash, dev_slot_id, dev_uses_name, emit_dev_entry,
-    emit_js, emit_js_module_with_options, emit_js_with_imports, emit_js_with_options,
-    live_dev_uses_name,
+    ModuleEmit, build_factory_names, css_scope_hash, dev_slot_id, dev_slot_source_path,
+    dev_uses_name, emit_dev_entry, emit_js, emit_js_module_with_options, emit_js_with_imports,
+    emit_js_with_options, live_dev_uses_name,
 };
 
 #[cfg(test)]
@@ -1537,5 +1537,35 @@ mod tests {
         assert!(out.contains(".then(__deka_to_result)"), "got: {}", out);
         assert!(!out.contains("function("), "got: {}", out);
         assert!(!out.contains("=>"), "got: {}", out);
+    }
+}
+
+#[cfg(test)]
+mod slot_path_tests {
+    use super::dev_slot_source_path;
+    use std::path::Path;
+
+    #[test]
+    fn dev_slot_source_path_relativizes_under_root() {
+        assert_eq!(
+            dev_slot_source_path("/a/proj/app/page.ds", Some(Path::new("/a/proj"))),
+            "app/page.ds"
+        );
+    }
+
+    #[test]
+    fn dev_slot_source_path_keeps_absolute_outside_root() {
+        assert_eq!(
+            dev_slot_source_path("/elsewhere/page.ds", Some(Path::new("/a/proj"))),
+            "/elsewhere/page.ds"
+        );
+    }
+
+    #[test]
+    fn dev_slot_source_path_keeps_absolute_without_root() {
+        assert_eq!(
+            dev_slot_source_path("/a/proj/app/page.ds", None),
+            "/a/proj/app/page.ds"
+        );
     }
 }

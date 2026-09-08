@@ -151,6 +151,9 @@ impl ProjectState {
         let options = GraphCompileOptions {
             client: false,
             module_base: self.module_base.clone(),
+            // Virtual in-memory project: paths are already project-relative,
+            // so no root relativization is needed.
+            module_root: None,
         };
         match compile_module_graph_with_options(&entry, &loader, options) {
             Ok(result) => {

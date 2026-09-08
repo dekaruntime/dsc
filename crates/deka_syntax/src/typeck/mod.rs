@@ -1178,7 +1178,21 @@ impl<'a> Checker<'a> {
                 }
 
                 if let Some(tree) = exports.build_fragments.get(imported) {
-                    self.build_fragments.insert(local, tree.clone());
+                    // A renamed import binds the fragment under the local
+                    // name, so the spliced descriptor must root under the
+                    // local name too (dsc#51). Nested factory references keep
+                    // the declaring module's names — hydration obtains those
+                    // through the module's factory closure (dsc#52).
+                    let mut tree = tree.clone();
+                    if local != imported {
+                        match &mut tree {
+                            DescriptorTree::Struct { name, .. }
+                            | DescriptorTree::Enum { name, .. }
+                            | DescriptorTree::Newtype { name, .. } => *name = local,
+                            _ => {}
+                        }
+                    }
+                    self.build_fragments.insert(local, tree);
                 }
             }
         }

@@ -1754,8 +1754,10 @@ impl<'a> Emitter<'a> {
     }
 
     /// Return the runtime binding that implements a descriptor factory in
-    /// this module. Imports may rename it, so hydration uses the descriptor
-    /// name as its object key rather than relying on JavaScript shorthand.
+    /// this module. Imports may rename it, and the descriptor then carries
+    /// the local name, so match either side of the specifier; hydration uses
+    /// the descriptor name as its object key rather than relying on
+    /// JavaScript shorthand.
     fn build_factory_binding(&self, factory: &str) -> Option<&str> {
         for stmt in self.program.statements.iter() {
             match stmt {
@@ -1767,10 +1769,9 @@ impl<'a> Emitter<'a> {
                     return Some(name);
                 }
                 Stmt::Import { specifiers, .. } => {
-                    if let Some(specifier) = specifiers
-                        .iter()
-                        .find(|specifier| specifier.imported == factory)
-                    {
+                    if let Some(specifier) = specifiers.iter().find(|specifier| {
+                        specifier.local == factory || specifier.imported == factory
+                    }) {
                         return Some(specifier.local);
                     }
                 }
@@ -1782,6 +1783,7 @@ impl<'a> Emitter<'a> {
 
     fn is_build_factory_import(&self, specifier: &deka_syntax::ImportSpec<'a>) -> bool {
         self.build_factory_names.contains(specifier.imported)
+            || self.build_factory_names.contains(specifier.local)
             || self.build_closure_names.contains(specifier.imported)
             || self.build_closure_names.contains(specifier.local)
     }
@@ -1965,53 +1967,97 @@ impl<'a> Emitter<'a> {
                     .insert((*source).to_string(), names);
             }
         }
+        // Import specifiers can rename their binding (`import { User as
+        // Person }`). The typechecker binds imported metadata under the local
+        // name, and source literals spell the local name, so aliased factories
+        // must be seeded under the alias as well (dsc#51).
+        let mut renamed: Vec<(&'a str, &'a str, &deka_syntax::ModuleExports<'a>)> = Vec::new();
+        for stmt in self.program.statements.iter() {
+            let Stmt::Import {
+                specifiers, source, ..
+            } = stmt
+            else {
+                continue;
+            };
+            let Some(exports) = imports.get(source) else {
+                continue;
+            };
+            for spec in specifiers.iter() {
+                if spec.imported != spec.local {
+                    renamed.push((spec.local, spec.imported, *exports));
+                }
+            }
+        }
         for exports in imports.values() {
             for (name, info) in exports.structs.iter() {
-                if self.structs.contains_key(*name) {
-                    continue;
+                if !self.structs.contains_key(*name) {
+                    self.seed_struct_export(name, info);
                 }
-                let mut meta = StructMeta::default();
-                for field in info.fields.iter() {
-                    meta.fields.insert(field.name.to_string());
-                    if field.default_value.is_some()
-                        || field.optional
-                        || is_optional_type(&field.ty)
-                    {
-                        // Imported struct defaults are not pre-emitted here;
-                        // omitting the field produces Option.None for Option-typed fields.
-                        if field.default_value.is_none() {
-                            self.uses_prelude_enums = true;
-                        }
-                        meta.optional.insert(field.name.to_string(), None);
-                    }
-                }
-                for embed in info.embeds.iter() {
-                    meta.embeds.push(embed.name.to_string());
-                }
-                self.structs.insert(name.to_string(), meta);
             }
             for (name, info) in exports.enums.iter() {
-                if self.enums.contains_key(*name) {
-                    continue;
+                if !self.enums.contains_key(*name) {
+                    self.seed_enum_export(name, info);
                 }
-                let mut meta = EnumMeta::default();
-                for case in info.cases.iter() {
-                    meta.cases.push(case.name.to_string());
-                    if case.payload.is_some() {
-                        meta.payload_cases.insert(case.name.to_string());
-                    }
-                }
-                self.enums.insert(name.to_string(), meta);
             }
             for (name, info) in exports.newtypes.iter() {
-                if self.newtypes.contains_key(*name) {
-                    continue;
+                if !self.newtypes.contains_key(*name) {
+                    self.seed_newtype_export(name, info);
                 }
-                self.newtypes.insert(name.to_string(), info.repr);
-                self.uses_newtype = true;
+            }
+        }
+        for (local, imported, exports) in renamed {
+            if let Some(info) = exports.structs.get(imported) {
+                if !self.structs.contains_key(local) {
+                    self.seed_struct_export(local, info);
+                }
+            }
+            if let Some(info) = exports.enums.get(imported) {
+                if !self.enums.contains_key(local) {
+                    self.seed_enum_export(local, info);
+                }
+            }
+            if let Some(info) = exports.newtypes.get(imported) {
+                if !self.newtypes.contains_key(local) {
+                    self.seed_newtype_export(local, info);
+                }
             }
         }
         self.compute_empty_embeds();
+    }
+
+    fn seed_struct_export(&mut self, name: &str, info: &deka_syntax::StructInfo<'a>) {
+        let mut meta = StructMeta::default();
+        for field in info.fields.iter() {
+            meta.fields.insert(field.name.to_string());
+            if field.default_value.is_some() || field.optional || is_optional_type(&field.ty) {
+                // Imported struct defaults are not pre-emitted here;
+                // omitting the field produces Option.None for Option-typed fields.
+                if field.default_value.is_none() {
+                    self.uses_prelude_enums = true;
+                }
+                meta.optional.insert(field.name.to_string(), None);
+            }
+        }
+        for embed in info.embeds.iter() {
+            meta.embeds.push(embed.name.to_string());
+        }
+        self.structs.insert(name.to_string(), meta);
+    }
+
+    fn seed_enum_export(&mut self, name: &str, info: &deka_syntax::EnumInfo<'a>) {
+        let mut meta = EnumMeta::default();
+        for case in info.cases.iter() {
+            meta.cases.push(case.name.to_string());
+            if case.payload.is_some() {
+                meta.payload_cases.insert(case.name.to_string());
+            }
+        }
+        self.enums.insert(name.to_string(), meta);
+    }
+
+    fn seed_newtype_export(&mut self, name: &str, info: &deka_syntax::typeck::NewtypeInfo) {
+        self.newtypes.insert(name.to_string(), info.repr);
+        self.uses_newtype = true;
     }
 
     fn compute_empty_embeds(&mut self) {

@@ -2148,6 +2148,62 @@ mod tests {
     }
 
     #[test]
+    fn graph_emits_aliased_imported_struct_literal() {
+        let types = PathBuf::from("/project/types.ds");
+        let page = PathBuf::from("/project/page.ds");
+        let mut files = HashMap::new();
+        files.insert(
+            types.clone(),
+            "struct User { name: string }\n\
+             fn (user User) greet() string { return \"Hello \" + user.name }\n\
+             export { User }"
+                .to_string(),
+        );
+        files.insert(
+            page.clone(),
+            "import { User as Person } from \"./types.ds\";\n\
+             const person: Person = build { return Ok(Person { name: \"Ada\" }) }\n\
+             export fn Page() string { return person.greet() }"
+                .to_string(),
+        );
+        let mut aliases = HashMap::new();
+        aliases.insert((page.clone(), "./types.ds".to_string()), types.clone());
+        let result = compile_module_graph(&page, &InMemoryLoader { files, aliases })
+            .expect("graph compiles");
+        let page_js = &result.modules[&page];
+        assert!(
+            page_js.contains("import { User as Person } from \"./types.ds\";"),
+            "aliased factory import must stay live:\n{page_js}"
+        );
+        assert!(
+            page_js.contains("({Person});"),
+            "hydration map must bind the descriptor name through the alias:\n{page_js}"
+        );
+        assert!(
+            page_js.contains("person.greet()"),
+            "receiver call must emit through the alias:\n{page_js}"
+        );
+        let types_js = &result.modules[&types];
+        assert!(
+            types_js.contains("User.impl(\"greet\""),
+            "receiver methods stay registered on the exported factory:\n{types_js}"
+        );
+        let slot = result
+            .dev_plan
+            .slots
+            .iter()
+            .find(|slot| slot.binding == "person")
+            .expect("one build slot for person");
+        assert!(
+            slot.entry.contains("Person({"),
+            "aliased struct literal must emit through the local binding:\n{}",
+            slot.entry
+        );
+    }
+
+
+
+    #[test]
     fn graph_keeps_dev_slots_reachable_only_through_a_dev_body() {
         let main = PathBuf::from("/project/main.ds");
         let dev_data = PathBuf::from("/project/dev-data.ds");

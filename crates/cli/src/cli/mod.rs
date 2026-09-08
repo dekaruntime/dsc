@@ -104,12 +104,16 @@ pub fn error(msg: Option<&str>) {
     );
 }
 
-pub fn execute(registry: &Registry) {
+/// Dispatches argv. Returns the process exit code: 0 on success, 2 on any
+/// usage error (unknown argument/flag, missing param value, unknown command),
+/// following the GNU exit-code convention. Command handlers keep owning
+/// runtime failures (they exit 1 themselves).
+pub fn execute(registry: &Registry) -> i32 {
     let parsed = core::parse_env(registry);
     if !parsed.errors.is_empty() {
         let message = format_parse_errors(&parsed.errors);
         error(Some(message.as_str()));
-        return;
+        return 2;
     }
 
     let args = &parsed.args;
@@ -120,25 +124,25 @@ pub fn execute(registry: &Registry) {
         {
             let verbose = args.flags.contains_key("--verbose");
             version(verbose);
-            return;
+            return 0;
         }
         if args.flags.contains_key("--help")
             || args.flags.contains_key("-H")
             || args.flags.contains_key("help")
         {
             help(registry);
-            return;
+            return 0;
         }
         let context = match Context::from_env(registry) {
             Ok(context) => context,
             Err(core::ContextError::Parse(errors)) => {
                 let message = format_parse_errors(&errors);
                 error(Some(message.as_str()));
-                return;
+                return 2;
             }
         };
         emit::cmd(&context);
-        return;
+        return 0;
     }
 
     let context = match Context::from_env(registry) {
@@ -146,34 +150,35 @@ pub fn execute(registry: &Registry) {
         Err(core::ContextError::Parse(errors)) => {
             let message = format_parse_errors(&errors);
             error(Some(message.as_str()));
-            return;
+            return 2;
         }
     };
     let cmd = &context.args;
 
     if cmd.commands.len() > 2 {
         error(None);
-        return;
+        return 2;
     }
 
     let cmd_name = &cmd.commands[0];
     let Some(command) = registry.command_named(cmd_name) else {
         error(None);
-        return;
+        return 2;
     };
 
     if cmd.commands.len() == 1 {
         (command.handler)(&context);
-        return;
+        return 0;
     }
 
     let sub_name = &cmd.commands[1];
     let Some(subcommand) = registry.subcommand_named(command, sub_name) else {
         error(None);
-        return;
+        return 2;
     };
 
     (subcommand.handler)(&context);
+    0
 }
 
 pub fn format_parse_errors(errors: &[ParseError]) -> String {

@@ -17,7 +17,10 @@ pub fn build_registry() -> Registry {
 
 pub fn run() {
     let registry = build_registry();
-    cli::execute(&registry);
+    let code = cli::execute(&registry);
+    if code != 0 {
+        std::process::exit(code);
+    }
 }
 
 #[cfg(test)]

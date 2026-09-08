@@ -40,6 +40,9 @@ pub enum TokenKind {
     Return,
     Match,
     Unsafe,
+    /// Build-phase DekaScript expression. Unlike `unsafe`, its body is
+    /// lexed and checked as DekaScript.
+    Build,
     Bridge,
     Await,
     Async,
@@ -334,8 +337,8 @@ impl<'a> Lexer<'a> {
                 'e' | 'E' if !saw_exp => {
                     let next = self.peek(1);
                     let has_digit = matches!(next, Some('0'..='9'));
-                    let has_signed_digit = matches!(next, Some('+' | '-'))
-                        && matches!(self.peek(2), Some('0'..='9'));
+                    let has_signed_digit =
+                        matches!(next, Some('+' | '-')) && matches!(self.peek(2), Some('0'..='9'));
                     if has_digit || has_signed_digit {
                         saw_exp = true;
                         self.advance();
@@ -381,10 +384,7 @@ impl<'a> Lexer<'a> {
         if text.len() > 1
             && text.starts_with('0')
             && !saw_dot
-            && !matches!(
-                text.chars().nth(1),
-                Some('x' | 'X' | 'b' | 'B' | 'o' | 'O')
-            )
+            && !matches!(text.chars().nth(1), Some('x' | 'X' | 'b' | 'B' | 'o' | 'O'))
         {
             self.diagnostics.push(Diagnostic::error(
                 start.line,
@@ -436,6 +436,7 @@ impl<'a> Lexer<'a> {
             "return" => TokenKind::Return,
             "match" => TokenKind::Match,
             "unsafe" => TokenKind::Unsafe,
+            "build" => TokenKind::Build,
             "bridge" => TokenKind::Bridge,
             "await" => TokenKind::Await,
             "async" => TokenKind::Async,
@@ -483,19 +484,17 @@ impl<'a> Lexer<'a> {
                 '`' => {
                     self.skip_template_literal();
                 }
-                '/' => {
-                    match self.peek(1) {
-                        Some('/') => self.skip_line_comment_raw(),
-                        Some('*') => self.skip_block_comment_raw(),
-                        _ => {
-                            if self.looks_like_regex_start() {
-                                self.skip_regex_literal();
-                            } else {
-                                self.advance();
-                            }
+                '/' => match self.peek(1) {
+                    Some('/') => self.skip_line_comment_raw(),
+                    Some('*') => self.skip_block_comment_raw(),
+                    _ => {
+                        if self.looks_like_regex_start() {
+                            self.skip_regex_literal();
+                        } else {
+                            self.advance();
                         }
                     }
-                }
+                },
                 _ => {
                     self.advance();
                 }
@@ -567,19 +566,17 @@ impl<'a> Lexer<'a> {
                             }
                             '"' | '\'' => self.skip_string_literal(c),
                             '`' => self.skip_template_literal(),
-                            '/' => {
-                                match self.peek(1) {
-                                    Some('/') => self.skip_line_comment_raw(),
-                                    Some('*') => self.skip_block_comment_raw(),
-                                    _ => {
-                                        if self.looks_like_regex_start() {
-                                            self.skip_regex_literal();
-                                        } else {
-                                            self.advance();
-                                        }
+                            '/' => match self.peek(1) {
+                                Some('/') => self.skip_line_comment_raw(),
+                                Some('*') => self.skip_block_comment_raw(),
+                                _ => {
+                                    if self.looks_like_regex_start() {
+                                        self.skip_regex_literal();
+                                    } else {
+                                        self.advance();
                                     }
                                 }
-                            }
+                            },
                             _ => {
                                 self.advance();
                             }
@@ -601,8 +598,24 @@ impl<'a> Lexer<'a> {
             None => true,
             Some(c) => matches!(
                 c,
-                '(' | ',' | '=' | ':' | '[' | '{' | ';' | '!' | '&' | '|' | '+' | '-' | '*' | '%'
-                    | '<' | '>' | '?' | '~' | '^'
+                '(' | ','
+                    | '='
+                    | ':'
+                    | '['
+                    | '{'
+                    | ';'
+                    | '!'
+                    | '&'
+                    | '|'
+                    | '+'
+                    | '-'
+                    | '*'
+                    | '%'
+                    | '<'
+                    | '>'
+                    | '?'
+                    | '~'
+                    | '^'
             ),
         }
     }
@@ -788,22 +801,22 @@ impl<'a> Lexer<'a> {
                 self.unsafe_type_end = self.matching_angle_end();
                 // fall through and lex `<` as an ordinary token
             } else {
-            self.unsafe_expect_brace = false;
-            let start = self.pos_at();
-            let start_byte = self.pos;
-            if self.current() == Some('{') {
-                self.advance();
-                self.raw_depth = 1;
-                self.raw_start_pos = self.pos_at();
-                self.raw_start_byte = self.pos;
-                return Token {
-                    kind: TokenKind::LBrace,
-                    text: "{",
-                    span: self.span_from(start, start_byte),
-                };
-            } else {
-                return self.error("expected `{` or `<` after `unsafe`");
-            }
+                self.unsafe_expect_brace = false;
+                let start = self.pos_at();
+                let start_byte = self.pos;
+                if self.current() == Some('{') {
+                    self.advance();
+                    self.raw_depth = 1;
+                    self.raw_start_pos = self.pos_at();
+                    self.raw_start_byte = self.pos;
+                    return Token {
+                        kind: TokenKind::LBrace,
+                        text: "{",
+                        span: self.span_from(start, start_byte),
+                    };
+                } else {
+                    return self.error("expected `{` or `<` after `unsafe`");
+                }
             }
         }
         let start = self.pos_at();
@@ -820,7 +833,7 @@ impl<'a> Lexer<'a> {
                         byte_start: start_byte,
                         byte_end: start_byte,
                     },
-                }
+                };
             }
         };
 
@@ -1243,7 +1256,10 @@ mod tests {
         let tok = lexer.next_token();
         assert_eq!(tok.kind, TokenKind::Comment);
         assert!(
-            lexer.diagnostics().iter().any(|d| d.message.contains("unterminated block comment")),
+            lexer
+                .diagnostics()
+                .iter()
+                .any(|d| d.message.contains("unterminated block comment")),
             "expected unterminated block comment error, got: {:?}",
             lexer.diagnostics()
         );
@@ -1255,7 +1271,10 @@ mod tests {
         let tok = lexer.next_token();
         assert_eq!(tok.kind, TokenKind::Number);
         assert!(
-            lexer.diagnostics().iter().any(|d| d.message.contains("leading-zero octal-style")),
+            lexer
+                .diagnostics()
+                .iter()
+                .any(|d| d.message.contains("leading-zero octal-style")),
             "expected leading-zero octal error, got: {:?}",
             lexer.diagnostics()
         );
@@ -1264,11 +1283,7 @@ mod tests {
     #[test]
     fn zero_and_float_still_allowed() {
         let mut lexer = Lexer::new("0 0.5");
-        let kinds = [
-            TokenKind::Number,
-            TokenKind::Number,
-            TokenKind::Eof,
-        ];
+        let kinds = [TokenKind::Number, TokenKind::Number, TokenKind::Eof];
         for expected in kinds {
             assert_eq!(lexer.next_token().kind, expected);
         }
@@ -1300,7 +1315,10 @@ mod tests {
         let tok = lexer.next_token();
         assert_eq!(tok.kind, TokenKind::Number);
         assert!(
-            lexer.diagnostics().iter().any(|d| d.message.contains("invalid placement")),
+            lexer
+                .diagnostics()
+                .iter()
+                .any(|d| d.message.contains("invalid placement")),
             "expected invalid underscore placement error, got: {:?}",
             lexer.diagnostics()
         );

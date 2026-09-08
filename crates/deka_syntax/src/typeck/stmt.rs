@@ -1,12 +1,12 @@
 //! Statement typechecking.
 
-use std::collections::{HashMap, HashSet};
 use super::expr::Coverage;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast;
 
-use super::types::Type;
 use super::Checker;
+use super::types::Type;
 
 impl<'a> Checker<'a> {
     pub(super) fn check_program(&mut self) {
@@ -35,7 +35,15 @@ impl<'a> Checker<'a> {
                     span,
                     is_async,
                     ..
-                } => self.check_function(name, type_params, params, return_type.as_ref(), body, *is_async, *span),
+                } => self.check_function(
+                    name,
+                    type_params,
+                    params,
+                    return_type.as_ref(),
+                    body,
+                    *is_async,
+                    *span,
+                ),
                 ast::Stmt::ReceiverMethod {
                     receiver_type,
                     receiver_name,
@@ -89,7 +97,10 @@ impl<'a> Checker<'a> {
         // relaxable later.
         const BUILTIN_TYPE_DIAGNOSTIC: &str = "`Type` is a builtin type";
         for stmt in self.program.statements {
-            if let ast::Stmt::TypeAlias { name, value, span, .. } = stmt {
+            if let ast::Stmt::TypeAlias {
+                name, value, span, ..
+            } = stmt
+            {
                 if *name == "Type" {
                     self.error_span(*span, BUILTIN_TYPE_DIAGNOSTIC);
                 }
@@ -97,13 +108,27 @@ impl<'a> Checker<'a> {
                     self.error_span(*span, format!("duplicate type alias `{name}`"));
                 }
             }
-            if let ast::Stmt::Enum { name, cases, type_params, is_super, span } = stmt {
+            if let ast::Stmt::Enum {
+                name,
+                cases,
+                type_params,
+                is_super,
+                span,
+            } = stmt
+            {
                 if *name == "Type" {
                     self.error_span(*span, BUILTIN_TYPE_DIAGNOSTIC);
                 }
                 if self
                     .enums
-                    .insert(name, super::EnumInfo { cases, type_params, is_super: *is_super })
+                    .insert(
+                        name,
+                        super::EnumInfo {
+                            cases,
+                            type_params,
+                            is_super: *is_super,
+                        },
+                    )
                     .is_some()
                 {
                     self.error_span(*span, format!("duplicate enum definition `{name}`"));
@@ -118,11 +143,32 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            if let ast::Stmt::Struct { name, fields, embeds, type_params, is_super, span, .. } = stmt {
+            if let ast::Stmt::Struct {
+                name,
+                fields,
+                embeds,
+                type_params,
+                is_super,
+                span,
+                ..
+            } = stmt
+            {
                 if *name == "Type" {
                     self.error_span(*span, BUILTIN_TYPE_DIAGNOSTIC);
                 }
-                if self.structs.insert(name, super::StructInfo { fields, embeds, type_params, is_super: *is_super }).is_some() {
+                if self
+                    .structs
+                    .insert(
+                        name,
+                        super::StructInfo {
+                            fields,
+                            embeds,
+                            type_params,
+                            is_super: *is_super,
+                        },
+                    )
+                    .is_some()
+                {
                     self.error_span(*span, format!("duplicate struct definition `{name}`"));
                     continue;
                 }
@@ -136,10 +182,7 @@ impl<'a> Checker<'a> {
                     if !seen_fields.insert(field.name) {
                         self.error_span(
                             field.span,
-                            format!(
-                                "Duplicate field '{}' in struct '{}'.",
-                                field.name, name
-                            ),
+                            format!("Duplicate field '{}' in struct '{}'.", field.name, name),
                         );
                     }
                 }
@@ -156,19 +199,32 @@ impl<'a> Checker<'a> {
                     if !seen_embeds.insert(embed.name) {
                         self.error_span(
                             embed.span,
-                            format!(
-                                "Duplicate embedded struct '{}'",
-                                embed.name
-                            ),
+                            format!("Duplicate embedded struct '{}'", embed.name),
                         );
                     }
                 }
             }
-            if let ast::Stmt::Interface { name, members, span, .. } = stmt {
+            if let ast::Stmt::Interface {
+                name,
+                members,
+                span,
+                ..
+            } = stmt
+            {
                 if *name == "Type" {
                     self.error_span(*span, BUILTIN_TYPE_DIAGNOSTIC);
                 }
-                if self.interfaces.insert(name, super::InterfaceInfo { members, span: *span }).is_some() {
+                if self
+                    .interfaces
+                    .insert(
+                        name,
+                        super::InterfaceInfo {
+                            members,
+                            span: *span,
+                        },
+                    )
+                    .is_some()
+                {
                     self.error_span(*span, format!("duplicate interface definition `{name}`"));
                 }
             }
@@ -176,12 +232,23 @@ impl<'a> Checker<'a> {
                 if *name == "Type" {
                     self.error_span(*span, BUILTIN_TYPE_DIAGNOSTIC);
                 }
-                if self.newtypes.insert(name, super::NewtypeInfo { repr: *repr }).is_some() {
+                if self
+                    .newtypes
+                    .insert(name, super::NewtypeInfo { repr: *repr })
+                    .is_some()
+                {
                     self.error_span(*span, format!("duplicate newtype definition `{name}`"));
                     continue;
                 }
-                if self.aliases.contains_key(name) || self.structs.contains_key(name) || self.enums.contains_key(name) || self.interfaces.contains_key(name) {
-                    self.error_span(*span, format!("`{name}` conflicts with an existing type declaration"));
+                if self.aliases.contains_key(name)
+                    || self.structs.contains_key(name)
+                    || self.enums.contains_key(name)
+                    || self.interfaces.contains_key(name)
+                {
+                    self.error_span(
+                        *span,
+                        format!("`{name}` conflicts with an existing type declaration"),
+                    );
                 }
             }
         }
@@ -196,7 +263,11 @@ impl<'a> Checker<'a> {
     /// Eagerly resolve interface member types so that unknown types and other
     /// annotation errors are reported even when the interface is not used.
     fn validate_interface_declarations(&mut self) {
-        let interfaces: Vec<_> = self.interfaces.iter().map(|(n, i)| (*n, i.clone())).collect();
+        let interfaces: Vec<_> = self
+            .interfaces
+            .iter()
+            .map(|(n, i)| (*n, i.clone()))
+            .collect();
         for (name, info) in interfaces {
             if info.members.is_empty() {
                 self.error_span(
@@ -310,17 +381,24 @@ impl<'a> Checker<'a> {
                     })
                     .collect();
                 let resolved_return = return_type.as_ref().map(|t| self.resolve_ast_type(t));
-                if self.receiver_methods.insert(key, super::MethodInfo {
-                    params,
-                    return_type: return_type.clone(),
-                    mutable: *receiver_mutable,
-                    param_types,
-                    resolved_return,
-                }).is_some()
+                if self
+                    .receiver_methods
+                    .insert(
+                        key,
+                        super::MethodInfo {
+                            params,
+                            return_type: return_type.clone(),
+                            mutable: *receiver_mutable,
+                            param_types,
+                            resolved_return,
+                        },
+                    )
+                    .is_some()
                 {
-                    self.error_span(*span, format!(
-                        "duplicate receiver method `{name}` on type `{receiver_type}`"
-                    ));
+                    self.error_span(
+                        *span,
+                        format!("duplicate receiver method `{name}` on type `{receiver_type}`"),
+                    );
                 }
             }
         }
@@ -546,15 +624,7 @@ impl<'a> Checker<'a> {
                 if let Some((name, type_params, params, body, is_async, span)) = info {
                     pending.push((name, span));
                     let prev = self.globals.get(name).cloned();
-                    self.check_function(
-                        name,
-                        type_params,
-                        params,
-                        None,
-                        body,
-                        is_async,
-                        span,
-                    );
+                    self.check_function(name, type_params, params, None, body, is_async, span);
                     let new = self.globals.get(name).cloned();
                     if prev != new {
                         changed = true;
@@ -629,14 +699,18 @@ impl<'a> Checker<'a> {
                 is_async,
                 ..
             } => {
-                self.check_function(name, type_params, params, return_type.as_ref(), body, *is_async, *span);
+                self.check_function(
+                    name,
+                    type_params,
+                    params,
+                    return_type.as_ref(),
+                    body,
+                    *is_async,
+                    *span,
+                );
             }
             ast::Stmt::Export { decl, .. } => match decl {
-                ast::ExportDecl::Const {
-                    name,
-                    ty,
-                    value,
-                } => {
+                ast::ExportDecl::Const { name, ty, value } => {
                     self.check_binding(name, ty.as_ref(), value, false, value.span());
                 }
                 ast::ExportDecl::Function { .. } => {
@@ -767,7 +841,13 @@ impl<'a> Checker<'a> {
                 }
                 self.pop_type_params();
             }
-            ast::Stmt::Enum { name: _, cases, type_params, is_super: _, span: _ } => {
+            ast::Stmt::Enum {
+                name: _,
+                cases,
+                type_params,
+                is_super: _,
+                span: _,
+            } => {
                 // `enum Box<T> { Full(T) }` — T must be in scope while the case
                 // payload types are resolved, or it reports `unknown type T`.
                 self.push_type_params(type_params);
@@ -795,7 +875,10 @@ impl<'a> Checker<'a> {
                 // import source (via `Checker::seed_imports`), do not overwrite
                 // them with the Infer placeholder.
                 for spec in specifiers.iter() {
-                    let already_known = self.scopes.first().map_or(false, |scope| scope.contains_key(spec.local));
+                    let already_known = self
+                        .scopes
+                        .first()
+                        .map_or(false, |scope| scope.contains_key(spec.local));
                     if !already_known {
                         self.declare_var(spec.local, Type::Infer);
                     }
@@ -819,7 +902,15 @@ impl<'a> Checker<'a> {
             span,
         } = stmt
         {
-            self.check_function(name, type_params, params, return_type.as_ref(), body, *is_async, *span);
+            self.check_function(
+                name,
+                type_params,
+                params,
+                return_type.as_ref(),
+                body,
+                *is_async,
+                *span,
+            );
         }
     }
 
@@ -859,7 +950,10 @@ impl<'a> Checker<'a> {
         // so rather than leaving the reader to guess.
         let bound = match &scrutinee_type {
             Type::Option { inner } => (**inner).clone(),
-            Type::Generic { base: "Result", args } if args.len() == 2 => args[0].clone(),
+            Type::Generic {
+                base: "Result",
+                args,
+            } if args.len() == 2 => args[0].clone(),
             Type::Infer | Type::Error => Type::Infer,
             other => {
                 self.error_span(
@@ -874,8 +968,7 @@ impl<'a> Checker<'a> {
 
         let declared = ty.map(|ty| self.resolve_ast_type(ty));
         if let Some(declared) = &declared {
-            if !self.is_assignable(declared, &bound)
-                && !matches!(bound, Type::Infer | Type::Error)
+            if !self.is_assignable(declared, &bound) && !matches!(bound, Type::Infer | Type::Error)
             {
                 self.error_span(
                     span,
@@ -972,8 +1065,11 @@ impl<'a> Checker<'a> {
         ty: Option<&ast::Type<'a>>,
         value: &ast::Expr<'a>,
         mutable: bool,
-        _span: ast::Span,
+        span: ast::Span,
     ) {
+        if let ast::Expr::Build { body, .. } = value {
+            return self.check_dev_binding(name, ty, body, mutable, value, span);
+        }
         let value_type = self.check_expr(value);
         let final_type = if let Some(annot) = ty {
             let expected = self.resolve_ast_type(annot);
@@ -982,10 +1078,7 @@ impl<'a> Checker<'a> {
                 // `Some(...)` or `none`; the struct-field sugar that accepts a
                 // concrete `T` does not apply here.
                 if !value_type.is_error()
-                    && !matches!(
-                        value_type,
-                        Type::Option { .. } | Type::None | Type::Infer
-                    )
+                    && !matches!(value_type, Type::Option { .. } | Type::None | Type::Infer)
                 {
                     self.error_at_expr(
                         value,
@@ -1020,6 +1113,93 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Check the v1 build-only binding form. The binding has type `T`; its
+    /// separate entry must return `Result<T, string>` for the Deka host.
+    fn check_dev_binding(
+        &mut self,
+        name: &'a str,
+        annotation: Option<&ast::Type<'a>>,
+        body: &'a [ast::Stmt<'a>],
+        mutable: bool,
+        value: &ast::Expr<'a>,
+        span: ast::Span,
+    ) {
+        let valid_position = !mutable && self.scopes.len() == 1 && !self.in_function;
+        if !valid_position {
+            self.error_at_expr(
+                value,
+                "`build` is only valid as the initializer of a module-level `const`",
+            );
+            self.declare_var(name, Type::Error);
+            return;
+        }
+
+        let Some(annotation) = annotation else {
+            self.error_at_expr(
+                value,
+                "`build` bindings require an explicit declared type, e.g. `const users: Array<User> = build { ... }`",
+            );
+            self.declare_var(name, Type::Error);
+            self.pending_module_bindings.remove(name);
+            return;
+        };
+
+        let expected = self.resolve_ast_type(annotation);
+        let descriptor = match self.descriptor_tree(&expected, span) {
+            Ok(tree) => tree,
+            Err(message) => {
+                self.error_at_expr(
+                    value,
+                    format!(
+                        "`build` binding `{name}` has an unrepresentable declared type: {message}"
+                    ),
+                );
+                self.declare_var(name, expected);
+                self.pending_module_bindings.remove(name);
+                return;
+            }
+        };
+
+        let expected_result = Type::Generic {
+            base: "Result",
+            args: vec![expected.clone(), Type::Named { name: "string" }],
+        };
+        let saved_in_function = self.in_function;
+        let saved_in_async = self.in_async_function;
+        let saved_return_type = self.return_type.clone();
+        self.in_function = true;
+        // Dev entries may await build-only bridge operations. The DS contract
+        // is still Result<T, string>; JavaScript wraps it in a Promise.
+        self.in_async_function = true;
+        self.return_type = Some(expected_result);
+        self.scopes.push(HashMap::new());
+        self.mutables.push(HashSet::new());
+        for stmt in body {
+            self.check_statement(stmt);
+        }
+        self.scopes.pop();
+        self.mutables.pop();
+        self.in_function = saved_in_function;
+        self.in_async_function = saved_in_async;
+        self.return_type = saved_return_type;
+
+        if !body_always_returns(body) {
+            self.error_at_expr(
+                value,
+                format!(
+                    "`build` binding `{name}` must return `Result<{expected}, string>` on every path"
+                ),
+            );
+        }
+
+        self.dev_blocks.insert(
+            value as *const ast::Expr<'a>,
+            super::DevBlock { body, descriptor },
+        );
+        self.declare_var(name, expected);
+        self.pending_module_bindings.remove(name);
+    }
+
     pub(super) fn check_function(
         &mut self,
         name: &'a str,
@@ -1033,7 +1213,11 @@ impl<'a> Checker<'a> {
         // Use the previously collected signature for parameter types so that
         // errors about missing annotations are reported exactly once.
         let (param_types, collected_ret, optional) = match self.globals.get(name).cloned() {
-            Some(Type::Function { params, ret, optional }) => (params, Some(*ret), optional),
+            Some(Type::Function {
+                params,
+                ret,
+                optional,
+            }) => (params, Some(*ret), optional),
             _ => {
                 let mut pts = Vec::new();
                 for p in params {
@@ -1138,12 +1322,10 @@ impl<'a> Checker<'a> {
             }
         } else {
             body_expected_ret.unwrap_or_else(|| {
-                self.return_type
-                    .take()
-                    .unwrap_or(Type::Generic {
-                        base: "Option",
-                        args: vec![Type::Never],
-                    })
+                self.return_type.take().unwrap_or(Type::Generic {
+                    base: "Option",
+                    args: vec![Type::Never],
+                })
             })
         };
 
@@ -1180,7 +1362,10 @@ impl<'a> Checker<'a> {
         }
 
         match explicit_ret {
-            Some(Type::Generic { base: "Promise", args }) if args.len() == 1 => {
+            Some(Type::Generic {
+                base: "Promise",
+                args,
+            }) if args.len() == 1 => {
                 let inner = args[0].clone();
                 let public = Type::Generic {
                     base: "Promise",
@@ -1225,9 +1410,7 @@ impl<'a> Checker<'a> {
         if receiver_mutable && self.newtypes.contains_key(receiver_type) {
             self.error_span(
                 _span,
-                format!(
-                    "mutable receiver methods are not allowed on newtype `{receiver_type}`"
-                ),
+                format!("mutable receiver methods are not allowed on newtype `{receiver_type}`"),
             );
         }
         if receiver_mutable && super::is_primitive_receiver_name(receiver_type) {
@@ -1235,9 +1418,7 @@ impl<'a> Checker<'a> {
             // to receive (deka#527).
             self.error_span(
                 _span,
-                format!(
-                    "mutable receiver methods are not allowed on primitive `{receiver_type}`"
-                ),
+                format!("mutable receiver methods are not allowed on primitive `{receiver_type}`"),
             );
         }
 
@@ -1264,9 +1445,13 @@ impl<'a> Checker<'a> {
                 repr: info.repr,
             }
         } else if super::is_primitive_receiver_name(receiver_type) {
-            Type::Named { name: receiver_type }
+            Type::Named {
+                name: receiver_type,
+            }
         } else {
-            Type::Struct { name: receiver_type }
+            Type::Struct {
+                name: receiver_type,
+            }
         };
         if receiver_mutable {
             self.declare_mutable_var(receiver_name, receiver_binding_type);
@@ -1354,9 +1539,10 @@ fn return_type_requires_value(ty: &Type<'_>) -> bool {
         Type::Never | Type::Error | Type::Infer | Type::Var => false,
         // An async function annotated `Promise<void>` is the async spelling of
         // the same "returns nothing" contract.
-        Type::Generic { base: "Promise", args } if args.len() == 1 => {
-            return_type_requires_value(&args[0])
-        }
+        Type::Generic {
+            base: "Promise",
+            args,
+        } if args.len() == 1 => return_type_requires_value(&args[0]),
         _ => true,
     }
 }

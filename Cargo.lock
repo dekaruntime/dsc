@@ -529,6 +529,7 @@ dependencies = [
  "deka_syntax",
  "insta",
  "serde",
+ "serde_json",
  "tempfile",
 ]
 

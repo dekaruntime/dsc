@@ -8,7 +8,9 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use deka_syntax::{BinOp, ExportDecl, Expr, ForInit, NewtypeRepr, Pattern, Program, Stmt, Type};
+use deka_syntax::{
+    BinOp, ExportDecl, Expr, ForInit, NewtypeRepr, Pattern, Program, Span, Stmt, Type,
+};
 
 use crate::util::{bin_op_str, escape_string, is_primitive_receiver, un_op_str, write_indent};
 
@@ -22,6 +24,128 @@ fn is_panic_callee(callee: &Expr<'_>) -> bool {
         } => matches!(object, Expr::Identifier { name: "deka", .. }),
         _ => false,
     }
+}
+
+/// Stable virtual-module key for one build-only binding.
+///
+/// It is intentionally derived only from source identity and location. Deka
+/// owns the materialized value behind this key; Dsc never evaluates it.
+pub fn dev_slot_id(file_path: &str, binding: &str, span: Span) -> String {
+    let identity = format!(
+        "{file_path}\0{binding}\0{}\0{}",
+        span.byte_start, span.byte_end
+    );
+    let hash = identity.bytes().fold(0xcbf29ce484222325_u64, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+    });
+    format!("{hash:016x}")
+}
+
+fn dev_binding<'a>(stmt: &'a Stmt<'a>) -> Option<(&'a str, &'a Expr<'a>, bool)> {
+    match stmt {
+        Stmt::Const {
+            name,
+            value: value @ Expr::Build { .. },
+            ..
+        } => Some((name, value, false)),
+        Stmt::Export {
+            decl:
+                ExportDecl::Const {
+                    name,
+                    value: value @ Expr::Build { .. },
+                    ..
+                },
+            ..
+        } => Some((name, value, true)),
+        _ => None,
+    }
+}
+
+fn declared_name<'a>(stmt: &'a Stmt<'a>) -> Option<&'a str> {
+    match stmt {
+        Stmt::Const { name, .. }
+        | Stmt::Let { name, .. }
+        | Stmt::Function { name, .. }
+        | Stmt::Struct { name, .. }
+        | Stmt::Enum { name, .. }
+        | Stmt::TypeAlias { name, .. }
+        | Stmt::Newtype { name, .. }
+        | Stmt::Interface { name, .. } => Some(name),
+        Stmt::Export {
+            decl: ExportDecl::Const { name, .. } | ExportDecl::Function { name, .. },
+            ..
+        } => Some(name),
+        _ => None,
+    }
+}
+
+fn collect_dev_stmt_names(stmt: &Stmt<'_>, out: &mut HashSet<String>) {
+    visit_stmt_exprs(stmt, &mut |expr| match expr {
+        Expr::Identifier { name, .. } => {
+            out.insert((*name).to_string());
+        }
+        Expr::StructLiteral { name, .. }
+        | Expr::EnumConstructor {
+            enum_name: name, ..
+        } => {
+            out.insert((*name).to_string());
+        }
+        Expr::JsxElement { element, .. }
+            if element
+                .tag
+                .chars()
+                .next()
+                .is_some_and(|ch| ch.is_ascii_uppercase()) =>
+        {
+            out.insert(element.tag.to_string());
+        }
+        _ => {}
+    });
+}
+
+fn runtime_uses_name(program: &Program<'_>, target: &str) -> bool {
+    let mut used = false;
+    for stmt in program.statements.iter() {
+        if dev_binding(stmt).is_some() {
+            continue;
+        }
+        visit_stmt_exprs(stmt, &mut |expr| {
+            if matches!(expr, Expr::Identifier { name, .. } if *name == target)
+                || matches!(expr, Expr::JsxElement { element, .. } if element.tag == target)
+            {
+                used = true;
+            }
+        });
+        if used {
+            break;
+        }
+    }
+    used
+}
+
+/// Whether a binding is referenced from a build-only `build` body.
+/// Module-graph compilation uses this to build a separate dev reachability
+/// graph without treating those imports as runtime dependencies.
+pub fn dev_uses_name(program: &Program<'_>, target: &str) -> bool {
+    let mut used = false;
+    for stmt in program.statements.iter() {
+        let Some((_, Expr::Build { body, .. }, _)) = dev_binding(stmt) else {
+            continue;
+        };
+        for stmt in *body {
+            visit_stmt_exprs(stmt, &mut |expr| {
+                if matches!(expr, Expr::Identifier { name, .. } if *name == target)
+                    || matches!(expr, Expr::JsxElement { element, .. } if element.tag == target)
+                {
+                    used = true;
+                }
+            });
+        }
+        if used {
+            break;
+        }
+    }
+    used
 }
 
 /// Emit JavaScript for a parsed and type-checked program.
@@ -115,17 +239,11 @@ pub fn emit_js_with_options<'a>(
     // by the typechecker (deka#561, deka#566): the emitter rewrites them to
     // an Option-producing expression since JS has no `first`/`last` and its
     // `pop`/`shift` return raw values, not the declared Option<T>.
-    array_builtin_calls: &HashMap<
-        *const Expr<'a>,
-        deka_syntax::typeck::ArrayAccess,
-    >,
+    array_builtin_calls: &HashMap<*const Expr<'a>, deka_syntax::typeck::ArrayAccess>,
     // Builtin Math-backed `number` method call sites, lowered by the
     // typechecker (deka#378 step 2, rfd#40 phase 2): the emitter rewrites
     // them to `Math.*` expressions since JS numbers have no such methods.
-    number_math_calls: &HashMap<
-        *const Expr<'a>,
-        deka_syntax::typeck::NumberMath,
-    >,
+    number_math_calls: &HashMap<*const Expr<'a>, deka_syntax::typeck::NumberMath>,
     // Builtin `.type()` call sites inside `super` functions, lowered by the
     // typechecker to the hidden descriptor parameter or a static tree const
     // (deka#529, rfd#41). Kept for super declarations (PR B): this is the
@@ -202,14 +320,8 @@ pub fn emit_js_module_with_options<'a>(
     type_of_calls: &HashSet<*const Expr<'a>>,
     signature_calls: &HashMap<*const Expr<'a>, deka_syntax::typeck::DescriptorTree<'a>>,
     json_calls: &HashMap<*const Expr<'a>, deka_syntax::typeck::JsonCall<'a>>,
-    array_builtin_calls: &HashMap<
-        *const Expr<'a>,
-        deka_syntax::typeck::ArrayAccess,
-    >,
-    number_math_calls: &HashMap<
-        *const Expr<'a>,
-        deka_syntax::typeck::NumberMath,
-    >,
+    array_builtin_calls: &HashMap<*const Expr<'a>, deka_syntax::typeck::ArrayAccess>,
+    number_math_calls: &HashMap<*const Expr<'a>, deka_syntax::typeck::NumberMath>,
     static_type_calls: &HashMap<*const Expr<'a>, deka_syntax::typeck::StaticTypeCall<'a>>,
     super_decl_trees: &std::collections::HashMap<&'a str, deka_syntax::typeck::DescriptorTree<'a>>,
     jsx_optional_props: &HashMap<
@@ -227,6 +339,7 @@ pub fn emit_js_module_with_options<'a>(
 ) -> Result<ModuleEmit, String> {
     let mut emitter = Emitter::new(program);
     emitter.module_base = module_base;
+    emitter.source_path = file_path.to_string();
     emitter.file_stem = file_stem_from_path(file_path);
     emitter.seed_imports(imports);
     emitter.unwrap_calls = unwrap_calls.clone();
@@ -256,6 +369,43 @@ pub fn emit_js_module_with_options<'a>(
         js,
         demand: emitter.demand,
     })
+}
+
+/// Emit one dev-only entry. Its caller is responsible for publishing the
+/// returned module in the compiler plan; this function never executes it.
+#[allow(clippy::too_many_arguments)]
+pub fn emit_dev_entry<'a>(
+    program: &'a Program<'a>,
+    source: &str,
+    imports: &HashMap<&str, &deka_syntax::ModuleExports<'a>>,
+    module_base: Option<String>,
+    typeck: &deka_syntax::typeck::TypeckResult<'a>,
+    body: &'a [Stmt<'a>],
+    slot: &str,
+    file_path: &str,
+) -> Result<String, String> {
+    let mut emitter = Emitter::new(program);
+    emitter.module_base = module_base;
+    emitter.source_path = file_path.to_string();
+    emitter.file_stem = file_stem_from_path(file_path);
+    emitter.seed_imports(imports);
+    emitter.unwrap_calls = typeck.unwrap_calls.clone();
+    emitter.operator_rewrites = typeck.operator_rewrites.clone();
+    emitter.method_calls = typeck.method_calls.clone();
+    emitter.type_of_calls = typeck.type_of_calls.clone();
+    emitter.signature_calls = typeck.signature_calls.clone();
+    emitter.json_calls = typeck.json_calls.clone();
+    emitter.array_builtin_calls = typeck.array_builtin_calls.clone();
+    emitter.number_math_calls = typeck.number_math_calls.clone();
+    emitter.static_type_calls = typeck.static_type_calls.clone();
+    emitter.super_decl_trees = typeck.super_trees.clone();
+    emitter.jsx_optional_props = typeck.jsx_optional_props.clone();
+    emitter.enum_case_patterns = typeck.enum_case_patterns.clone();
+    emitter.union_type_patterns = typeck.union_type_patterns.clone();
+    if module_imports_side_effect_css(program) {
+        emitter.css_scope = Some(css_scope_hash(source));
+    }
+    emitter.emit_dev_entry(slot, body)
 }
 
 fn file_stem_from_path(path: &str) -> String {
@@ -674,7 +824,10 @@ fn json_encode(tree: &deka_syntax::typeck::DescriptorTree, value: &str) -> Strin
                 })
                 .collect::<Vec<_>>()
                 .join(" ");
-            format!("(() => {{ switch ({value}.__case) {{ {} default: return undefined; }} }})()", arms)
+            format!(
+                "(() => {{ switch ({value}.__case) {{ {} default: return undefined; }} }})()",
+                arms
+            )
         }
         T::Union { members } => {
             let arms = members
@@ -741,7 +894,9 @@ fn json_decode(tree: &deka_syntax::typeck::DescriptorTree, value: &str) -> Strin
         },
         T::Newtype { name, repr } => {
             let inner = json_decode(repr, value);
-            format!("(() => {{ const x = {inner}; return x === undefined ? undefined : {name}(x); }})()")
+            format!(
+                "(() => {{ const x = {inner}; return x === undefined ? undefined : {name}(x); }})()"
+            )
         }
         T::Array { elem } => format!(
             "Array.isArray({value}) ? (() => {{ const a = []; for (const x of {value}) {{ const y = {}; if (y === undefined) return undefined; a.push(y); }} return a; }})() : undefined",
@@ -752,16 +907,28 @@ fn json_decode(tree: &deka_syntax::typeck::DescriptorTree, value: &str) -> Strin
             json_decode(inner, &format!("{value}.Option.values?.[0]"))
         ),
         T::Struct { name, fields } => {
-            let mut checks = vec![format!("{value} && typeof {value} === \"object\" && {value}[{}]", json_string(name))];
+            let mut checks = vec![format!(
+                "{value} && typeof {value} === \"object\" && {value}[{}]",
+                json_string(name)
+            )];
             let mut assignments = Vec::new();
             for field in fields {
-                let source = format!("{value}[{}][{}]", json_string(name), json_string(field.name));
+                let source = format!(
+                    "{value}[{}][{}]",
+                    json_string(name),
+                    json_string(field.name)
+                );
                 let decoded = json_decode(&field.ty, &source);
                 let local = format!("__{}", field.name);
                 checks.push(format!("(() => {{ const {local} = {decoded}; if ({local} === undefined) return false; return true; }})()"));
                 assignments.push(format!("{}: {}", json_string(field.name), decoded));
             }
-            format!("({}) ? {}({{ {} }}) : undefined", checks.join(" && "), name, assignments.join(", "))
+            format!(
+                "({}) ? {}({{ {} }}) : undefined",
+                checks.join(" && "),
+                name,
+                assignments.join(", ")
+            )
         }
         T::Enum { name, cases } => {
             let mut arms = Vec::new();
@@ -770,13 +937,25 @@ fn json_decode(tree: &deka_syntax::typeck::DescriptorTree, value: &str) -> Strin
                     Some(payload) => {
                         let source = format!("{value}[{}].values?.[0]", json_string(name));
                         let decoded = json_decode(payload, &source);
-                        format!("(() => {{ const x = {}; return x === undefined ? undefined : {}.{}(x); }})()", decoded, name, case)
+                        format!(
+                            "(() => {{ const x = {}; return x === undefined ? undefined : {}.{}(x); }})()",
+                            decoded, name, case
+                        )
                     }
                     None => format!("{}.{}", name, case),
                 };
-                arms.push(format!("{} === {} ? {}", format!("{value}[{}].case", json_string(name)), json_string(case), body));
+                arms.push(format!(
+                    "{} === {} ? {}",
+                    format!("{value}[{}].case", json_string(name)),
+                    json_string(case),
+                    body
+                ));
             }
-            format!("{value} && typeof {value} === \"object\" && {value}[{}] ? {} : undefined", json_string(name), arms.join(" : "))
+            format!(
+                "{value} && typeof {value} === \"object\" && {value}[{}] ? {} : undefined",
+                json_string(name),
+                arms.join(" : ")
+            )
         }
         T::Union { members } => {
             let mut expression = "undefined".to_string();
@@ -920,7 +1099,10 @@ struct Emitter<'a> {
     /// typechecker, keyed by declaration name. Read by `emit_prelude` to
     /// intern one frozen const per referenced declaration.
     super_decl_trees: std::collections::HashMap<&'a str, deka_syntax::typeck::DescriptorTree<'a>>,
+    source_path: String,
     file_stem: String,
+    /// Dev entries are JS modules written next to normal emitted modules.
+    dev_entry: bool,
     fn_scope: String,
     jsx_path: Vec<usize>,
     jsx_siblings: Vec<usize>,
@@ -973,7 +1155,9 @@ impl<'a> Emitter<'a> {
             number_math_calls: HashMap::new(),
             static_type_calls: HashMap::new(),
             super_decl_trees: std::collections::HashMap::new(),
+            source_path: "module.ds".to_string(),
             file_stem: "module".to_string(),
+            dev_entry: false,
             fn_scope: "_".to_string(),
             jsx_path: Vec::new(),
             jsx_siblings: Vec::new(),
@@ -1000,12 +1184,42 @@ impl<'a> Emitter<'a> {
         // jsx runtime import when this file contains JSX.
         let mut first = true;
         for stmt in self.program.statements.iter() {
-            if matches!(stmt, Stmt::Import { .. }) && self.should_emit_stmt(stmt) {
+            if matches!(stmt, Stmt::Import { .. })
+                && self.should_emit_stmt(stmt)
+                && self.should_emit_runtime_import(stmt)
+            {
                 if !first {
                     self.out.push('\n');
                 }
                 first = false;
                 self.emit_stmt(stmt)?;
+            }
+        }
+        // Runtime code never contains a dev body. The host resolves this
+        // opaque value import from the compiler plan after executing the
+        // matching dev-only entry.
+        for stmt in self.program.statements.iter() {
+            let Some((name, value, exported)) = dev_binding(stmt) else {
+                continue;
+            };
+            if !self.is_live(name) {
+                continue;
+            }
+            let slot = dev_slot_id(&self.source_path, name, value.span());
+            if !first {
+                self.out.push('\n');
+            }
+            first = false;
+            self.out.push_str("import { value as ");
+            self.out.push_str(name);
+            self.out.push_str(" } from \"deka:dev/");
+            self.out.push_str(&slot);
+            self.out.push_str("\";");
+            if exported {
+                self.out.push('\n');
+                self.out.push_str("export { ");
+                self.out.push_str(name);
+                self.out.push_str(" };");
             }
         }
         if self.needs_jsx_helper() {
@@ -1042,7 +1256,7 @@ impl<'a> Emitter<'a> {
         // First pass: emit struct/enum/function declarations so that all
         // factories exist before receiver methods are registered.
         for stmt in self.program.statements.iter() {
-            if matches!(stmt, Stmt::Import { .. }) {
+            if matches!(stmt, Stmt::Import { .. }) || dev_binding(stmt).is_some() {
                 continue;
             }
             if !Self::is_runtime_statement(stmt) && self.should_emit_stmt(stmt) {
@@ -1059,7 +1273,10 @@ impl<'a> Emitter<'a> {
 
         // Second pass: emit executable top-level statements (const/let/expr).
         for stmt in self.program.statements.iter() {
-            if Self::is_runtime_statement(stmt) && self.should_emit_stmt(stmt) {
+            if Self::is_runtime_statement(stmt)
+                && dev_binding(stmt).is_none()
+                && self.should_emit_stmt(stmt)
+            {
                 if !first {
                     self.out.push('\n');
                 }
@@ -1071,10 +1288,106 @@ impl<'a> Emitter<'a> {
         Ok(std::mem::take(&mut self.out))
     }
 
+    fn emit_dev_entry(&mut self, slot: &str, body: &'a [Stmt<'a>]) -> Result<String, String> {
+        self.dev_entry = true;
+        self.live_names = Some(self.dev_live_names(body));
+        self.out.push_str("\"use strict\";\n");
+
+        for stmt in self.program.statements.iter() {
+            if matches!(stmt, Stmt::Import { .. }) && self.should_emit_stmt(stmt) {
+                self.emit_stmt(stmt)?;
+                self.out.push('\n');
+            }
+        }
+        self.emit_prelude()?;
+
+        // Keep only declarations and top-level values reachable from this
+        // dev body. Runtime expressions and other dev slots stay out.
+        for stmt in self.program.statements.iter() {
+            if matches!(stmt, Stmt::Import { .. }) || dev_binding(stmt).is_some() {
+                continue;
+            }
+            if !Self::is_runtime_statement(stmt) && self.should_emit_stmt(stmt) {
+                self.emit_stmt(stmt)?;
+                self.out.push('\n');
+            }
+        }
+        self.emit_method_registrations()?;
+        for stmt in self.program.statements.iter() {
+            if Self::is_runtime_statement(stmt)
+                && self.should_emit_stmt(stmt)
+                && dev_binding(stmt).is_none()
+                && !matches!(stmt, Stmt::Expr { .. })
+            {
+                self.emit_stmt(stmt)?;
+                self.out.push('\n');
+            }
+        }
+
+        self.out
+            .push_str("export default async function __deka_dev_");
+        self.out.push_str(slot);
+        self.out.push_str("() {\n");
+        for stmt in body {
+            self.emit_stmt(stmt)?;
+            self.out.push('\n');
+        }
+        self.out.push_str("}\n");
+        Ok(std::mem::take(&mut self.out))
+    }
+
+    fn dev_live_names(&self, body: &[Stmt<'a>]) -> HashSet<String> {
+        let mut live = HashSet::new();
+        for stmt in body {
+            collect_dev_stmt_names(stmt, &mut live);
+        }
+
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for stmt in self.program.statements.iter() {
+                let Some(name) = declared_name(stmt) else {
+                    continue;
+                };
+                if !live.contains(name) || dev_binding(stmt).is_some() {
+                    continue;
+                }
+                let before = live.len();
+                collect_dev_stmt_names(stmt, &mut live);
+                changed |= live.len() > before;
+            }
+        }
+        live
+    }
+
     fn is_live(&self, name: &str) -> bool {
         self.live_names
             .as_ref()
             .map_or(true, |live| live.contains(name))
+    }
+
+    fn should_emit_runtime_import(&self, stmt: &Stmt<'a>) -> bool {
+        // Graph shaking already computes runtime liveness. Single-file
+        // compilation keeps every ordinary import by default, so it needs the
+        // same distinction here: references nested in `build` do not make a
+        // binding part of the runtime graph.
+        if self.live_names.is_some() {
+            return true;
+        }
+        let Stmt::Import { specifiers, .. } = stmt else {
+            return true;
+        };
+        if specifiers.is_empty() {
+            return true;
+        }
+
+        // Retain normal imports, including apparently-unused package imports:
+        // their module initialization may be observable. Only an import whose
+        // every binding belongs solely to a dev entry can leave runtime JS.
+        !specifiers.iter().all(|specifier| {
+            dev_uses_name(self.program, specifier.local)
+                && !runtime_uses_name(self.program, specifier.local)
+        })
     }
 
     fn should_emit_stmt(&self, stmt: &Stmt<'_>) -> bool {
@@ -1240,6 +1553,13 @@ impl<'a> Emitter<'a> {
     /// Note: unknown bare specifiers are rejected at compile time before emit
     /// when module_base is set (deka#497), so this path only sees stdlib names.
     fn resolve_module_source(&self, source: &str) -> String {
+        if self.dev_entry
+            && (source.starts_with("./") || source.starts_with("../"))
+            && (source.ends_with(".ds") || source.ends_with(".dsx"))
+        {
+            let ext_len = if source.ends_with(".dsx") { 4 } else { 3 };
+            return format!("{}.js", &source[..source.len() - ext_len]);
+        }
         let Some(base) = &self.module_base else {
             return source.to_string();
         };
@@ -1448,8 +1768,7 @@ impl<'a> Emitter<'a> {
                 if !self.is_live(struct_name) {
                     continue;
                 }
-                let methods =
-                    self.collect_methods_for_struct(struct_name, &mut HashSet::new());
+                let methods = self.collect_methods_for_struct(struct_name, &mut HashSet::new());
                 for method in &methods {
                     if method.receiver_mutable {
                         parts.impl_mut = true;
@@ -2101,7 +2420,8 @@ impl<'a> Emitter<'a> {
         self.out.push_str(name);
         self.out.push_str("$proto, __p, { get() { return ");
         self.out.push_str(name);
-        self.out.push_str("$values.get(this); }, enumerable: false, configurable: false });\n");
+        self.out
+            .push_str("$values.get(this); }, enumerable: false, configurable: false });\n");
         write_indent(&mut self.out, 0);
         self.out.push_str(name);
         self.out
@@ -2798,6 +3118,10 @@ impl<'a> Emitter<'a> {
             Expr::Unsafe { source, .. } => {
                 self.emit_unsafe(source)?;
             }
+            // Valid dev blocks are replaced at their enclosing top-level
+            // binding. This fallback prevents an invalid nested form from
+            // leaking build-only code into the runtime module.
+            Expr::Build { .. } => self.out.push_str("undefined"),
             Expr::Bridge {
                 kind, action, args, ..
             } => {
@@ -3123,8 +3447,7 @@ impl<'a> Emitter<'a> {
         if trimmed.is_empty() {
             self.out.push_str("(function() { try { return (");
             self.out.push_str(crate::prelude::RESULT_OK);
-            self.out
-                .push_str(")(undefined); } catch (err) { return (");
+            self.out.push_str(")(undefined); } catch (err) { return (");
             self.out.push_str(crate::prelude::RESULT_ERR);
             self.out
                 .push_str(")(err instanceof Error ? err : new Error(String(err))); } })()");
@@ -3379,7 +3702,9 @@ impl<'a> Emitter<'a> {
                     number_math_calls: HashMap::new(),
                     static_type_calls: HashMap::new(),
                     super_decl_trees: std::collections::HashMap::new(),
+                    source_path: self.source_path.clone(),
                     file_stem: self.file_stem.clone(),
+                    dev_entry: self.dev_entry,
                     fn_scope: self.fn_scope.clone(),
                     jsx_path: Vec::new(),
                     jsx_siblings: Vec::new(),
@@ -4234,6 +4559,9 @@ fn visit_expr(expr: &Expr, visitor: &mut dyn FnMut(&Expr)) {
                 visit_stmt_exprs(s, visitor);
             }
         }
+        // Build-only bodies have a separate import graph and cannot retain a
+        // runtime import merely because they reference it.
+        Expr::Build { .. } => {}
         Expr::JsxElement { element, .. } => {
             for attr in element.attributes.iter() {
                 if let Some(v) = &attr.value {

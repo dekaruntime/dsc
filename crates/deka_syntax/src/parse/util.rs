@@ -75,6 +75,7 @@ pub(super) fn token_name(kind: TokenKind) -> &'static str {
         Return => "`return`",
         Match => "`match`",
         Unsafe => "`unsafe`",
+        Build => "`build`",
         Bridge => "`bridge`",
         Await => "`await`",
         Async => "`async`",

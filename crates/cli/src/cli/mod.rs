@@ -7,6 +7,7 @@ pub mod check;
 pub mod emit;
 pub mod fmt;
 pub mod lsp;
+pub mod plan;
 pub mod transpile;
 
 pub fn register_global_flags(registry: &mut Registry) {

@@ -2,7 +2,7 @@
 //!
 //! The neutral `deka_compiler_*` exports are the only browser-facing ABI.
 
-use std::alloc::{alloc, dealloc, Layout};
+use std::alloc::{Layout, alloc, dealloc};
 use std::{ptr, slice, str};
 
 use deka_syntax::{Diagnostic as DekaDiagnostic, Severity};
@@ -211,6 +211,10 @@ struct CompileResponse<'a> {
 #[derive(Serialize)]
 struct CompileOutput {
     code: String,
+    /// Present only when source contains build-only values. Browser hosts can
+    /// inspect the requirement but cannot execute it without a Deka host.
+    #[serde(rename = "devPlan", skip_serializing_if = "Option::is_none")]
+    dev_plan: Option<deka_compile::DevPlan>,
 }
 
 #[derive(Serialize)]
@@ -287,7 +291,10 @@ fn compile_request(source: &str, filename: &str, options_json: &str) -> String {
                 .collect::<Vec<_>>();
             let has_error = diagnostics.iter().any(|d| d.severity == "error");
             let ok = !has_error && !result.js.is_empty();
-            let output = ok.then(|| CompileOutput { code: result.js });
+            let output = ok.then(|| CompileOutput {
+                code: result.js,
+                dev_plan: (!result.dev_plan.slots.is_empty()).then_some(result.dev_plan),
+            });
             json(&CompileResponse {
                 abi_version: ABI_VERSION,
                 ok,
@@ -320,7 +327,10 @@ fn compile_request(source: &str, filename: &str, options_json: &str) -> String {
     }
 }
 
-fn parse_compile_options(filename: &str, options_json: &str) -> Result<CompileRequestOptions, &'static str> {
+fn parse_compile_options(
+    filename: &str,
+    options_json: &str,
+) -> Result<CompileRequestOptions, &'static str> {
     if !filename.ends_with(".ds") && !filename.ends_with(".dsx") {
         return Err("Deka browser compiler only accepts .ds or .dsx source files");
     }
@@ -338,7 +348,11 @@ fn parse_compile_options(filename: &str, options_json: &str) -> Result<CompileRe
     }
 }
 
-fn diagnostic_from_deka_syntax(diagnostic: &DekaDiagnostic, source: &str, filename: &str) -> Diagnostic {
+fn diagnostic_from_deka_syntax(
+    diagnostic: &DekaDiagnostic,
+    source: &str,
+    filename: &str,
+) -> Diagnostic {
     let help = diagnostic.help_text.as_deref().unwrap_or("");
     let severity = severity_label(diagnostic.severity);
     let rendered = strip_ansi_codes(&deka_validation::format_validation_error(
@@ -359,8 +373,13 @@ fn diagnostic_from_deka_syntax(diagnostic: &DekaDiagnostic, source: &str, filena
         start_line: diagnostic.line,
         start_column: diagnostic.column,
         end_line: diagnostic.line,
-        end_column: diagnostic.column.saturating_add(diagnostic.underline_length.max(1)),
-        help: diagnostic.help_text.clone().filter(|h| !h.trim().is_empty()),
+        end_column: diagnostic
+            .column
+            .saturating_add(diagnostic.underline_length.max(1)),
+        help: diagnostic
+            .help_text
+            .clone()
+            .filter(|h| !h.trim().is_empty()),
         rendered,
     }
 }
@@ -480,8 +499,8 @@ mod tests {
         let Ok(raw) = std::fs::read_to_string(&manifest_path) else {
             return Vec::new();
         };
-        let manifest: Vec<TourLesson> = serde_json::from_str(&raw)
-        .expect("tests/tour/manifest.json");
+        let manifest: Vec<TourLesson> =
+            serde_json::from_str(&raw).expect("tests/tour/manifest.json");
 
         let ds_files: Vec<String> = std::fs::read_dir(&tour_dir)
             .unwrap_or_else(|error| panic!("read {}: {error}", tour_dir.display()))
@@ -540,18 +559,52 @@ mod tests {
 
     #[test]
     fn deka_mode_compiles_a_ds_fixture_with_structured_metadata() {
-        let response: Value =
-            serde_json::from_str(&compile_request("const answer = 42;", "lesson.ds", r#"{"mode":"auto"}"#))
-                .expect("response JSON");
+        let response: Value = serde_json::from_str(&compile_request(
+            "const answer = 42;",
+            "lesson.ds",
+            r#"{"mode":"auto"}"#,
+        ))
+        .expect("response JSON");
 
         assert_eq!(response["abi_version"], ABI_VERSION);
         assert_eq!(response["ok"], true);
         assert_eq!(response["metadata"]["language"], "deka");
         assert_eq!(response["metadata"]["filename"], "lesson.ds");
-        assert!(response["output"]["code"]
-            .as_str()
-            .is_some_and(|code| code.contains("const answer = 42")));
+        assert!(
+            response["output"]["code"]
+                .as_str()
+                .is_some_and(|code| code.contains("const answer = 42"))
+        );
         assert_eq!(response["diagnostics"].as_array().map(Vec::len), Some(0));
+    }
+
+    #[test]
+    fn compile_response_exposes_dev_plan_without_executing_it() {
+        let source = r#"
+const labels: Array<string> = build {
+  return Ok(["Ada"])
+}
+"#;
+        let response: Value = serde_json::from_str(&compile_request(
+            source,
+            "app/data.ds",
+            r#"{"mode":"deka"}"#,
+        ))
+        .expect("response JSON");
+        assert_eq!(response["ok"], true, "{response}");
+        assert_eq!(response["output"]["devPlan"]["version"], 1, "{response}");
+        assert_eq!(
+            response["output"]["devPlan"]["slots"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            response["output"]["code"]
+                .as_str()
+                .is_some_and(|code| code.contains("deka:dev/"))
+        );
     }
 
     #[test]
@@ -576,7 +629,8 @@ mod tests {
         // through and then fails as "Cannot use import statement outside a
         // module" (testsuite.deka.gg regression).
         assert!(
-            code.lines().any(|line| line == r#"import { echo } from "/tour/modules/io.mjs";"#),
+            code.lines()
+                .any(|line| line == r#"import { echo } from "/tour/modules/io.mjs";"#),
             "expected the import on its own line, got:\n{code}"
         );
     }
@@ -630,26 +684,35 @@ mod tests {
 
         assert_eq!(filename_response["ok"], false);
         assert_eq!(filename_response["metadata"]["language"], "unknown");
-        assert!(filename_response["diagnostics"][0]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("only accepts .ds")));
+        assert!(
+            filename_response["diagnostics"][0]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("only accepts .ds"))
+        );
 
-        let mode_response: Value =
-            serde_json::from_str(&compile_request("const answer = 42;", "lesson.ds", r#"{"mode":"phpx"}"#))
-                .expect("response JSON");
+        let mode_response: Value = serde_json::from_str(&compile_request(
+            "const answer = 42;",
+            "lesson.ds",
+            r#"{"mode":"phpx"}"#,
+        ))
+        .expect("response JSON");
         assert_eq!(mode_response["ok"], false);
-        assert!(mode_response["diagnostics"][0]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("supported modes are `auto` and `deka`")));
+        assert!(
+            mode_response["diagnostics"][0]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("supported modes are `auto` and `deka`"))
+        );
     }
 
     #[test]
     fn diagnostics_are_monaco_ready_and_native_parity_is_stable() {
         let source = "function broken(";
-        let native: Value = serde_json::from_str(&compile_request(source, "broken.ds", r#"{"mode":"deka"}"#))
-            .expect("native response JSON");
-        let wasm_abi: Value = serde_json::from_str(&compile_request(source, "broken.ds", r#"{"mode":"auto"}"#))
-            .expect("WASM ABI response JSON");
+        let native: Value =
+            serde_json::from_str(&compile_request(source, "broken.ds", r#"{"mode":"deka"}"#))
+                .expect("native response JSON");
+        let wasm_abi: Value =
+            serde_json::from_str(&compile_request(source, "broken.ds", r#"{"mode":"auto"}"#))
+                .expect("WASM ABI response JSON");
 
         assert_eq!(native["ok"], false);
         assert_eq!(native["diagnostics"], wasm_abi["diagnostics"]);
@@ -662,8 +725,9 @@ mod tests {
 
     #[test]
     fn mode_and_filename_errors_are_structured() {
-        let response: Value = serde_json::from_str(&compile_request("", "lesson.txt", r#"{"mode":"auto"}"#))
-            .expect("response JSON");
+        let response: Value =
+            serde_json::from_str(&compile_request("", "lesson.txt", r#"{"mode":"auto"}"#))
+                .expect("response JSON");
         assert_eq!(response["ok"], false);
         assert_eq!(response["diagnostics"][0]["code"], "emitter");
         assert_eq!(response["metadata"]["filename"], "lesson.txt");
@@ -678,8 +742,9 @@ mod tests {
 
 const origin = Point { x: 3, y: 4 };
 "#;
-        let response: Value = serde_json::from_str(&compile_request(source, "struct.ds", r#"{"mode":"deka"}"#))
-            .expect("response JSON");
+        let response: Value =
+            serde_json::from_str(&compile_request(source, "struct.ds", r#"{"mode":"deka"}"#))
+                .expect("response JSON");
 
         assert_eq!(response["ok"], true, "{response}");
         let code = response["output"]["code"]
@@ -723,10 +788,11 @@ const origin = Point { x: 3, y: 4 };
             if source.contains("from \"io\"") || source.contains("from 'io'") {
                 continue;
             }
-            let response: Value = serde_json::from_str(&compile_request(
-                &source, &filename, r#"{"mode":"deka"}"#,
-            ))
-            .unwrap_or_else(|error| panic!("{}: invalid response JSON: {error}", lesson.id));
+            let response: Value =
+                serde_json::from_str(&compile_request(&source, &filename, r#"{"mode":"deka"}"#))
+                    .unwrap_or_else(|error| {
+                        panic!("{}: invalid response JSON: {error}", lesson.id)
+                    });
             assert_eq!(
                 response["ok"], lesson.expect_compile,
                 "{} ({}): {response}",

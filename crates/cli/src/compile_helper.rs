@@ -82,6 +82,33 @@ pub fn compile_source_js(
         .ok_or_else(|| "module graph did not emit entry module".to_string())
 }
 
+/// Compile an entry and return only the build-time materialization contract.
+/// Dsc exposes this to its host, but never evaluates a plan entry itself.
+pub fn compile_dev_plan(input: &Path, cwd: &Path) -> Result<deka_compile::DevPlan, String> {
+    let source = std::fs::read_to_string(input)
+        .map_err(|err| format!("failed to read {}: {err}", input.display()))?;
+    let input_name = input
+        .to_str()
+        .ok_or_else(|| format!("input path is not valid UTF-8: {}", input.display()))?;
+    let meta = deka_compile::parse_source_module_meta(&source);
+    if meta.imports.is_empty() {
+        return compile_to_js(&source, input_name)
+            .map(|result| result.dev_plan)
+            .map_err(|diagnostics| format_diagnostics(&diagnostics));
+    }
+
+    let project_root = find_project_root(cwd, input)
+        .or_else(|| input.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| PathBuf::from("."));
+    if let Some(err) = unresolved_bare_import_error(&source, input, &project_root) {
+        return Err(err);
+    }
+    let loader = module_graph::FsModuleLoader::new(project_root);
+    module_graph::compile_module_graph_with_options(input, &loader, GraphCompileOptions::default())
+        .map(|graph| graph.dev_plan)
+        .map_err(|diagnostics| format_diagnostics(&diagnostics))
+}
+
 /// Compile the entry's reachable graph. Keys are canonical source paths.
 /// Isolate hosts (`--self-contained --out <dir>`) write every module, not
 /// just the entry, so package imports (`http`, `jwt`) stay in the map.
@@ -249,10 +276,7 @@ fn lock_package_name(spec: &str) -> Option<String> {
     Some(format!("@deka/{first}"))
 }
 
-fn is_linked_bare_import(
-    spec: &str,
-    linked: &std::collections::BTreeMap<String, PathBuf>,
-) -> bool {
+fn is_linked_bare_import(spec: &str, linked: &std::collections::BTreeMap<String, PathBuf>) -> bool {
     for package in linked.keys() {
         for alias in deka_project::module_spec::module_spec_aliases(package) {
             if spec == alias || spec.starts_with(&(alias + "/")) {
@@ -416,7 +440,11 @@ fn compute_fs_graph_hash(root: &Path) -> Result<String, String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-fn collect_integrity_files(root: &Path, current: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
+fn collect_integrity_files(
+    root: &Path,
+    current: &Path,
+    out: &mut Vec<PathBuf>,
+) -> Result<(), String> {
     let mut entries = std::fs::read_dir(current)
         .map_err(|err| format!("failed to read {}: {err}", current.display()))?
         .collect::<Result<Vec<_>, _>>()
@@ -489,14 +517,7 @@ fn format_package_error(
         .to_string();
     let (line, column, underline) = specifier_frame(source, spec, span);
     deka_validation::format_validation_error(
-        source,
-        &file_path,
-        kind,
-        line,
-        column,
-        message,
-        help,
-        underline,
+        source, &file_path, kind, line, column, message, help, underline,
     )
 }
 

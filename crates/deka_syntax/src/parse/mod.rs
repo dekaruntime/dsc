@@ -87,6 +87,7 @@ fn kind_is_name_capable(kind: TokenKind) -> bool {
             | TokenKind::Return
             | TokenKind::Match
             | TokenKind::Unsafe
+            | TokenKind::Build
             | TokenKind::Bridge
             | TokenKind::Await
             | TokenKind::Async
@@ -100,7 +101,8 @@ struct Parser<'a> {
     arena: &'a Bump,
     tokens: Vec<Token<'a>>,
     source: &'a str,
-    pos: usize,    prev: Token<'a>,
+    pos: usize,
+    prev: Token<'a>,
     errors: Vec<Diagnostic>,
 }
 
@@ -226,7 +228,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-
     /// Look past any immediately-following newlines and return the kind of
     /// the first non-newline token. Does not advance the parser.
     fn peek_after_newlines(&self) -> TokenKind {
@@ -296,7 +297,10 @@ mod tests {
     fn return_type_colon_rejected_on_receiver_method() {
         let arena = Bump::new();
         let result = parse("fn (p P) get(): number { return p.x }", &arena);
-        assert!(!result.errors.is_empty(), "colon form must not parse on methods");
+        assert!(
+            !result.errors.is_empty(),
+            "colon form must not parse on methods"
+        );
     }
 
     #[test]
@@ -346,9 +350,15 @@ mod tests {
         // `break` in a match arm body must keep erroring as a bad object key,
         // not parse as a keyword key (deka#481 colon-lookahead rule).
         let arena = Bump::new();
-        let result = parse("for (let i = 0; i < 3; i = i + 1) {\n  match (i) {\n    2 => { break },\n    _ => {}\n  }\n}", &arena);
+        let result = parse(
+            "for (let i = 0; i < 3; i = i + 1) {\n  match (i) {\n    2 => { break },\n    _ => {}\n  }\n}",
+            &arena,
+        );
         assert!(
-            result.errors.iter().any(|e| e.message.contains("expected object key")),
+            result
+                .errors
+                .iter()
+                .any(|e| e.message.contains("expected object key")),
             "{:?}",
             result.errors
         );
@@ -527,10 +537,7 @@ mod tests {
     fn parse_triple_nested_generic_type() {
         // `>>>` lexes as Shr + Gt; the split must compose with a plain Gt.
         let arena = Bump::new();
-        let result = parse(
-            "const x: Option<Option<Option<number>>> = None;",
-            &arena,
-        );
+        let result = parse("const x: Option<Option<Option<number>>> = None;", &arena);
         assert!(result.errors.is_empty(), "{:?}", result.errors);
     }
 
@@ -621,10 +628,16 @@ mod tests {
         let program = result.program.unwrap();
         match &program.statements[0] {
             Stmt::Function {
-                params, return_type, ..
+                params,
+                return_type,
+                ..
             } => {
-                assert!(matches!(&params[0].ty, Some(Type::Union { members, .. }) if members.len() == 2));
-                assert!(matches!(return_type, Some(Type::Union { members, .. }) if members.len() == 2));
+                assert!(
+                    matches!(&params[0].ty, Some(Type::Union { members, .. }) if members.len() == 2)
+                );
+                assert!(
+                    matches!(return_type, Some(Type::Union { members, .. }) if members.len() == 2)
+                );
             }
             _ => panic!("expected function declaration"),
         }
@@ -642,7 +655,9 @@ mod tests {
                 Some(Type::Union { members, .. }) => {
                     assert_eq!(members.len(), 2);
                     assert!(matches!(&members[0], Type::Named { name, .. } if name == &"string"));
-                    assert!(matches!(&members[1], Type::Option { inner, .. } if matches!(&**inner, Type::Named { name, .. } if name == &"number")));
+                    assert!(
+                        matches!(&members[1], Type::Option { inner, .. } if matches!(&**inner, Type::Named { name, .. } if name == &"number"))
+                    );
                 }
                 _ => panic!("expected union type, got {:?}", ty),
             },
@@ -786,7 +801,11 @@ mod tests {
         let program = result.program.unwrap();
         match &program.statements[0] {
             Stmt::Const { value, .. } => match value {
-                Expr::EnumConstructor { enum_name, case_name, .. } => {
+                Expr::EnumConstructor {
+                    enum_name,
+                    case_name,
+                    ..
+                } => {
                     assert_eq!(enum_name.to_string(), "Option");
                     assert_eq!(case_name.to_string(), "Some");
                 }
@@ -839,10 +858,7 @@ mod tests {
     #[test]
     fn parse_struct_fields_without_commas() {
         let arena = Bump::new();
-        let result = parse(
-            "struct Point {\n  x: number\n  y: number\n}",
-            &arena,
-        );
+        let result = parse("struct Point {\n  x: number\n  y: number\n}", &arena);
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         let program = result.program.unwrap();
         match &program.statements[0] {
@@ -915,7 +931,11 @@ mod tests {
         let program = result.program.unwrap();
         match &program.statements[0] {
             Stmt::Const { value, .. } => match value {
-                Expr::EnumConstructor { enum_name, case_name, .. } => {
+                Expr::EnumConstructor {
+                    enum_name,
+                    case_name,
+                    ..
+                } => {
                     assert_eq!(*enum_name, "Option");
                     assert_eq!(*case_name, "None");
                 }
@@ -938,8 +958,14 @@ mod tests {
             Stmt::Const { value, .. } => match value {
                 Expr::Match { arms, .. } => {
                     assert_eq!(arms.len(), 2);
-                    assert!(matches!(arms[0].pattern, Pattern::Constructor { name: "Red", .. }));
-                    assert!(matches!(arms[1].pattern, Pattern::Constructor { name: "Green", .. }));
+                    assert!(matches!(
+                        arms[0].pattern,
+                        Pattern::Constructor { name: "Red", .. }
+                    ));
+                    assert!(matches!(
+                        arms[1].pattern,
+                        Pattern::Constructor { name: "Green", .. }
+                    ));
                 }
                 _ => panic!("expected match expression"),
             },
@@ -1017,10 +1043,9 @@ mod tests {
             let arena = Bump::new();
             let result = parse(source, &arena);
             assert!(
-                result
-                    .errors
-                    .iter()
-                    .any(|e| e.message.contains("user code cannot declare type parameters")),
+                result.errors.iter().any(|e| e
+                    .message
+                    .contains("user code cannot declare type parameters")),
                 "{source:?} must be rejected, got: {:?}",
                 result.errors
             );
@@ -1045,7 +1070,9 @@ mod tests {
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         let program = result.program.unwrap();
         match &program.statements[0] {
-            Stmt::Import { specifiers, source, .. } => {
+            Stmt::Import {
+                specifiers, source, ..
+            } => {
                 assert_eq!(source, &"./math.ds");
                 assert_eq!(specifiers.len(), 1);
                 assert_eq!(specifiers[0].imported, "add");
@@ -1078,7 +1105,9 @@ mod tests {
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         let program = result.program.unwrap();
         match &program.statements[0] {
-            Stmt::Import { specifiers, source, .. } => {
+            Stmt::Import {
+                specifiers, source, ..
+            } => {
                 assert!(specifiers.is_empty());
                 assert_eq!(source, &"./side-effects.ds");
             }
@@ -1107,7 +1136,10 @@ mod tests {
     #[test]
     fn parse_export_function() {
         let arena = Bump::new();
-        let result = parse("export fn add(a: number, b: number) number { return a + b; }", &arena);
+        let result = parse(
+            "export fn add(a: number, b: number) number { return a + b; }",
+            &arena,
+        );
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         let program = result.program.unwrap();
         match &program.statements[0] {
@@ -1147,7 +1179,10 @@ mod tests {
         let result = parse("export default 42;", &arena);
         assert!(!result.errors.is_empty());
         assert!(
-            result.errors.iter().any(|e| e.message.contains("default exports")),
+            result
+                .errors
+                .iter()
+                .any(|e| e.message.contains("default exports")),
             "{:?}",
             result.errors
         );
@@ -1283,7 +1318,12 @@ mod tests {
         let program = result.program.unwrap();
         match &program.statements[0] {
             Stmt::Const { value, .. } => match value {
-                Expr::Binary { op: BinOp::Pipe, left, right, .. } => {
+                Expr::Binary {
+                    op: BinOp::Pipe,
+                    left,
+                    right,
+                    ..
+                } => {
                     assert!(matches!(left, Expr::Identifier { name, .. } if name == &"x"));
                     assert!(matches!(right, Expr::Identifier { name, .. } if name == &"double"));
                 }
@@ -1313,7 +1353,10 @@ mod tests {
     #[test]
     fn parse_unsafe_block_with_nested_braces() {
         let arena = Bump::new();
-        let result = parse("const r = unsafe { function f() { return 1; } f() };", &arena);
+        let result = parse(
+            "const r = unsafe { function f() { return 1; } f() };",
+            &arena,
+        );
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         let program = result.program.unwrap();
         match &program.statements[0] {
@@ -1408,9 +1451,15 @@ mod tests {
     fn parse_jsx_member_expression_rejected() {
         let arena = Bump::new();
         let result = parse("const el = <My.Component />;", &arena);
-        assert!(result.program.is_none(), "member expression should fail to parse");
         assert!(
-            result.errors.iter().any(|e| e.message.contains("member expressions")),
+            result.program.is_none(),
+            "member expression should fail to parse"
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.message.contains("member expressions")),
             "expected member expression error, got: {:?}",
             result.errors
         );
@@ -1450,7 +1499,10 @@ mod tests {
     #[test]
     fn parse_optional_semicolon_in_block() {
         let arena = Bump::new();
-        let result = parse("fn add(a: number, b: number) number {\n  const c = a + b\n  return c\n}", &arena);
+        let result = parse(
+            "fn add(a: number, b: number) number {\n  const c = a + b\n  return c\n}",
+            &arena,
+        );
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         let program = result.program.unwrap();
         match &program.statements[0] {
@@ -1483,7 +1535,9 @@ mod tests {
         let program = result.program.unwrap();
         match &program.statements[0] {
             Stmt::Const { value, .. } => match value {
-                Expr::Binary { op, left, right, .. } => {
+                Expr::Binary {
+                    op, left, right, ..
+                } => {
                     assert!(matches!(op, BinOp::Add));
                     // (1 + 2) + 3
                     match left {
@@ -1544,18 +1598,29 @@ mod tests {
     fn parse_semicolon_still_required_inline() {
         let arena = Bump::new();
         let result = parse("const x = 1 const y = 2", &arena);
-        assert!(result.program.is_none(), "expected parse failure without newline or semicolon");
+        assert!(
+            result.program.is_none(),
+            "expected parse failure without newline or semicolon"
+        );
     }
 
     #[test]
     fn parse_fn_expression_literal() {
         let arena = Bump::new();
-        let result = parse("const double = fn (x: number) number { return x * 2 }", &arena);
+        let result = parse(
+            "const double = fn (x: number) number { return x * 2 }",
+            &arena,
+        );
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         let program = result.program.unwrap();
         match &program.statements[0] {
             Stmt::Const { value, .. } => match value {
-                Expr::Function { params, return_type, body, .. } => {
+                Expr::Function {
+                    params,
+                    return_type,
+                    body,
+                    ..
+                } => {
                     assert_eq!(params.len(), 1);
                     assert_eq!(params[0].name, "x");
                     assert!(return_type.is_some());
@@ -1574,7 +1639,13 @@ mod tests {
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         let program = result.program.unwrap();
         match &program.statements[0] {
-            Stmt::For { init, condition, step, body, .. } => {
+            Stmt::For {
+                init,
+                condition,
+                step,
+                body,
+                ..
+            } => {
                 assert!(init.is_some());
                 assert!(condition.is_some());
                 assert!(step.is_some());
@@ -1733,9 +1804,13 @@ mod tests {
         match &program.statements[0] {
             Stmt::Expr { expr, .. } => match expr {
                 Expr::Call { callee, args, .. } => {
-                    assert!(matches!(callee, Expr::Identifier { name, .. } if name.to_string() == "echo"));
+                    assert!(
+                        matches!(callee, Expr::Identifier { name, .. } if name.to_string() == "echo")
+                    );
                     assert_eq!(args.len(), 1);
-                    assert!(matches!(args[0], Expr::String { value, .. } if value.to_string() == "hello"));
+                    assert!(
+                        matches!(args[0], Expr::String { value, .. } if value.to_string() == "hello")
+                    );
                 }
                 _ => panic!("expected call, got {:?}", expr),
             },
@@ -1752,9 +1827,13 @@ mod tests {
         match &program.statements[0] {
             Stmt::Expr { expr, .. } => match expr {
                 Expr::Call { callee, args, .. } => {
-                    assert!(matches!(callee, Expr::Identifier { name, .. } if name.to_string() == "echo"));
+                    assert!(
+                        matches!(callee, Expr::Identifier { name, .. } if name.to_string() == "echo")
+                    );
                     assert_eq!(args.len(), 1);
-                    assert!(matches!(args[0], Expr::Identifier { name, .. } if name.to_string() == "message"));
+                    assert!(
+                        matches!(args[0], Expr::Identifier { name, .. } if name.to_string() == "message")
+                    );
                 }
                 _ => panic!("expected call, got {:?}", expr),
             },
@@ -1770,7 +1849,12 @@ mod tests {
         let program = result.program.unwrap();
         match &program.statements[0] {
             Stmt::Expr { expr, .. } => match expr {
-                Expr::Binary { op: BinOp::Add, left, right, .. } => {
+                Expr::Binary {
+                    op: BinOp::Add,
+                    left,
+                    right,
+                    ..
+                } => {
                     assert!(matches!(left, Expr::Call { .. }));
                     assert!(matches!(right, Expr::Number { value, .. } if *value == 1.0));
                 }
@@ -1790,8 +1874,16 @@ mod tests {
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         let program = result.program.unwrap();
         assert_eq!(program.statements.len(), 2);
-        assert!(matches!(program.statements[0], Stmt::Expr { expr: Expr::Identifier { name, .. }, .. } if name.to_string() == "echo"));
-        assert!(matches!(program.statements[1], Stmt::Expr { expr: Expr::String { .. }, .. }));
+        assert!(
+            matches!(program.statements[0], Stmt::Expr { expr: Expr::Identifier { name, .. }, .. } if name.to_string() == "echo")
+        );
+        assert!(matches!(
+            program.statements[1],
+            Stmt::Expr {
+                expr: Expr::String { .. },
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -1818,7 +1910,9 @@ mod tests {
         match &program.statements[0] {
             Stmt::Expr { expr, .. } => match expr {
                 Expr::Call { callee, args, .. } => {
-                    assert!(matches!(callee, Expr::Identifier { name, .. } if name.to_string() == "echo"));
+                    assert!(
+                        matches!(callee, Expr::Identifier { name, .. } if name.to_string() == "echo")
+                    );
                     assert_eq!(args.len(), 1);
                 }
                 _ => panic!("expected call, got {:?}", expr),

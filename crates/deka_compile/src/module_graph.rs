@@ -13,7 +13,7 @@ use bumpalo::Bump;
 use deka_syntax::Diagnostic;
 
 use crate::shake::{self, ShakeModule, ShakePlan};
-use crate::{compile_to_js_with_imports_and_options, parse_source_module_meta, CompileOptions};
+use crate::{CompileOptions, compile_to_js_with_imports_and_options, parse_source_module_meta};
 
 /// Compiler-provided JS runtime (`ui/jsx`, `ui/form`, …). These are not
 /// DekaScript modules: hosts materialize the files, and the graph leaves the
@@ -308,6 +308,9 @@ pub struct ModuleGraphResult {
     /// stdlib package the project does not declare.  gated on
     /// entry-only imports and missed exactly that (deka#430).
     pub imports: BTreeSet<String>,
+    /// Build-only slots from every kept module. The graph compiler aggregates
+    /// these without evaluating them; Deka consumes the plan later.
+    pub dev_plan: crate::DevPlan,
 }
 
 impl ModuleGraphResult {
@@ -670,6 +673,39 @@ pub fn compile_module_graph_with_options(
         return Err(errors);
     }
 
+    // Runtime shaking must not make a dev-only dependency disappear. Start
+    // with kept modules and follow only imports referenced by a `build` body;
+    // this is deliberately separate from the runtime graph.
+    let mut dev_keep = std::collections::HashSet::new();
+    let mut dev_queue: VecDeque<PathBuf> = plan.keep.iter().cloned().collect();
+    while let Some(path) = dev_queue.pop_front() {
+        if !dev_keep.insert(path.clone()) {
+            continue;
+        }
+        let Some(program) = programs.get(&path) else {
+            continue;
+        };
+        let Some(module) = modules.get(&path) else {
+            continue;
+        };
+        for stmt in program.statements.iter() {
+            let deka_syntax::Stmt::Import {
+                specifiers, source, ..
+            } = stmt
+            else {
+                continue;
+            };
+            if specifiers
+                .iter()
+                .any(|specifier| deka_emit::dev_uses_name(program, specifier.local))
+            {
+                if let Some(dep) = module.dependencies.get(*source) {
+                    dev_queue.push_back(dep.clone());
+                }
+            }
+        }
+    }
+
     // ------------------------------------------------------------------
     // Emit each kept module.  We compile in dependency order so imported
     // structs, enums, and receiver methods are known to the typechecker.
@@ -680,8 +716,9 @@ pub fn compile_module_graph_with_options(
     let mut emitted: HashMap<PathBuf, String> = HashMap::with_capacity(plan.keep.len());
     let mut demands: HashMap<PathBuf, deka_emit::prelude::PreludeDemand> =
         HashMap::with_capacity(plan.keep.len());
+    let mut dev_slots = Vec::new();
     for path in order {
-        if !plan.keep.contains(&path) {
+        if !plan.keep.contains(&path) && !dev_keep.contains(&path) {
             continue;
         }
         let module = modules.get(&path).expect("module in graph");
@@ -711,8 +748,11 @@ pub fn compile_module_graph_with_options(
             compile_options,
         ) {
             Ok(result) => {
-                demands.insert(path.clone(), result.demand);
-                emitted.insert(path, result.js);
+                if plan.keep.contains(&path) {
+                    demands.insert(path.clone(), result.demand);
+                    emitted.insert(path.clone(), result.js);
+                }
+                dev_slots.extend(result.dev_plan.slots);
             }
             Err(diagnostics) => {
                 for d in diagnostics {
@@ -762,6 +802,10 @@ pub fn compile_module_graph_with_options(
         prelude,
         module_preludes,
         imports: all_imports,
+        dev_plan: crate::DevPlan {
+            version: 1,
+            slots: dev_slots,
+        },
     })
 }
 
@@ -1584,6 +1628,67 @@ mod tests {
             !result.modules[&main].contains("page.css"),
             "css imports must not reach the JS output: {}",
             result.modules[&main]
+        );
+    }
+
+    #[test]
+    fn graph_aggregates_dev_plan_without_runtime_dev_imports() {
+        let main = PathBuf::from("/project/main.ds");
+        let dev_data = PathBuf::from("/project/dev-data.ds");
+        let mut files = HashMap::new();
+        files.insert(
+            main.clone(),
+            "import { load } from \"./dev-data.ds\";\nconst labels: Array<string> = build { return Ok(load()) }"
+                .to_string(),
+        );
+        files.insert(
+            dev_data.clone(),
+            "export fn load() Array<string> { return [\"Ada\"] }".to_string(),
+        );
+        let mut aliases = HashMap::new();
+        aliases.insert((main.clone(), "./dev-data.ds".to_string()), dev_data);
+        let result = compile_module_graph(&main, &InMemoryLoader { files, aliases })
+            .expect("graph compiles");
+        assert_eq!(result.dev_plan.version, 1);
+        assert_eq!(result.dev_plan.slots.len(), 1);
+        assert!(
+            !result.modules[&main].contains("./dev-data.ds"),
+            "{}",
+            result.modules[&main]
+        );
+        assert!(
+            result.dev_plan.slots[0].entry.contains("./dev-data.js"),
+            "{}",
+            result.dev_plan.slots[0].entry
+        );
+    }
+
+    #[test]
+    fn graph_keeps_dev_slots_reachable_only_through_a_dev_body() {
+        let main = PathBuf::from("/project/main.ds");
+        let dev_data = PathBuf::from("/project/dev-data.ds");
+        let mut files = HashMap::new();
+        files.insert(
+            main.clone(),
+            "import { labels } from \"./dev-data.ds\";\nconst page_labels: Array<string> = build { return Ok(labels) }"
+                .to_string(),
+        );
+        files.insert(
+            dev_data.clone(),
+            "const labels: Array<string> = build { return Ok([\"Ada\"]) };\nexport { labels };"
+                .to_string(),
+        );
+        let mut aliases = HashMap::new();
+        aliases.insert(
+            (main.clone(), "./dev-data.ds".to_string()),
+            dev_data.clone(),
+        );
+        let result = compile_module_graph(&main, &InMemoryLoader { files, aliases })
+            .expect("graph compiles");
+        assert_eq!(result.dev_plan.slots.len(), 2);
+        assert!(
+            !result.modules.contains_key(&dev_data),
+            "dev-only dependency leaked into runtime modules"
         );
     }
 

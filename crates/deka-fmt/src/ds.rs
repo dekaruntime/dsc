@@ -5,10 +5,9 @@
 //! returned unchanged so the formatter is safe to run on incomplete code.
 
 use deka_syntax::ast::{
-    UnwrapAlternative,
-    BinOp, Embed, EnumCase, ExportDecl, ExportName, Expr, ForInit, ImportSpec,
-    InterfaceMember, JsxElement, MatchArm, ObjectField, Param, Pattern, Program, Span,
-    Stmt, StructField, TemplatePart, Type, TypeParam, UnOp,
+    BinOp, Embed, EnumCase, ExportDecl, ExportName, Expr, ForInit, ImportSpec, InterfaceMember,
+    JsxElement, MatchArm, ObjectField, Param, Pattern, Program, Span, Stmt, StructField,
+    TemplatePart, Type, TypeParam, UnOp, UnwrapAlternative,
 };
 use deka_syntax::parse;
 
@@ -198,9 +197,7 @@ impl<'src> Formatter<'src> {
         match stmt {
             Stmt::Export { decl, .. } => self.fmt_export_decl(decl, stmt_end_line),
             Stmt::Import {
-                specifiers,
-                source,
-                ..
+                specifiers, source, ..
             } => {
                 self.write("import ");
                 if specifiers.is_empty() {
@@ -219,7 +216,9 @@ impl<'src> Formatter<'src> {
                     self.write("\"");
                 }
             }
-            Stmt::Const { name, ty, value, .. } => {
+            Stmt::Const {
+                name, ty, value, ..
+            } => {
                 self.write("const ");
                 self.write(name);
                 if let Some(ty) = ty {
@@ -229,7 +228,9 @@ impl<'src> Formatter<'src> {
                 self.write(" = ");
                 self.fmt_expr(value);
             }
-            Stmt::Let { name, ty, value, .. } => {
+            Stmt::Let {
+                name, ty, value, ..
+            } => {
                 self.write("let ");
                 self.write(name);
                 if let Some(ty) = ty {
@@ -296,7 +297,13 @@ impl<'src> Formatter<'src> {
                 is_async,
                 ..
             } => {
-                self.fmt_fn_sig(*is_async, Some(name), type_params, params, return_type.as_ref());
+                self.fmt_fn_sig(
+                    *is_async,
+                    Some(name),
+                    type_params,
+                    params,
+                    return_type.as_ref(),
+                );
                 self.write(" ");
                 self.fmt_block(body, stmt_end_line);
             }
@@ -355,7 +362,13 @@ impl<'src> Formatter<'src> {
                     self.write("}");
                 }
             }
-            Stmt::Enum { name, type_params, cases, is_super, .. } => {
+            Stmt::Enum {
+                name,
+                type_params,
+                cases,
+                is_super,
+                ..
+            } => {
                 if *is_super {
                     self.write("super ");
                 }
@@ -433,7 +446,9 @@ impl<'src> Formatter<'src> {
                 self.fmt_expr(expr);
             }
             Stmt::Return { value: None, .. } => self.write("return"),
-            Stmt::Return { value: Some(value), .. } => {
+            Stmt::Return {
+                value: Some(value), ..
+            } => {
                 self.write("return ");
                 self.fmt_expr(value);
             }
@@ -574,7 +589,13 @@ impl<'src> Formatter<'src> {
                 is_async,
             } => {
                 self.write("export ");
-                self.fmt_fn_sig(*is_async, Some(name), type_params, params, return_type.as_ref());
+                self.fmt_fn_sig(
+                    *is_async,
+                    Some(name),
+                    type_params,
+                    params,
+                    return_type.as_ref(),
+                );
                 self.write(" ");
                 self.fmt_block(body, stmt_end_line);
             }
@@ -793,7 +814,12 @@ impl<'src> Formatter<'src> {
     // --- expressions -------------------------------------------------------
 
     fn fmt_expr(&mut self, expr: &Expr<'_>) {
-        self.write(&self.expr_to_string(expr));
+        if let Expr::Build { body, span } = expr {
+            self.write("build ");
+            self.fmt_block(body, span.end.line);
+        } else {
+            self.write(&self.expr_to_string(expr));
+        }
     }
 
     fn expr_to_string(&self, expr: &Expr<'_>) -> String {
@@ -822,7 +848,9 @@ impl<'src> Formatter<'src> {
             // compile, so running it destroyed working code (deka#453).
             Expr::None { .. } => "None".to_string(),
             Expr::Identifier { name, .. } => name.to_string(),
-            Expr::Binary { op, left, right, .. } => {
+            Expr::Binary {
+                op, left, right, ..
+            } => {
                 if *op == BinOp::Pipe {
                     return self.pipe_chain_to_string(expr);
                 }
@@ -842,9 +870,17 @@ impl<'src> Formatter<'src> {
             Expr::Unary { op, operand, .. } => {
                 let (prefix, postfix) = unary_op_str(op);
                 if !prefix.is_empty() {
-                    format!("{}{}", prefix, self.expr_to_string_with_prec(operand, Prec::Unary))
+                    format!(
+                        "{}{}",
+                        prefix,
+                        self.expr_to_string_with_prec(operand, Prec::Unary)
+                    )
                 } else {
-                    format!("{}{}", self.expr_to_string_with_prec(operand, Prec::Postfix), postfix)
+                    format!(
+                        "{}{}",
+                        self.expr_to_string_with_prec(operand, Prec::Postfix),
+                        postfix
+                    )
                 }
             }
             Expr::Call {
@@ -856,11 +892,23 @@ impl<'src> Formatter<'src> {
                 let mut s = self.expr_to_string(callee);
                 if !type_args.is_empty() {
                     s.push('<');
-                    s.push_str(&type_args.iter().map(type_to_string).collect::<Vec<_>>().join(", "));
+                    s.push_str(
+                        &type_args
+                            .iter()
+                            .map(type_to_string)
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    );
                     s.push('>');
                 }
                 s.push('(');
-                s.push_str(&args.iter().map(|a| self.expr_to_string(a)).collect::<Vec<_>>().join(", "));
+                s.push_str(
+                    &args
+                        .iter()
+                        .map(|a| self.expr_to_string(a))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                );
                 s.push(')');
                 s
             }
@@ -913,14 +961,18 @@ impl<'src> Formatter<'src> {
                 result_type,
                 span,
             } => self.unsafe_to_string(source, result_type.as_ref(), *span),
+            Expr::Build { .. } => "build { ... }".to_string(),
             Expr::Bridge {
-                kind,
-                action,
-                args,
-                ..
+                kind, action, args, ..
             } => {
                 let mut s = format!("bridge {}.{action}(", kind);
-                s.push_str(&args.iter().map(|a| self.expr_to_string(a)).collect::<Vec<_>>().join(", "));
+                s.push_str(
+                    &args
+                        .iter()
+                        .map(|a| self.expr_to_string(a))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                );
                 s.push(')');
                 s
             }
@@ -945,7 +997,13 @@ impl<'src> Formatter<'src> {
             Expr::JsxText { value, .. } => value.to_string(),
             Expr::Array { elements, .. } => {
                 let mut s = "[".to_string();
-                s.push_str(&elements.iter().map(|e| self.expr_to_string(e)).collect::<Vec<_>>().join(", "));
+                s.push_str(
+                    &elements
+                        .iter()
+                        .map(|e| self.expr_to_string(e))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                );
                 s.push(']');
                 s
             }
@@ -996,7 +1054,13 @@ impl<'src> Formatter<'src> {
                     s.push_str("async ");
                 }
                 s.push_str("fn(");
-                s.push_str(&params.iter().map(|p| param_to_string(p)).collect::<Vec<_>>().join(", "));
+                s.push_str(
+                    &params
+                        .iter()
+                        .map(|p| param_to_string(p))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                );
                 s.push(')');
                 if let Some(ty) = return_type {
                     s.push_str(" ");
@@ -1098,8 +1162,10 @@ impl<'src> Formatter<'src> {
                 .any(|c| c == '\n')
         });
         let single_line = arm_strs.join(", ");
-        let use_multiline =
-            arms.len() >= 2 || source_has_newline || single_line.len() > 80 || span.start.line != span.end.line;
+        let use_multiline = arms.len() >= 2
+            || source_has_newline
+            || single_line.len() > 80
+            || span.start.line != span.end.line;
 
         if !use_multiline {
             s.push(' ');
@@ -1288,10 +1354,14 @@ fn stmt_list_to_string(stmts: &[Stmt<'_>], sep: &str, fmt: &Formatter<'_>) -> St
 
 fn stmt_to_string(stmt: &Stmt<'_>, fmt: &Formatter<'_>) -> String {
     match stmt {
-        Stmt::Return { value: Some(value), .. } => format!("return {}", fmt.expr_to_string(value)),
+        Stmt::Return {
+            value: Some(value), ..
+        } => format!("return {}", fmt.expr_to_string(value)),
         Stmt::Return { value: None, .. } => "return".to_string(),
         Stmt::Expr { expr, .. } => fmt.expr_to_string(expr),
-        Stmt::Const { name, ty, value, .. } => {
+        Stmt::Const {
+            name, ty, value, ..
+        } => {
             let mut s = format!("const {}", name);
             if let Some(ty) = ty {
                 s.push_str(": ");
@@ -1301,7 +1371,9 @@ fn stmt_to_string(stmt: &Stmt<'_>, fmt: &Formatter<'_>) -> String {
             s.push_str(&fmt.expr_to_string(value));
             s
         }
-        Stmt::Let { name, ty, value, .. } => {
+        Stmt::Let {
+            name, ty, value, ..
+        } => {
             let mut s = format!("let {}", name);
             if let Some(ty) = ty {
                 s.push_str(": ");
@@ -1363,13 +1435,25 @@ fn type_to_string(ty: &Type<'_>) -> String {
         Type::Generic { base, args, .. } => {
             let mut s = base.to_string();
             s.push('<');
-            s.push_str(&args.iter().map(type_to_string).collect::<Vec<_>>().join(", "));
+            s.push_str(
+                &args
+                    .iter()
+                    .map(type_to_string)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
             s.push('>');
             s
         }
         Type::Function { params, ret, .. } => {
             let mut s = "fn(".to_string();
-            s.push_str(&params.iter().map(type_to_string).collect::<Vec<_>>().join(", "));
+            s.push_str(
+                &params
+                    .iter()
+                    .map(type_to_string)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
             s.push_str(") ");
             s.push_str(&type_to_string(ret));
             s
@@ -1662,10 +1746,24 @@ mod tests {
     }
 
     #[test]
+    fn formats_dev_block_as_dsl_code() {
+        let input = "const labels: Array<string> = build { return Ok([\"Ada\"]) }";
+        let output = format_ds(input).expect("formats");
+        assert_eq!(
+            output,
+            "const labels: Array<string> = build {\n  return Result.Ok([\"Ada\"])\n}\n"
+        );
+    }
+
+    #[test]
     fn formats_function() {
         let input = "fn add(  a:int,b :  string   ) int{ return a+b; }";
         let output = format_ds(input).unwrap();
-        assert!(output.contains("fn add(a: int, b: string) int {"), "got: {}", output);
+        assert!(
+            output.contains("fn add(a: int, b: string) int {"),
+            "got: {}",
+            output
+        );
         assert!(output.contains("  return a + b"), "got: {}", output);
     }
 
@@ -1782,7 +1880,11 @@ mod tests {
     fn formats_async_await() {
         let input = "async fn fetch() Promise<int> { return await 1; }";
         let output = format_ds(input).unwrap();
-        assert!(output.contains("async fn fetch() Promise<int> {"), "got: {}", output);
+        assert!(
+            output.contains("async fn fetch() Promise<int> {"),
+            "got: {}",
+            output
+        );
         assert!(output.contains("return await 1"), "got: {}", output);
     }
 
@@ -1854,7 +1956,8 @@ mod tests {
     fn preserves_line_comments() {
         // deka#484: the parser discards comment tokens; the formatter
         // re-lexes and reattaches them by position.
-        let input = "// file header\nlet x = 1\n\n// doc for f\nfn f() {\n  // inside\n  return x\n}\n";
+        let input =
+            "// file header\nlet x = 1\n\n// doc for f\nfn f() {\n  // inside\n  return x\n}\n";
         let output = format_ds(input).unwrap();
         assert_eq!(
             output,
@@ -1886,10 +1989,7 @@ mod tests {
     fn preserves_blank_line_inside_block() {
         let input = "fn f() {\n  let x = 1\n\n  let y = 2\n}";
         let output = format_ds(input).unwrap();
-        assert_eq!(
-            output,
-            "fn f() {\n  let x = 1\n\n  let y = 2\n}\n"
-        );
+        assert_eq!(output, "fn f() {\n  let x = 1\n\n  let y = 2\n}\n");
     }
 
     #[test]
@@ -1910,27 +2010,25 @@ mod tests {
     fn keeps_pipe_chain_across_multiple_lines() {
         let input = "const x = 5\n  |> add(1)\n  |> console.log";
         let output = format_ds(input).unwrap();
-        assert_eq!(
-            output,
-            "const x = 5\n  |> add(1)\n  |> console.log\n"
-        );
+        assert_eq!(output, "const x = 5\n  |> add(1)\n  |> console.log\n");
     }
 
     #[test]
     fn breaks_long_pipe_chain_to_multiple_lines() {
         let input = "const result = initialValue |> transformWithLongName |> anotherVeryLongTransformationName |> finalTransform";
         let output = format_ds(input).unwrap();
-        assert!(output.contains("\n  |> "), "expected multiline pipe, got: {}", output);
+        assert!(
+            output.contains("\n  |> "),
+            "expected multiline pipe, got: {}",
+            output
+        );
     }
 
     #[test]
     fn does_not_add_semicolons_to_statements() {
         let input = "const x = 1\nconst y = 2\nconsole.log(x + y)";
         let output = format_ds(input).unwrap();
-        assert_eq!(
-            output,
-            "const x = 1\nconst y = 2\nconsole.log(x + y)\n"
-        );
+        assert_eq!(output, "const x = 1\nconst y = 2\nconsole.log(x + y)\n");
         parse_ds(&output);
     }
 

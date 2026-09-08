@@ -122,17 +122,17 @@ fn transform_stmt<'a>(
             is_const: *is_const,
             scrutinee: transform_expr(scrutinee, arena, enums).clone(),
             alternative: match alternative {
-                ast::UnwrapAlternative::Block(stmts) => ast::UnwrapAlternative::Block(
-                    ast::alloc_slice(
+                ast::UnwrapAlternative::Block(stmts) => {
+                    ast::UnwrapAlternative::Block(ast::alloc_slice(
                         arena,
                         stmts
                             .iter()
                             .map(|inner| transform_stmt(inner, arena, enums))
                             .collect::<Vec<_>>(),
-                    ),
-                ),
-                ast::UnwrapAlternative::Match(arms) => ast::UnwrapAlternative::Match(
-                    ast::alloc_slice(
+                    ))
+                }
+                ast::UnwrapAlternative::Match(arms) => {
+                    ast::UnwrapAlternative::Match(ast::alloc_slice(
                         arena,
                         arms.iter()
                             .map(|arm| ast::MatchArm {
@@ -142,8 +142,8 @@ fn transform_stmt<'a>(
                                 span: arm.span,
                             })
                             .collect::<Vec<_>>(),
-                    ),
-                ),
+                    ))
+                }
             },
             span: *span,
         },
@@ -300,7 +300,9 @@ fn transform_stmt<'a>(
             span: *span,
         },
         Stmt::Return { value, span } => Stmt::Return {
-            value: value.as_ref().map(|v| transform_expr(v, arena, enums).clone()),
+            value: value
+                .as_ref()
+                .map(|v| transform_expr(v, arena, enums).clone()),
             span: *span,
         },
         Stmt::If {
@@ -382,7 +384,9 @@ fn transform_stmt<'a>(
                 condition: condition
                     .as_ref()
                     .map(|c| transform_expr(c, arena, enums).clone()),
-                step: step.as_ref().map(|s| transform_expr(s, arena, enums).clone()),
+                step: step
+                    .as_ref()
+                    .map(|s| transform_expr(s, arena, enums).clone()),
                 body: ast::alloc_slice(arena, new_body),
                 span: *span,
             }
@@ -412,7 +416,12 @@ fn transform_expr<'a>(
         | Expr::None { .. }
         | Expr::Identifier { .. } => return expr,
 
-        Expr::Binary { op, left, right, span } => Expr::Binary {
+        Expr::Binary {
+            op,
+            left,
+            right,
+            span,
+        } => Expr::Binary {
             op: *op,
             left: transform_expr(left, arena, enums),
             right: transform_expr(right, arena, enums),
@@ -434,12 +443,20 @@ fn transform_expr<'a>(
             args: transform_exprs(args, arena, enums),
             span: *span,
         },
-        Expr::FieldAccess { object, field, span } => Expr::FieldAccess {
+        Expr::FieldAccess {
+            object,
+            field,
+            span,
+        } => Expr::FieldAccess {
             object: transform_expr(object, arena, enums),
             field,
             span: *span,
         },
-        Expr::IndexAccess { object, index, span } => Expr::IndexAccess {
+        Expr::IndexAccess {
+            object,
+            index,
+            span,
+        } => Expr::IndexAccess {
             object: transform_expr(object, arena, enums),
             index: transform_expr(index, arena, enums),
             span: *span,
@@ -478,6 +495,15 @@ fn transform_expr<'a>(
         } => Expr::Unsafe {
             source,
             result_type: result_type.clone(),
+            span: *span,
+        },
+        Expr::Build { body, span } => Expr::Build {
+            body: ast::alloc_slice(
+                arena,
+                body.iter()
+                    .map(|stmt| transform_stmt(stmt, arena, enums))
+                    .collect(),
+            ),
             span: *span,
         },
         Expr::Bridge {
@@ -672,7 +698,11 @@ fn try_resolve_enum_expr<'a>(
     enums: &HashMap<&'a str, HashSet<&'a str>>,
 ) -> Option<Expr<'a>> {
     match expr {
-        Expr::FieldAccess { object, field, span } => {
+        Expr::FieldAccess {
+            object,
+            field,
+            span,
+        } => {
             let enum_name = match object {
                 Expr::Identifier { name, .. } => *name,
                 _ => return None,
@@ -689,10 +719,7 @@ fn try_resolve_enum_expr<'a>(
             })
         }
         Expr::Call {
-            callee,
-            args,
-            span,
-            ..
+            callee, args, span, ..
         } => {
             let (object, field) = match callee {
                 Expr::FieldAccess { object, field, .. } => (object, *field),
@@ -766,17 +793,17 @@ fn lower_stmt<'a>(
             is_const: *is_const,
             scrutinee: lower_expr(scrutinee, arena, method_calls).clone(),
             alternative: match alternative {
-                ast::UnwrapAlternative::Block(stmts) => ast::UnwrapAlternative::Block(
-                    ast::alloc_slice(
+                ast::UnwrapAlternative::Block(stmts) => {
+                    ast::UnwrapAlternative::Block(ast::alloc_slice(
                         arena,
                         stmts
                             .iter()
                             .map(|inner| lower_stmt(inner, arena, method_calls))
                             .collect::<Vec<_>>(),
-                    ),
-                ),
-                ast::UnwrapAlternative::Match(arms) => ast::UnwrapAlternative::Match(
-                    ast::alloc_slice(
+                    ))
+                }
+                ast::UnwrapAlternative::Match(arms) => {
+                    ast::UnwrapAlternative::Match(ast::alloc_slice(
                         arena,
                         arms.iter()
                             .map(|arm| ast::MatchArm {
@@ -786,8 +813,8 @@ fn lower_stmt<'a>(
                                 span: arm.span,
                             })
                             .collect::<Vec<_>>(),
-                    ),
-                ),
+                    ))
+                }
             },
             span: *span,
         },
@@ -1025,7 +1052,9 @@ fn lower_stmt<'a>(
                 condition: condition
                     .as_ref()
                     .map(|c| lower_expr(c, arena, method_calls).clone()),
-                step: step.as_ref().map(|s| lower_expr(s, arena, method_calls).clone()),
+                step: step
+                    .as_ref()
+                    .map(|s| lower_expr(s, arena, method_calls).clone()),
                 body: ast::alloc_slice(arena, new_body),
                 span: *span,
             }
@@ -1089,7 +1118,12 @@ fn lower_expr<'a>(
         | Expr::None { .. }
         | Expr::Identifier { .. } => return expr,
 
-        Expr::Binary { op, left, right, span } => Expr::Binary {
+        Expr::Binary {
+            op,
+            left,
+            right,
+            span,
+        } => Expr::Binary {
             op: *op,
             left: lower_expr(left, arena, method_calls),
             right: lower_expr(right, arena, method_calls),
@@ -1111,12 +1145,20 @@ fn lower_expr<'a>(
             args: lower_exprs(args, arena, method_calls),
             span: *span,
         },
-        Expr::FieldAccess { object, field, span } => Expr::FieldAccess {
+        Expr::FieldAccess {
+            object,
+            field,
+            span,
+        } => Expr::FieldAccess {
             object: lower_expr(object, arena, method_calls),
             field,
             span: *span,
         },
-        Expr::IndexAccess { object, index, span } => Expr::IndexAccess {
+        Expr::IndexAccess {
+            object,
+            index,
+            span,
+        } => Expr::IndexAccess {
             object: lower_expr(object, arena, method_calls),
             index: lower_expr(index, arena, method_calls),
             span: *span,
@@ -1155,6 +1197,15 @@ fn lower_expr<'a>(
         } => Expr::Unsafe {
             source,
             result_type: result_type.clone(),
+            span: *span,
+        },
+        Expr::Build { body, span } => Expr::Build {
+            body: ast::alloc_slice(
+                arena,
+                body.iter()
+                    .map(|stmt| lower_stmt(stmt, arena, method_calls))
+                    .collect(),
+            ),
             span: *span,
         },
         Expr::Bridge {

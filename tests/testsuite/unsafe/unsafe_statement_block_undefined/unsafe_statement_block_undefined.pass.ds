@@ -4,4 +4,7 @@ const r = unsafe {
   const y = 2
   console.log(x + y)
 }
-echo(match (r) { Ok(v) => `ok: ${v}`, Err(e) => `err: ${e.message}` })
+echo(match (r) {
+  Ok(v) => `ok: ${v}`,
+  Err(e) => `err: ${e.message}`,
+})

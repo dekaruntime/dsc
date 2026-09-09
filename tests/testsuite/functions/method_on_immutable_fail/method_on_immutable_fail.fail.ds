@@ -1,5 +1,5 @@
 struct Counter {
-  value: number
+  value: number;
 }
 fn (c mut Counter) increment() void {
   c.value = c.value + 1

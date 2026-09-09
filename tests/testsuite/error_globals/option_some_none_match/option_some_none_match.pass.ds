@@ -1,5 +1,13 @@
 import { echo } from "io"
 const a = Option.Some("value")
 const b = Option.None
-echo(match (a) { Some(v) => v, None => "empty", _ => "?" })
-echo(match (b) { Some(v) => v, None => "empty", _ => "?" })
+echo(match (a) {
+  Some(v) => v,
+  None => "empty",
+  _ => "?",
+})
+echo(match (b) {
+  Some(v) => v,
+  None => "empty",
+  _ => "?",
+})

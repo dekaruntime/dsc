@@ -1,23 +1,26 @@
 import { echo } from "io"
 import { write_file, read_file } from "fs"
-fn utf8(value: string): bytes {
+fn utf8(value: string) bytes {
   let encoded = unsafe<bytes> { new TextEncoder().encode(value) }
   return match (encoded) {
     Ok(buf) => buf,
-    Err(err) => utf8("")
+    Err(err) => utf8(""),
   }
 }
-fn from_utf8(value: bytes): string {
+fn from_utf8(value: bytes) string {
   let decoded = unsafe { new TextDecoder("utf-8", { fatal: false }).decode(value) }
   return match (decoded) {
     Ok(text) => text,
-    Err(err) => ""
+    Err(err) => "",
   }
 }
 async fn go() {
   await write_file(".cache/o.txt", utf8("one"))
   await write_file(".cache/o.txt", utf8("two"))
   const r = await read_file(".cache/o.txt")
-  echo(match (r) { Ok(buf) => from_utf8(buf), Err(e) => "fail" })
+  echo(match (r) {
+    Ok(buf) => from_utf8(buf),
+    Err(e) => "fail",
+  })
 }
 go()

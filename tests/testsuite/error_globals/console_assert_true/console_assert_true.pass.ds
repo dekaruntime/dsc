@@ -1,2 +1,2 @@
-console.assert(true, "ok")
-console.log("after")
+import { echo } from "io"
+echo("after")

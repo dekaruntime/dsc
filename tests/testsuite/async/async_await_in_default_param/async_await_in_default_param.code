@@ -4,7 +4,7 @@ async fn value() Promise<number> {
 }
 
 async fn main(x: number = await value()) {
-  echo(x)
+  echo(string(x))
 }
 
 await main()

@@ -1,5 +1,6 @@
 {
   "title": "import without braces is rejected",
   "stage": "parse",
-  "expectedDiagnosticContains": "Missing export"
+  "expectedDiagnosticContains": "expected ``{``, found `identifier`",
+  "notes": "deka#567: the rejection now comes from the real parser naming the entry file, not from the resolution gate's downstream 'Missing export' artifact."
 }

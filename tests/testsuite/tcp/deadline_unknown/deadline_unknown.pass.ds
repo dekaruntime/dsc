@@ -3,5 +3,5 @@ import { set_deadline } from "tcp"
 
 echo(match (set_deadline(0, 10)) {
   Ok(v) => "ok",
-  Err(e) => "err"
+  Err(e) => "err",
 })

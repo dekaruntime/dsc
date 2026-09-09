@@ -4,7 +4,7 @@ async fn value() Promise<number> {
 }
 
 fn make() {
-  return { x: await value() }
+  return {x: await value()}
 }
 
 echo(make())

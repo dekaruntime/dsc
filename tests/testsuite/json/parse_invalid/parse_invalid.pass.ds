@@ -1,6 +1,5 @@
 import { echo } from "io"
-import { parse } from "json"
-echo(match (parse("not json")) {
+echo(match ("not json".parseJSON<number>()) {
   Ok(v) => "ok",
-  Err(e) => "err"
+  Err(e) => "err",
 })

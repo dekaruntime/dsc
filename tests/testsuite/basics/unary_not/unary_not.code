@@ -1,2 +1,2 @@
 import { echo } from "io"
-echo(!false)
+echo(string(!false))

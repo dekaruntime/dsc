@@ -1,5 +1,5 @@
-import { double } from "./level2.ds";
+import { double } from "./level2.ds"
 
 export fn calc(x: number) number {
-  return double(x) + 1;
+  return double(x) + 1
 }

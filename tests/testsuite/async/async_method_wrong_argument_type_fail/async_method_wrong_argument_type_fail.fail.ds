@@ -1,5 +1,5 @@
 struct Counter {
-  count: number
+  count: number;
 }
 
 async fn (c Counter) add(n: number) Promise<number> {

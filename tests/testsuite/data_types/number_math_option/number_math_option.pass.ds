@@ -1,0 +1,37 @@
+import { echo } from "io"
+
+// Partial Math functions return Option<number>: None exactly where
+// JavaScript would have handed back NaN (deka#378 step 2, rfd#13).
+fn show(label: string, v: Option<number>) string {
+  return match (v) {
+    Some(n) => label + "=" + string(n),
+    None => label + "=none",
+  }
+}
+
+// Genuine results pass through as Some.
+echo(show("sqrt(16)", (16).sqrt()))
+echo(show("log(1)", (1).log()))
+echo(show("pow(2, 10)", (2).pow(10)))
+echo(show("asin(0)", (0).asin()))
+echo(show("acos(1)", (1).acos()))
+
+// None where JS answers NaN — the whole point of the wrapper.
+echo(show("sqrt(-1)", (-1).sqrt()))
+echo(show("log(-1)", (-1).log()))
+echo(show("asin(2)", (2).asin()))
+echo(show("acos(-2)", (-2).acos()))
+echo(show("pow(-2, 0.5)", (-2).pow(0.5)))
+
+// Infinity is a legitimate IEEE-754 value, not a lie: it passes through
+// as Some rather than collapsing to None.
+echo(show("pow(10, 400)", (10).pow(400)))
+echo(show("log(0)", (0).log()))
+
+// sin/cos/tan on a NON-FINITE receiver: Math.sin(Infinity) is NaN, and
+// Infinity is an ordinary reachable number (1.0/0.0) — the case that
+// separates the total/partial split from a plausible-looking one (deka#594
+// review). These must be None, not Some(NaN) and not a typed `number`.
+echo(show("sin(inf)", (1.0/0.0).sin()))
+echo(show("cos(inf)", (1.0/0.0).cos()))
+echo(show("tan(inf)", (1.0/0.0).tan()))

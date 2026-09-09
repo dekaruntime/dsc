@@ -3,6 +3,9 @@ import { mkdirs } from "fs"
 async fn go() {
   await mkdirs(".cache/id")
   const r = await mkdirs(".cache/id")
-  echo(match (r) { Ok(v) => "ok", Err(e) => "err" })
+  echo(match (r) {
+    Ok(v) => "ok",
+    Err(e) => "err",
+  })
 }
 go()

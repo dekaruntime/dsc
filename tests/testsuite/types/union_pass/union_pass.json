@@ -1,0 +1,5 @@
+{
+  "title": "Union widening assign and match type-patterns narrow and bind",
+  "stage": "run",
+  "notes": "deka#530, rfd#42. A union value must be matched before use; the type-patterns test and bind in one construct."
+}

@@ -1,6 +1,6 @@
 {
-  "title": "Generic type parameters on interfaces are not supported",
+  "title": "Generic type parameters on interfaces are banned",
   "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "unknown type `T`"
+  "notes": "deka#561: user code cannot declare type parameters on any form, including interfaces. A generic interface would reopen user-defined generic containers through the back door — it can be used concretely (fn f(c: Container<number>)) with no function declaring a type parameter.",
+  "expectedDiagnosticContains": "user code cannot declare type parameters"
 }

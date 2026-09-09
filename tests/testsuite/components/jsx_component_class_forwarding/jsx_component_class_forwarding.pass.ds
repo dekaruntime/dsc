@@ -1,7 +1,11 @@
 import { echo } from "io"
-const ui = globalThis.deka.ui
-fn Card(props: object) object {
-  return ui.jsx("div", { children: props.children })
+import { jsx } from "ui/jsx"
+import { renderToString } from "ui/server"
+interface CardProps {
+  children: string;
 }
-const html = ui.renderToString(ui.jsx(Card, { class: "bg-blue-300 w-[50%] p-4", children: "Hello" }))
+fn Card(props: CardProps) Component {
+  return jsx("div", {children: props.children})
+}
+const html = renderToString(jsx(Card, {class: "bg-blue-300 w-[50%] p-4", children: "Hello"}))
 echo(html.html)

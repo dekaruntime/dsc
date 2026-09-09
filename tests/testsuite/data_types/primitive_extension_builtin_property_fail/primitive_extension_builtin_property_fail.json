@@ -1,0 +1,6 @@
+{
+  "title": "Declaring an extension on a builtin property fails",
+  "stage": "typecheck",
+  "expectedDiagnosticContains": "cannot declare extension `length` on `string`: `length` is a builtin property",
+  "notes": "deka#527: `s.length` stays property-shaped, so an extension of the same name would give one name two silent meanings (rfd#13). Builtin methods remain shadowable."
+}

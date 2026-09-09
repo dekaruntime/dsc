@@ -2,9 +2,7 @@ import { echo } from "io"
 async fn greet(name: string) Promise<void> {
   echo(name)
 }
-
 async fn main() {
   await greet(1)
 }
-
 await main()

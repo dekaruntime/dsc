@@ -13,6 +13,21 @@ import os from "node:os";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..", "..");
 const testsRoot = __dirname;
+
+// Fixtures known to fail, loaded from tests/testsuite/expected-failures.txt.
+// A ratchet, not a suppression list: a listed fixture that starts passing is a
+// hard error, so the list can only shrink (same mechanism as the deka repo's
+// runner, deka#503).
+function loadExpectedFailures() {
+  const file = join(testsRoot, "expected-failures.txt");
+  if (!existsSync(file)) return new Set();
+  return new Set(
+    readFileSync(file, "utf8")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#"))
+  );
+}
 const scratchRoot = join(__dirname, ".run-tmp");
 
 const DEFAULT_DEKA_LOCK = '{\n  "lockfileVersion": 1,\n  "packages": {}\n}\n';
@@ -93,7 +108,15 @@ function collectDsFiles(dir, relativeTo) {
     const rel = relative(relativeTo, full).replace(/\\/g, "/");
     if (entry.isDirectory()) {
       results.push(...collectDsFiles(full, relativeTo));
-    } else if (entry.isFile() && (entry.name.endsWith(".ds") || entry.name.endsWith(".dsx"))) {
+    } else if (
+      entry.isFile() &&
+      (entry.name.endsWith(".ds") ||
+        entry.name.endsWith(".dsx") ||
+        entry.name.endsWith(".css"))
+    ) {
+      // .css files are component-authored stylesheets: copied next to the
+      // fixture sources so side-effect `import "./x.css"` resolves (RFD 24
+      // §10.6 attribute scoping).
       results.push(rel);
     }
   }
@@ -611,9 +634,60 @@ async function main() {
     return { test, skipped: false, native, ...evaled };
   });
 
+  const expectedFailures = loadExpectedFailures();
+
+  // Gate computation runs in BOTH output modes. --json used to print and
+  // exit(0) before any gate ran -- a silent bypass that reported success
+  // while fixtures were mismatched (same shape as deka#539).
   let passed = 0;
   let failed = 0;
   let skipped = 0;
+  let known = 0;
+  const unexpectedlyPassing = [];
+
+  if (!args.json) console.log("");
+  for (const result of results) {
+    if (result.skipped) {
+      skipped++;
+      continue;
+    }
+    if (result.matched) {
+      // A listed fixture that passes must be removed from the list; leaving
+      // it would let a real regression hide behind a stale entry.
+      if (expectedFailures.has(result.test.slug)) {
+        unexpectedlyPassing.push(result.test.slug);
+      }
+      passed++;
+      continue;
+    }
+    if (expectedFailures.has(result.test.slug)) {
+      known++;
+      continue;
+    }
+    failed++;
+    if (!args.json) {
+      console.log(`✗ ${result.test.slug}`);
+      for (const reason of result.reasons) {
+        console.log(`    ${reason}`);
+      }
+    }
+  }
+
+  if (unexpectedlyPassing.length > 0 && !args.json) {
+    console.log("");
+    console.log("These fixtures are listed in expected-failures.txt but PASSED.");
+    console.log("Delete their lines -- a stale entry can hide a real regression:");
+    for (const slug of unexpectedlyPassing) console.log(`    ${slug}`);
+  }
+
+  // Every fixture must land in exactly one bucket. If this identity ever
+  // fails, a fixture has fallen between the cases and is owned by nothing.
+  if (passed + failed + skipped + known !== filtered.length) {
+    console.error(
+      `\nreconciliation failed: ${passed + failed + skipped + known} accounted for, ${filtered.length} fixtures.`
+    );
+    process.exit(1);
+  }
 
   if (args.json) {
     const output = results.map((r) => ({
@@ -624,6 +698,7 @@ async function main() {
       expectedStage: r.test.stage,
       skipped: r.skipped ?? false,
       skipReason: r.skipped ? r.reason : undefined,
+      knownFailure: !r.skipped && !r.matched && expectedFailures.has(r.test.slug),
       matched: r.matched ?? false,
       actualStatus: r.native ? (r.native.ok ? "pass" : "fail") : undefined,
       actualStage: r.stage,
@@ -633,33 +708,15 @@ async function main() {
       reasons: r.reasons,
     }));
     console.log(JSON.stringify(output, null, 2));
-    process.exit(0);
+  } else {
+    console.log("\n============================================================");
+    console.log(
+      ` Passed: ${passed} | Failed: ${failed} | Known: ${known} | Skipped: ${skipped} | Total: ${filtered.length}`
+    );
+    console.log("============================================================\n");
   }
 
-  console.log("");
-  for (const result of results) {
-    if (result.skipped) {
-      skipped++;
-      continue;
-    }
-    if (result.matched) {
-      passed++;
-      continue;
-    }
-    failed++;
-    console.log(`✗ ${result.test.slug}`);
-    for (const reason of result.reasons) {
-      console.log(`    ${reason}`);
-    }
-  }
-
-  console.log("\n============================================================");
-  console.log(
-    ` Passed: ${passed} | Failed: ${failed} | Skipped: ${skipped} | Total: ${filtered.length}`
-  );
-  console.log("============================================================\n");
-
-  process.exit(failed === 0 ? 0 : 1);
+  process.exit(failed === 0 && unexpectedlyPassing.length === 0 ? 0 : 1);
 }
 
 main().catch((error) => {

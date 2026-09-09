@@ -1,0 +1,6 @@
+{
+  "title": "getType() with arguments fails",
+  "stage": "typecheck",
+  "expectedDiagnosticContains": "`getType` expects no arguments",
+  "notes": "deka#529: the builtin takes no arguments."
+}

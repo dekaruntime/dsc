@@ -2,7 +2,6 @@ import { echo } from "io"
 interface Config {
   label: Option<string>;
 }
-
 fn show(c: Config) {
   echo(match (c.label) {
     Some(v) => v,
@@ -10,6 +9,5 @@ fn show(c: Config) {
     _ => "?",
   })
 }
-
 show({label: Option.Some("hi")})
 show({label: Option.None})

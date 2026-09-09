@@ -1,8 +1,6 @@
 import { echo } from "io"
 fn compose(f: fn(number) number, g: fn(number) number) fn(number) number {
-  return fn(x: number) number {
-    return f(g(x))
-  }
+  return fn(x: number) number { return f(g(x)) }
 }
 fn double(n: number) number {
   return n * 2

@@ -2,7 +2,6 @@ import { echo } from "io"
 const x = 1
 {
   const x = 2
-  echo(x)
+  echo(string(x))
 }
-
-echo(x)
+echo(string(x))

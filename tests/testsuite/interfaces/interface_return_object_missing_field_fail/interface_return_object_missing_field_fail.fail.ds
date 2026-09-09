@@ -1,6 +1,6 @@
 import { echo } from "io"
 interface Named {
-  name: string
+  name: string;
 }
 fn makeNamed() Named {
   return {}

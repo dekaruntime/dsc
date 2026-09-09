@@ -1,0 +1,5 @@
+{
+  "title": "Module-scope let can be reassigned inside function bodies.",
+  "stage": "run",
+  "notes": "Regression for deka#600; exercises the mutables seeding for module lets."
+}

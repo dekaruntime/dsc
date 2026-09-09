@@ -1,6 +1,6 @@
 import { echo } from "io"
 interface Op {
-  op: fn(number, number) number
+  op: fn(number, number) number;
 }
 fn add(a: number, b: number) number {
   return a + b
@@ -8,4 +8,4 @@ fn add(a: number, b: number) number {
 fn run(o: Op) {
   echo(o.op(1, 2))
 }
-run({ op: add })
+run({op: add})

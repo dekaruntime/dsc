@@ -1,6 +1,3 @@
 import { echo } from "io"
-import { stringify } from "json"
-echo(match (stringify({})) {
-  Ok(v) => v,
-  Err(e) => "fail"
-})
+struct Empty {}
+echo((Empty {}).toJSON())

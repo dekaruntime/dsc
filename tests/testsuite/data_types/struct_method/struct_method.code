@@ -3,10 +3,8 @@ struct Point {
   x: number;
   y: number;
 }
-
 fn (p Point) sum() number {
   return p.x + p.y
 }
-
 const p = Point { x: 3, y: 4 }
-echo(p.sum())
+echo(string(p.sum()))

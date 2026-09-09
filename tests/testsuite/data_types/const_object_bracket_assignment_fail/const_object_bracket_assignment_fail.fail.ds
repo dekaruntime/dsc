@@ -1,4 +1,4 @@
 import { echo } from "io"
-const obj = { a: 1 }
+const obj = {a: 1}
 obj["a"] = 2
 echo(string(obj.a))

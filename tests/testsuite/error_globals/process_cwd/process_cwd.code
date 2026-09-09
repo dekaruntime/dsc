@@ -5,5 +5,5 @@ import { echo } from "io"
 let cwd = unsafe<string> { process.cwd() }
 match (cwd) {
   Ok(v) => echo("has-cwd"),
-  Err(e) => echo("no-cwd")
+  Err(e) => echo("no-cwd"),
 }

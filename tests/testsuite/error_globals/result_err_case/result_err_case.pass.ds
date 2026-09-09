@@ -1,3 +1,6 @@
 import { echo } from "io"
 const r = Result.Err("bad")
-echo(match (r) { Ok(v) => `ok: ${v}`, Err(e) => `err: ${e}` })
+echo(match (r) {
+  Ok(v) => `ok: ${v}`,
+  Err(e) => `err: ${e}`,
+})

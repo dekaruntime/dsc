@@ -1,2 +1,6 @@
 import { echo } from "io"
-echo(false && echo("x"))
+fn side_effect() boolean {
+  echo("x")
+  return true
+}
+echo(string(false && side_effect()))

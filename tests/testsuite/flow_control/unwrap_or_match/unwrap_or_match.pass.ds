@@ -1,18 +1,18 @@
 import { echo } from "io"
 
-fn attempt(ok: boolean): Result<string, string> {
+fn attempt(ok: boolean) Result<string, string> {
   if (ok) {
-    return Ok("good")
+    return Result.Ok("good")
   }
-  return Err("boom")
+  return Result.Err("boom")
 }
 
 // The arms match the *original* value, so `unwrap` supplies the `Ok` arm and
 // the author writes the rest. That keeps the desugaring literal: `or match` is
 // "the remaining arms" (deka#445).
-fn run(ok: boolean): string {
+fn run(ok: boolean) string {
   let v = unwrap(attempt(ok)) or match {
-    Err(message) => "failed: " + message
+    Err(message) => "failed: " + message,
   }
   return v
 }

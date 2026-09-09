@@ -4,7 +4,7 @@ fn (m Mover) move() string {
   return "moving"
 }
 struct Robot {
-  Mover
+  Mover;
 }
-const r = Robot { Mover: Mover {} }
+const r = Robot { Mover: Mover {  } }
 echo(r.move())

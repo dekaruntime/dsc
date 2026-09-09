@@ -1,20 +1,16 @@
 import { echo } from "io"
 interface Counter {
   value: number;
-  fn next() Counter {}
+  fn next() Counter;
 }
-
 struct Step {
   value: number;
 }
-
 fn (s Step) next() Counter {
   return Step { value: s.value + 1 }
 }
-
 fn run(c: Counter) {
   const n = c.next()
-  echo(n.value)
+  echo(string(n.value))
 }
-
 run(Step { value: 0 })

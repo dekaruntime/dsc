@@ -1,5 +1,6 @@
 {
-  "title": "Assigning to const array element fails at runtime",
-  "stage": "run",
-  "notes": ""
+  "title": "Assigning to a const array element fails",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "const binding `arr`; use `let` to allow mutation"
 }

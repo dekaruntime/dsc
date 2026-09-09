@@ -6,9 +6,9 @@ enum Color {
 }
 fn name(c: Color) string {
   return match (c) {
-    Color.Red => "red",
-    Color.Green => "green",
-    Color.Blue => "blue",
+    Red => "red",
+    Green => "green",
+    Blue => "blue",
   }
 }
 echo(name(Color.Green))

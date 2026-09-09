@@ -1,6 +1,6 @@
 import { echo } from "io"
 import { now } from "time"
-echo(match (unsafe<boolean> { Number.isFinite(now()) }) {
+echo(string(match (unsafe<boolean> { Number.isFinite(now()) }) {
   Ok(v) => v,
-  Err(e) => false
-})
+  Err(e) => false,
+}))

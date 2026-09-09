@@ -3,8 +3,8 @@ import { upgrade } from "tls"
 const msg = match (upgrade(0, "localhost")) {
   Ok(h) => "",
   Err(e) => match (unsafe<string> { String(e) }) {
-    Ok(s) => s,
-    Err(err) => ""
-  }
+  Ok(s) => s,
+  Err(err) => "",
+},
 }
-echo(msg.length > 0)
+echo(string(msg.length > 0))

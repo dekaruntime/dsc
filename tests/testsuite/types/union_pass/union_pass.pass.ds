@@ -1,0 +1,15 @@
+// deka#530, rfd#42: union types and match type-patterns.
+// Widening assign: a string is assignable to `string | number`.
+// The match type-patterns narrow and bind; the payload is the member type.
+import { echo } from "io"
+
+fn render(v: string | number) string {
+  return match (v) {
+    string(s) => s,
+    number(n) => string(n),
+  }
+}
+
+const widened: string | number = "hello"
+echo(render(widened))
+echo(render(42))

@@ -1,0 +1,4 @@
+import { echo } from "io"
+let something: number | string = 42
+echo(something.signature().toString())
+echo(something.getType().toString())

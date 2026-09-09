@@ -1,0 +1,40 @@
+import { echo } from "io"
+
+// pop()/shift() return Option<T> — and the emitted code really builds one
+// (deka#566). Previously a raw JS passthrough: unwrap took the or-branch
+// on a present value, empty arrays produced Some(undefined), and const
+// arrays threw "Cannot delete property" at runtime.
+let nums: Array<number> = [1, 2, 3]
+
+let p = unwrap(nums.pop()) or { -1 }
+echo(string(p))
+
+let s = unwrap(nums.shift()) or { -1 }
+echo(string(s))
+
+// The mutation is real: the array shrank twice ([1,2,3] -> [2] -> []).
+echo(string(nums.length))
+
+// Empty array takes the absent branch, not Some(undefined).
+let e: Array<number> = []
+let ep = unwrap(e.pop()) or { -99 }
+echo(string(ep))
+
+let es = unwrap(e.shift()) or { -99 }
+echo(string(es))
+
+// Match reads the Option directly. Function parameters are immutable
+// bindings, so the receiver is a mutable local here.
+let rest: Array<number> = [42]
+let via_match = match (rest.pop()) {
+  Some(n) => "popped " + string(n),
+  None => "empty",
+}
+echo(via_match)
+
+let now_empty: Array<number> = []
+let absent = match (now_empty.shift()) {
+  Some(n) => "shifted " + string(n),
+  None => "empty",
+}
+echo(absent)

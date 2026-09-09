@@ -1,4 +1,4 @@
 import { echo } from "io"
 let items = [1, 2, 3]
 items[0] = 9
-echo(items[0])
+echo(string(items[0]))

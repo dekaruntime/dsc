@@ -4,4 +4,4 @@ fn demo() number {
   const b = a + 2
   return b
 }
-echo(demo())
+echo(string(demo()))

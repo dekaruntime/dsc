@@ -1,6 +1,6 @@
 import { echo } from "io"
 const r = Result.Ok(42)
-echo(match (r) {
+echo("" + match (r) {
   Ok(v) => v,
   Err(e) => -1,
   _ => -2,

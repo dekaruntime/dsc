@@ -3,5 +3,4 @@ async fn outer() {
   const f = fn() number { return await 1 }
   echo(f())
 }
-
 await outer()

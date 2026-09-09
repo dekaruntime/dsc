@@ -1,6 +1,11 @@
 import { echo } from "io"
-const ui = globalThis.deka.ui
-fn A(props: object) object { return ui.jsx("span", { children: "a" }) }
-fn B(props: object) object { return ui.jsx("span", { children: "b" }) }
-const html = ui.renderToString(ui.jsxs(ui.Fragment, { children: [ui.jsx(A, {}), ui.jsx(B, {})] }))
+import { jsx, jsxs, Fragment } from "ui/jsx"
+import { renderToString } from "ui/server"
+fn A() Component {
+  return jsx("span", {children: "a"})
+}
+fn B() Component {
+  return jsx("span", {children: "b"})
+}
+const html = renderToString(jsxs(Fragment, {children: [jsx(A, {}), jsx(B, {})]}))
 echo(html.html)

@@ -1,7 +1,8 @@
 {
   "title": "Nested component referencing undefined component fails",
-  "stage": "run",
-  "notes": "A component that invokes an undefined inner component should fail at runtime.",
+  "stage": "parse",
+  "expectedDiagnosticContains": "unknown identifier `Inner`",
+  "notes": "v2 catches the undefined inner component at compile time rather than at runtime.",
   "hosts": [
     "browser"
   ]

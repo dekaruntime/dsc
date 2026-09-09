@@ -1,0 +1,6 @@
+{
+  "title": "A function declaring a return type with an empty body fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "declares return type `string` but does not return a value on every path",
+  "notes": "An empty body silently handed callers undefined (deka#476)."
+}

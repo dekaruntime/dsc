@@ -1,2 +1,2 @@
 import { echo } from "io"
-echo(+5)
+echo(string(+5))

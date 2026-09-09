@@ -1,9 +1,5 @@
 import { echo } from "io"
-import { parse } from "json"
-echo(match (parse("null")) {
-  Ok(v) => match (unsafe<string> { String(v) }) {
-    Ok(s) => s,
-    Err(e) => "fail"
-  },
-  Err(e) => "fail"
+echo(match ("null".parseJSON<number>()) {
+  Ok(v) => "ok",
+  Err(e) => "fail",
 })

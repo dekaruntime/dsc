@@ -5,7 +5,7 @@ enum Color {
 }
 fn name(c: Color) string {
   return match (c) {
-    Color.Red => "red",
-    Color.Green => "green",
+    Red => "red",
+    Green => "green",
   }
 }

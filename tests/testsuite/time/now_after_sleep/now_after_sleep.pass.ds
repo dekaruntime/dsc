@@ -2,4 +2,4 @@ import { echo } from "io"
 import { now, sleep_ms } from "time"
 const before = now()
 sleep_ms(1)
-echo(now() >= before)
+echo(string(now() >= before))

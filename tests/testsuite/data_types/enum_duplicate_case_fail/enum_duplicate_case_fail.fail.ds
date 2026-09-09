@@ -1,7 +1,7 @@
 import { echo } from "io"
 enum Color {
-  Red
-  Green
-  Red
+  Red,
+  Green,
+  Red,
 }
 echo(Color.Red)

@@ -3,4 +3,4 @@ import { echo } from "io"
 type Cents number
 const a = Cents(5)
 const b = Cents(3)
-echo(string(number(a - b)))
+echo(string(unboxNumber(a - b)))

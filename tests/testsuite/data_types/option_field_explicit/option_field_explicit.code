@@ -2,27 +2,27 @@ import { echo } from "io"
 
 // The two spellings mean the same thing: a field of type `Option<T>`.
 struct S {
-  path: string?
+  path?: string;
 }
 
 interface O {
-  label?: string
+  label?: string;
 }
 
-fn shown(value: Option<string>): string {
+fn shown(value: Option<string>) string {
   return match (value) {
     Some(p) => p,
-    None => "none"
+    None => "none",
   }
 }
 
-fn labelled(o: O): string {
+fn labelled(o: O) string {
   return shown(o.label)
 }
 
-const filled = S { path: Some("/x") }
+const filled = S { path: Option.Some("/x") }
 const empty = S { path: None }
 echo(shown(filled.path))
 echo(shown(empty.path))
-echo(labelled({ label: Some("hi") }))
-echo(labelled({ label: None }))
+echo(labelled({label: Option.Some("hi")}))
+echo(labelled({label: None}))

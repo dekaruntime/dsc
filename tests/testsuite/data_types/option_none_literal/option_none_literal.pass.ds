@@ -1,14 +1,14 @@
 import { echo } from "io"
-fn find(hit: boolean): Option<number> {
+fn find(hit: boolean) Option<number> {
   if (hit) {
-    return Some(7)
+    return Option.Some(7)
   }
   return None
 }
-fn label(value: Option<number>): string {
+fn label(value: Option<number>) string {
   return match (value) {
     Some(v) => "some",
-    None => "none"
+    None => "none",
   }
 }
 const direct: Option<number> = None

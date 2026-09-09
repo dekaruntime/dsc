@@ -2,10 +2,8 @@ import { echo } from "io"
 struct Box {
   value: number;
 }
-
 fn makeBox(v: number) Box {
   return Box { value: v }
 }
-
 const b = makeBox(7)
-echo(b.value)
+echo(string(b.value))

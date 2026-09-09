@@ -1,5 +1,0 @@
-{
-  "title": "Generic Type Spacing",
-  "stage": "run",
-  "notes": "Formatter should canonicalize generic type spacing."
-}

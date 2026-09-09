@@ -1,0 +1,6 @@
+struct Bad {
+  run: fn() string
+}
+
+const bad = Bad { run: fn() string { return "nope" } }
+const text = bad.toJSON()

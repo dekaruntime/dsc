@@ -1,13 +1,13 @@
 import { echo } from "io"
 import { random_bytes, aes_256_gcm_encrypt, aes_256_gcm_decrypt } from "crypto"
-fn utf8(value: string): bytes {
+fn utf8(value: string) bytes {
   let encoded = unsafe<bytes> { new TextEncoder().encode(value) }
   return match (encoded) {
     Ok(buf) => buf,
-    Err(err) => utf8("")
+    Err(err) => utf8(""),
   }
 }
-fn to_hex(value: bytes): string {
+fn to_hex(value: bytes) string {
   let r = unsafe {
     var s = "";
     var i = 0;
@@ -19,25 +19,31 @@ fn to_hex(value: bytes): string {
   }
   return match (r) {
     Ok(v) => v,
-    Err(e) => ""
+    Err(e) => "",
   }
 }
-fn no_aad(): bytes {
+fn no_aad() bytes {
   let r = unsafe<bytes> { new Uint8Array(0) }
   return match (r) {
     Ok(v) => v,
-    Err(e) => utf8("")
+    Err(e) => utf8(""),
   }
 }
-let key = match (random_bytes(32)) { Ok(v) => v, Err(e) => utf8("") }
-let nonce = match (random_bytes(12)) { Ok(v) => v, Err(e) => utf8("") }
+let key = match (random_bytes(32)) {
+  Ok(v) => v,
+  Err(e) => utf8(""),
+}
+let nonce = match (random_bytes(12)) {
+  Ok(v) => v,
+  Err(e) => utf8(""),
+}
 let pt = utf8("hello aead")
 let aad = no_aad()
 const round = match (aes_256_gcm_encrypt(key, nonce, pt, aad)) {
   Err(e) => "fail-enc",
   Ok(ct) => match (aes_256_gcm_decrypt(key, nonce, ct, aad)) {
-    Err(e) => "fail-dec",
-    Ok(out) => to_hex(out)
-  }
+  Err(e) => "fail-dec",
+  Ok(out) => to_hex(out),
+},
 }
-echo(round == to_hex(pt))
+echo(string(round == to_hex(pt)))

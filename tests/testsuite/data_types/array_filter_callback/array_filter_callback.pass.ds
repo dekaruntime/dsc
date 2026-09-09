@@ -1,6 +1,6 @@
 import { echo } from "io"
 const arr = [1, 2, 3, 4]
-const evens = arr.filter(fn (x: number) boolean { return x % 2 == 0 })
+const evens = arr.filter(fn(x: number) boolean { return x % 2 == 0 })
 const len: number = evens.length
 const first: number = evens[0]
 const second: number = evens[1]

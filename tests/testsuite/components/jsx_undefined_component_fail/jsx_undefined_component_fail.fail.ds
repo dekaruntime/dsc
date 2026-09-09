@@ -1,4 +1,5 @@
 import { echo } from "io"
-const ui = globalThis.deka.ui
-const html = ui.renderToString(ui.jsx(Missing, {}))
+import { jsx } from "ui/jsx"
+import { renderToString } from "ui/server"
+const html = renderToString(jsx(Missing, {}))
 echo(html.html)

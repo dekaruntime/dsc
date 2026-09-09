@@ -1,3 +1,6 @@
 import { echo } from "io"
 const r = unsafe { deka.panic("boom") }
-echo(match (r) { Ok(v) => `ok: ${v}`, Err(e) => `err: ${e.message}` })
+echo(match (r) {
+  Ok(v) => `ok: ${v}`,
+  Err(e) => `err: ${e.message}`,
+})

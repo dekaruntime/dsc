@@ -150,6 +150,33 @@ jobs:
           cargo test --locked -p deka-fmt --test corpus_roundtrip
           cargo test --locked -p deka_compiler_wasm all_website_tour_sources_match_the_native_abi_contract
 
+      # dsc#80: the Hats fixtures only run here if a real `deka run` executes
+      # them. dsc cannot build the runtime (V8 stays out of this repo), so the
+      # gate downloads the released runtime pinned in
+      # scripts/deka-runtime-version and fails the job on any fixture
+      # mismatch not listed in tests/testsuite/expected-failures.txt (a
+      # ratchet, not a suppression list).
+      - name: Setup Bun for the testsuite runner
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install pinned deka runtime
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
+        run: scripts/ci-install-deka-runtime.sh "$GITHUB_WORKSPACE/.cache/deka-runtime/deka"
+
+      - name: Build dsc for the testsuite gate
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
+        run: cargo build --release -p cli
+
+      - name: Testsuite fixtures against the pinned runtime
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
+        env:
+          DEKA_NATIVE: ${{ github.workspace }}/.cache/deka-runtime/deka
+          DEKA_DSC: ${{ github.workspace }}/target/release/dsc
+        run: bun tests/testsuite/run.mjs
+
       - name: Check wasm32 compiler + diagnostics
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
         run: |

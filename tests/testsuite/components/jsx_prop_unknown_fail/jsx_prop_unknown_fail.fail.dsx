@@ -1,9 +1,9 @@
 interface CardProps {
-  title: string
+  title: string;
 }
 
 fn Card(props: CardProps) Component {
   return <h2>{props.title}</h2>
 }
 
-const view = <Card title="Hello" subtitel="typo" />
+const view = <Card title={"Hello"} subtitel={"typo"} />

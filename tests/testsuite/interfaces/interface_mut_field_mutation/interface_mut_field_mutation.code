@@ -2,11 +2,9 @@ import { echo } from "io"
 interface Box {
   mut value: number;
 }
-
 fn setFive(b: Box) {
   b.value = 5
 }
-
 let obj = {value: 0}
 setFive(obj)
-echo(obj.value)
+echo(string(obj.value))

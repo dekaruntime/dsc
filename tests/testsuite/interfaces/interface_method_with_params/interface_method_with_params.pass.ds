@@ -1,6 +1,6 @@
 import { echo } from "io"
 interface Shouter {
-  fn shout(msg: string) void
+  fn shout(msg: string) void;
 }
 struct Bullhorn {}
 fn (b Bullhorn) shout(msg: string) {
@@ -9,4 +9,4 @@ fn (b Bullhorn) shout(msg: string) {
 fn runShouter(s: Shouter) {
   s.shout("hey")
 }
-runShouter(Bullhorn {})
+runShouter(Bullhorn {  })

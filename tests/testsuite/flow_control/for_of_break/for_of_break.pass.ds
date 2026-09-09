@@ -1,7 +1,7 @@
 import { echo } from "io"
 const items = ["a", "b", "c"]
 for (const item of items) {
-  if (item === "b") {
+  if (item == "b") {
     break
   }
   echo(item)

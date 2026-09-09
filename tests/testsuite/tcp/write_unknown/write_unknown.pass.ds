@@ -1,15 +1,15 @@
 import { echo } from "io"
 import { write } from "tcp"
-fn utf8(value: string): bytes {
+fn utf8(value: string) bytes {
   let encoded = unsafe<bytes> { new TextEncoder().encode(value) }
   return match (encoded) {
     Ok(buf) => buf,
-    Err(err) => utf8("")
+    Err(err) => utf8(""),
   }
 }
 let data = utf8("x")
 
 echo(match (write(0, data)) {
   Ok(v) => "ok",
-  Err(e) => "err"
+  Err(e) => "err",
 })

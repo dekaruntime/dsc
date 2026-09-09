@@ -1,3 +1,6 @@
 import { echo } from "io"
 const x = unsafe { throw new Error("inner") }
-echo(match (x) { Ok(v) => v, Err(_) => 99 })
+echo(match (x) {
+  Ok(v) => v,
+  Err(_) => 99,
+})

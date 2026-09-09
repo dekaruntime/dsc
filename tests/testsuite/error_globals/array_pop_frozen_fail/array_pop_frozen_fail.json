@@ -1,5 +1,6 @@
 {
-  "title": "Popping a frozen array fails",
-  "stage": "run",
-  "notes": "Array literals are frozen, so pop cannot mutate."
+  "title": "Popping a const array fails",
+  "stage": "parse",
+  "notes": "The checker rejects mutation before emission.",
+  "expectedDiagnosticContains": "cannot call mutable method `pop` on an immutable receiver"
 }

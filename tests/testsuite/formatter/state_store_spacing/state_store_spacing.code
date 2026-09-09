@@ -1,4 +1,8 @@
 import { echo } from "io"
-const store = deka.ui.State.create({count: 0}, {increment: fn(state: object) object { return {count: state.count + 1} }})
-store.increment()
-echo(store().count)
+import { signal } from "ui/reactive"
+const countPair = signal(0)
+const getCount = countPair[0]
+const setCount = countPair[1]
+const increment = fn() void { setCount(getCount() + 1) }
+increment()
+echo(getCount())

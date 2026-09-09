@@ -5,4 +5,4 @@ const y = match (x) {
   None => 0,
   _ => -1,
 }
-echo(y)
+echo(string(y))

@@ -3,8 +3,10 @@ struct Node {
   value: number;
   next?: Node;
 }
-
 const tail = Node { value: 2 }
-const head = Node { value: 1, next: tail }
-echo(head.value)
-echo(head.next.value)
+const head = Node { value: 1, next: Option.Some(tail) }
+echo("" + head.value)
+echo("" + match (head.next) {
+  Some(n) => n.value,
+  None => 0,
+})

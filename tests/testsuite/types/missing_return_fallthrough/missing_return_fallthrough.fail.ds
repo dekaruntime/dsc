@@ -1,0 +1,5 @@
+import { echo } from "io"
+fn wrongTail() string {
+  const x: number = 1
+}
+echo("ok")

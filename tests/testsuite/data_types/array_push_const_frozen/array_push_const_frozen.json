@@ -1,5 +1,6 @@
 {
-  "title": "Push on const frozen array fails at runtime",
-  "stage": "run",
-  "notes": ""
+  "title": "Push on const array fails",
+  "stage": "parse",
+  "notes": "",
+  "expectedDiagnosticContains": "cannot call mutable method `push` on an immutable receiver"
 }

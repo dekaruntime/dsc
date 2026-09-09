@@ -1,2 +1,2 @@
 import { echo } from "io"
-echo(1e-3)
+echo(string(0.001))

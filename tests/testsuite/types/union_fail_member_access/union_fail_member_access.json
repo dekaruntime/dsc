@@ -1,0 +1,6 @@
+{
+  "title": "Member access on a union without narrowing fails",
+  "stage": "typecheck",
+  "expectedDiagnosticContains": "narrow it with a match type-pattern",
+  "notes": "deka#530, rfd#42. The member that provides the field is unknown until the value is narrowed."
+}

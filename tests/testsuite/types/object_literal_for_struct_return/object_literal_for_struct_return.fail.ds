@@ -1,9 +1,9 @@
 import { echo } from "io"
 struct Box {
-  value: number
+  value: number;
 }
 fn identity(b: Box) Box {
-  return { value: 7 }
+  return {value: 7}
 }
 const x = Box { value: 7 }
 const y = identity(x)

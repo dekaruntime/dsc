@@ -4,12 +4,12 @@ const none = Option.None
 const a = match (some) {
   Some(v) => v * 2,
   None => 0,
-  _ => -1
+  _ => -1,
 }
 const b = match (none) {
   Some(v) => v * 2,
   None => 0,
-  _ => -1
+  _ => -1,
 }
 echo(string(a))
 echo(string(b))

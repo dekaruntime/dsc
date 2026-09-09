@@ -1,0 +1,1 @@
+<div data-deka-id="css_scope_no_leak.pass:_/i0"><div data-deka-id="CardA:CardA/i0" data-deka-cid-9d489cd01eff class="card">A</div><div data-deka-id="CardB:CardB/i0" data-deka-cid-c353cf4f42da class="card">B</div></div>

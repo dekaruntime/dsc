@@ -1,0 +1,5 @@
+{
+  "title": "getType() on primitives returns a first-class Type",
+  "stage": "run",
+  "notes": "deka#529, rfd#41: `.getType()` rewrites to the module-local `__deka_type_of(x)`; `.toString()` names the runtime type."
+}

@@ -1,3 +1,6 @@
 import { echo } from "io"
 const r = unsafe<bytes> { new TextEncoder().encode("hi") }
-echo(match (r) { Ok(v) => `${v.length}:${v[0]}:${v[1]}`, Err(e) => `err: ${e.message}` })
+echo(match (r) {
+  Ok(v) => `${v.length}:${v[0]}:${v[1]}`,
+  Err(e) => `err: ${e.message}`,
+})

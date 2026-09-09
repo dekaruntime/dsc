@@ -2,5 +2,4 @@ import { echo } from "io"
 async fn work() Promise<void> {
   echo("done")
 }
-
 await work()

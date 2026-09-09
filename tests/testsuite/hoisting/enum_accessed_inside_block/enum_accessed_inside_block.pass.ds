@@ -1,3 +1,8 @@
 import { echo } from "io"
-enum State { On Off }
-if (true) { echo(State.On.name) }
+enum State {
+  On,
+  Off,
+}
+if (true) {
+  echo(State.On.name)
+}

@@ -1,3 +1,6 @@
 import { echo } from "io"
 const r = unsafe { JSON.parse("invalid json") }
-echo(match (r) { Ok(v) => `ok: ${v}`, Err(e) => `err: ${e.message}` })
+echo(match (r) {
+  Ok(v) => `ok: ${v}`,
+  Err(e) => `err: ${e.message}`,
+})

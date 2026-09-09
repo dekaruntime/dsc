@@ -4,7 +4,7 @@ async fn go() {
   const r = await read_file("no-such-file.txt")
   echo(match (r) {
     Ok(v) => "ok",
-    Err(e) => "err"
+    Err(e) => "err",
   })
 }
 go()

@@ -1,4 +1,4 @@
 import { echo } from "io"
-const ui = globalThis.deka.ui
-const html = ui.renderToString(<div class={missing}>hi</div>)
+import { renderToString } from "ui/server"
+const html = renderToString(<div class={missing}>hi</div>)
 echo(html.html)

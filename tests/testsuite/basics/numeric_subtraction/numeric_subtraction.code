@@ -1,2 +1,2 @@
 import { echo } from "io"
-echo(10 - 3)
+echo(string(10 - 3))

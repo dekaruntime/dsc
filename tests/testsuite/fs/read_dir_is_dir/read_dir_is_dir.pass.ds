@@ -6,10 +6,10 @@ async fn go() {
   const is_dir = match (r) {
     Err(e) => false,
     Ok(entries) => match (unsafe { entries[0].is_dir === true }) {
-      Ok(v) => v,
-      Err(e) => false
-    }
+    Ok(v) => v,
+    Err(e) => false,
+  },
   }
-  echo(is_dir)
+  echo(string(is_dir))
 }
 go()

@@ -1,0 +1,5 @@
+{
+  "title": "Primitive extension method on string",
+  "stage": "run",
+  "notes": "deka#527: `title.slugify()` is a compile-time rewrite to the free function `slugify$string(title)`."
+}

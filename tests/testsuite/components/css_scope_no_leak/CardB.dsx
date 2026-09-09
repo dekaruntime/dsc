@@ -1,0 +1,4 @@
+import "./card_b.css"
+export fn CardB() {
+    return <div class="card">B</div>
+}

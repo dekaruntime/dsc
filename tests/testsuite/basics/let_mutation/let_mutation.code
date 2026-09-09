@@ -1,4 +1,4 @@
 import { echo } from "io"
 let x = 1
 x = 2
-echo(x)
+echo(string(x))

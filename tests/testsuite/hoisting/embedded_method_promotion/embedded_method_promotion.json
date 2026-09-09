@@ -3,6 +3,7 @@
   "stage": "run",
   "notes": "",
   "hosts": [
+    "native",
     "browser"
   ]
 }

@@ -5,6 +5,6 @@ let thrown = unsafe {
 }
 const label: string = match (thrown) {
   Ok(value) => "ok",
-  Err(error) => "caught"
+  Err(error) => "caught",
 }
 echo(label)

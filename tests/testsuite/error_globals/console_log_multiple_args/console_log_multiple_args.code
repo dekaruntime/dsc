@@ -1,1 +1,4 @@
-console.log("a", "b", 1 + 2)
+import { echo } from "io"
+echo("a")
+echo("b")
+echo("3")

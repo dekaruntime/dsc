@@ -1,3 +1,6 @@
 import { echo } from "io"
 const parsed = unsafe { JSON.parse("{\"x\":1}") }
-echo(match (parsed) { Ok(v) => v.x, Err(_) => 0 })
+echo(match (parsed) {
+  Ok(v) => v.x,
+  Err(_) => 0,
+})

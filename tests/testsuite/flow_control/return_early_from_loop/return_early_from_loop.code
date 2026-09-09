@@ -1,13 +1,11 @@
 import { echo } from "io"
 fn find(xs: Array<number>, target: number) number {
   for (const x of xs) {
-    if (x === target) {
+    if (x == target) {
       return x
     }
   }
-
   return -1
 }
-
-echo(find([1, 2, 3], 2))
-echo(find([1, 2, 3], 5))
+echo(string(find([1, 2, 3], 2)))
+echo(string(find([1, 2, 3], 5)))

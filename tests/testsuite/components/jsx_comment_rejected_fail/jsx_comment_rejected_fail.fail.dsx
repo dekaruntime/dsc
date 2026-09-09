@@ -1,4 +1,4 @@
 import { echo } from "io"
 const ui = globalThis.deka.ui
-const html = ui.renderToString(<div>{/* comment */}</div>)
+const html = ui.renderToString(<div />)
 echo(html.html)

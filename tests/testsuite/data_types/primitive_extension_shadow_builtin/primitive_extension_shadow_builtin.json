@@ -1,0 +1,5 @@
+{
+  "title": "User extension shadows builtin call-shaped access only",
+  "stage": "run",
+  "notes": "deka#527: call-shaped `s.toUpperCase()` routes to the extension; property-shaped `s.length` keeps the builtin."
+}

@@ -1,10 +1,10 @@
 import { echo } from "io"
 import { mkdirs, write_file, read_dir } from "fs"
-fn utf8(value: string): bytes {
+fn utf8(value: string) bytes {
   let encoded = unsafe<bytes> { new TextEncoder().encode(value) }
   return match (encoded) {
     Ok(buf) => buf,
-    Err(err) => utf8("")
+    Err(err) => utf8(""),
   }
 }
 async fn go() {
@@ -14,10 +14,10 @@ async fn go() {
   const is_file = match (r) {
     Err(e) => false,
     Ok(entries) => match (unsafe { entries[0].is_file === true }) {
-      Ok(v) => v,
-      Err(e) => false
-    }
+    Ok(v) => v,
+    Err(e) => false,
+  },
   }
-  echo(is_file)
+  echo(string(is_file))
 }
 go()

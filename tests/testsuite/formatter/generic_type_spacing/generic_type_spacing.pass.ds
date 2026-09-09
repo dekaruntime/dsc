@@ -1,3 +1,0 @@
-import { echo } from "io"
-fn id<T>(x:T) T{return x}
-echo(string(id(42)))

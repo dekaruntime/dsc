@@ -9,4 +9,4 @@ async fn (c Counter) fetch() Promise<number> {
 
 const counter = Counter { count: 7 }
 const value = await counter.fetch()
-echo(value)
+echo(string(value))

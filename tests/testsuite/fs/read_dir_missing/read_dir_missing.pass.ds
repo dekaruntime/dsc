@@ -4,7 +4,7 @@ async fn go() {
   const r = await read_dir(".cache/no-dir")
   echo(match (r) {
     Ok(v) => "ok",
-    Err(e) => "err"
+    Err(e) => "err",
   })
 }
 go()

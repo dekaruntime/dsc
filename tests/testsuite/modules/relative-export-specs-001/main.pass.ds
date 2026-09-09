@@ -1,3 +1,3 @@
 import { echo } from "io"
-import { localValue } from "./values.ds";
-echo(localValue);
+import { localValue } from "./values.ds"
+echo(localValue)

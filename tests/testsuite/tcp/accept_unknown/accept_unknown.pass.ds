@@ -3,5 +3,5 @@ import { accept } from "tcp"
 
 echo(match (accept(0)) {
   Ok(v) => "ok",
-  Err(e) => "err"
+  Err(e) => "err",
 })

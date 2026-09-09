@@ -1,3 +1,12 @@
 import { echo } from "io"
-enum Color{Red Green Blue}
-echo("" + match (Color.Green) { Color.Red => 1, Color.Green => 2, Color.Blue => 3, _ => 0 })
+enum Color {
+  Red,
+  Green,
+  Blue,
+}
+echo("" + match (Color.Green) {
+  Red => 1,
+  Green => 2,
+  Blue => 3,
+  _ => 0,
+})

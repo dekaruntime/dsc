@@ -2,10 +2,8 @@ import { echo } from "io"
 struct Outer {
   inner: Inner;
 }
-
 struct Inner {
   x: number;
 }
-
 const o = Outer { inner: Inner { x: 1 } }
-echo(o.inner.x)
+echo(string(o.inner.x))

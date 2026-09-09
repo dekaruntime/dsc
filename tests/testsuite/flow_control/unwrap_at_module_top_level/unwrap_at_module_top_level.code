@@ -4,6 +4,8 @@ import { echo } from "io"
 // classified as a declaration rather than a runtime statement, so it was
 // hoisted above this line and read `src` before it was initialised
 // (deka#445). Every earlier test had the unwrap inside a function body.
-let src: Option<string> = Some("x")
-let joined = unwrap(src) or { "none" }
+let src: Option<string> = Option.Some("x")
+let joined = unwrap(src) or {
+  "none"
+}
 echo(joined)

@@ -1,5 +1,6 @@
 import { echo } from "io"
-const signalPair = deka.ui.signal(0)
+import { signal } from "ui/reactive"
+const signalPair = signal(0)
 const getCount = signalPair[0]
-const doubled = deka.ui.memo(fn() number { return getCount() * 2 })
+const doubled = fn() number { return getCount() * 2 }
 echo(doubled())

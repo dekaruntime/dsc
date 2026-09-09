@@ -8,4 +8,4 @@ async fn outer() Promise<number> {
 }
 
 const result = await outer()
-echo(result)
+echo(string(result))

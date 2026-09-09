@@ -3,5 +3,5 @@ struct Point {
   x: number;
 }
 if (true) {
-  echo(Point({x: 5}).x)
+  echo(string(Point({x: 5}).x))
 }

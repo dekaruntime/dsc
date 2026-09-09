@@ -2,6 +2,6 @@ import { echo } from "io"
 import { from_array, len, get } from "bytes"
 
 const encoded = from_array([255, 0, 128])
-echo(len(encoded))
-echo(get(encoded, 0))
-echo(get(encoded, 2))
+echo(string(len(encoded)))
+echo(string(get(encoded, 0)))
+echo(string(get(encoded, 2)))

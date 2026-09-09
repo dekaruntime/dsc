@@ -1,6 +1,6 @@
 {
-  "title": "Mutating a frozen object fails",
+  "title": "Mutating a const object fails",
   "stage": "parse",
   "notes": "",
-  "expectedDiagnosticContains": "cannot assign to field `a` of immutable value"
+  "expectedDiagnosticContains": "const binding `obj`; use `let` to allow mutation"
 }

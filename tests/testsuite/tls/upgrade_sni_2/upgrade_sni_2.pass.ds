@@ -2,5 +2,5 @@ import { echo } from "io"
 import { upgrade } from "tls"
 echo(match (upgrade(0, "127.0.0.1")) {
   Ok(h) => "ok",
-  Err(e) => "err"
+  Err(e) => "err",
 })

@@ -1,31 +1,37 @@
 import { echo } from "io"
 
 // The block supplies the value when there is nothing to unwrap.
-fn label(o: Option<string>): string {
-  let v = unwrap(o) or { "fallback" }
+fn label(o: Option<string>) string {
+  let v = unwrap(o) or {
+    "fallback"
+  }
   return v
 }
 
 // Or it leaves the function. This is why `unwrap … or` is a binding form and
 // not an expression: an expression-position block has to become an IIFE, and a
 // `return` inside an IIFE returns from the IIFE, not the function (deka#445).
-fn early(o: Option<string>): string {
-  let v = unwrap(o) or { return "exited" }
+fn early(o: Option<string>) string {
+  let v = unwrap(o) or {
+    return "exited"
+  }
   return "got " + v
 }
 
 // Result unwraps its Ok payload the same way.
-fn attempt(): Result<string, string> {
-  return Ok("y")
+fn attempt() Result<string, string> {
+  return Result.Ok("y")
 }
 
-fn tried(): string {
-  let v = unwrap(attempt()) or { "no" }
+fn tried() string {
+  let v = unwrap(attempt()) or {
+    "no"
+  }
   return v
 }
 
-echo(label(Some("a")))
+echo(label(Option.Some("a")))
 echo(label(None))
-echo(early(Some("b")))
+echo(early(Option.Some("b")))
 echo(early(None))
 echo(tried())

@@ -1,3 +1,7 @@
 import { echo } from "io"
-fn demo() number { let a = 1; const b = a + 2; return b }
+fn demo() number {
+  let a = 1
+  const b = a + 2
+  return b
+}
 echo(string(demo()))

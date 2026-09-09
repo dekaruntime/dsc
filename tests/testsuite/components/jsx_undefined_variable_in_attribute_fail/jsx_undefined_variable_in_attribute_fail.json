@@ -1,8 +1,9 @@
 {
   "title": "Undefined variable in JSX attribute expression fails at runtime",
-  "stage": "run",
-  "notes": "",
+  "stage": "parse",
+  "notes": "v2 catches the undefined variable at compile time rather than at runtime.",
   "hosts": [
     "browser"
-  ]
+  ],
+  "expectedDiagnosticContains": "unknown identifier `missing`"
 }

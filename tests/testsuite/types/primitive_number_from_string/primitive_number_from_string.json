@@ -1,5 +1,5 @@
 {
-  "title": "number() on a string returns Option<number>",
+  "title": "parseNumber() on a string returns Option<number>",
   "stage": "run",
   "notes": "deka#364: Number() can produce NaN, so the conversion is Option<number> like parseInt."
 }

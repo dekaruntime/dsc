@@ -1,8 +1,8 @@
 import { echo } from "io"
 interface Named {
-  name: string
+  name: string;
 }
 fn makeNamed() Named {
-  return { nombre: "A" }
+  return {nombre: "A"}
 }
 echo(makeNamed().name)

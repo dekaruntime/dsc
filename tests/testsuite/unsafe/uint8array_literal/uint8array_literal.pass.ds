@@ -1,3 +1,6 @@
 import { echo } from "io"
 const r = unsafe<bytes> { new Uint8Array([65, 66, 67]) }
-echo(match (r) { Ok(v) => `${v.length}:${v[0]}:${v[2]}`, Err(e) => `err: ${e.message}` })
+echo(match (r) {
+  Ok(v) => `${v.length}:${v[0]}:${v[2]}`,
+  Err(e) => `err: ${e.message}`,
+})

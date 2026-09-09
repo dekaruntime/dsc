@@ -3,5 +3,5 @@ fn helper() number {
   return 42
 }
 if (true) {
-  echo(helper())
+  echo(string(helper()))
 }

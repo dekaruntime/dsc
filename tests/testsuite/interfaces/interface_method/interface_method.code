@@ -1,18 +1,14 @@
 import { echo } from "io"
 interface Greeter {
-  fn greet() string {}
+  fn greet() string;
 }
-
 struct Person {
   name: string;
 }
-
 fn (p Person) greet() string {
   return "Hello, " + p.name
 }
-
 fn welcome(g: Greeter) {
   echo(g.greet())
 }
-
 welcome(Person { name: "Deka" })

@@ -1,6 +1,8 @@
 import { echo } from "io"
 interface Empty {}
-struct S { x: number }
+struct S {
+  x: number;
+}
 fn f(e: Empty) {}
 const s = S { x: 1 }
 f(s)

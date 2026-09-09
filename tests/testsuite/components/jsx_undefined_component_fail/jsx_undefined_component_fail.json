@@ -1,7 +1,8 @@
 {
   "title": "Rendering an undefined component fails",
-  "stage": "run",
-  "notes": "",
+  "stage": "parse",
+  "expectedDiagnosticContains": "unknown identifier `Missing`",
+  "notes": "v2 catches the undefined component at compile time rather than at render.",
   "hosts": [
     "browser"
   ]

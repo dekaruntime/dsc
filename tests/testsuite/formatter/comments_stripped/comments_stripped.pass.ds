@@ -1,4 +1,4 @@
 // leading comment
 import { echo } from "io"
-const a=1 /* inline */ + 2
+const a = 1 + 2
 echo(string(a))

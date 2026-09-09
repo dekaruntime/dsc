@@ -1,5 +1,6 @@
 import { echo } from "io"
-const ui = globalThis.deka.ui
+import { jsxs } from "ui/jsx"
+import { renderToString } from "ui/server"
 const name = "Deka"
-const html = ui.renderToString(ui.jsxs("p", { children: ["Hello ", name] }))
+const html = renderToString(jsxs("p", {children: ["Hello ", name]}))
 echo(html.html)

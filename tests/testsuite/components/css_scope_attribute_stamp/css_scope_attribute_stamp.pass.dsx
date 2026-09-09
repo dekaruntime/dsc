@@ -1,0 +1,6 @@
+import "./styles.css"
+import { echo } from "io"
+import { renderToString } from "ui/server"
+const el = <p class="greeting">hello</p>
+const html = renderToString(el)
+echo(html.html)

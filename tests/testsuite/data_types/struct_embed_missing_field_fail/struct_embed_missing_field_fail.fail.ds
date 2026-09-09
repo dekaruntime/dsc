@@ -1,9 +1,9 @@
 import { echo } from "io"
 struct Inner {
-  value: number
+  value: number;
 }
 struct Outer {
-  Inner
+  Inner;
 }
-const o = Outer {}
+const o = Outer {  }
 echo(o)

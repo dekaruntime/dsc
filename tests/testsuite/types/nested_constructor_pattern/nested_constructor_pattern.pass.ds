@@ -6,4 +6,4 @@ fn f(r: Result<Option<number>, string>) number {
     Ok(Some(v)) => v,
   }
 }
-echo(string(f(Ok(Some(7)))))
+echo(string(f(Result.Ok(Option.Some(7)))))

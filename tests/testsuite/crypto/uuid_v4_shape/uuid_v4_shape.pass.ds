@@ -2,8 +2,8 @@ import { echo } from "io"
 import { uuid_v4 } from "crypto"
 echo(match (uuid_v4()) {
   Ok(id) => match (unsafe { /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id) }) {
-    Ok(v) => v,
-    Err(e) => false
-  },
-  Err(e) => false
+  Ok(v) => v,
+  Err(e) => false,
+},
+  Err(e) => false,
 })

@@ -129,7 +129,9 @@ fn source_range(
     let lines: Vec<&str> = source.split('\n').collect();
     let line_index = line.saturating_sub(1).min(lines.len().saturating_sub(1));
     let current_line = lines.get(line_index).copied().unwrap_or_default();
-    let start_byte = floor_char_boundary(current_line, column.saturating_sub(1));
+    // Compiler columns count characters, not bytes (dekaruntime/dsc#70), so
+    // convert the column to a byte offset before slicing.
+    let start_byte = char_column_to_byte(current_line, column);
     let end_byte = floor_char_boundary(
         current_line,
         start_byte
@@ -146,6 +148,18 @@ fn source_range(
             character: utf16_offset_at_byte(current_line, end_byte),
         },
     }
+}
+
+/// Convert a 1-based character column (how the compiler counts columns,
+/// dekaruntime/dsc#70) to a byte offset into `line`, clamped to the line.
+fn char_column_to_byte(line: &str, column: usize) -> usize {
+    if column == 0 {
+        return 0;
+    }
+    line.char_indices()
+        .nth(column - 1)
+        .map(|(byte, _)| byte)
+        .unwrap_or(line.len())
 }
 
 fn floor_char_boundary(line: &str, byte_offset: usize) -> usize {
@@ -237,12 +251,15 @@ mod tests {
                 character: 0
             }
         );
+        // Columns count characters (dekaruntime/dsc#70); column 3 of a
+        // two-character line is out of range and clamps to the line end
+        // (utf16 offset 2), not to byte 3.
         let range = source_range("éx", 1, 3, 1);
         assert_eq!(
             range.start,
             AnalysisPosition {
                 line: 0,
-                character: 1
+                character: 2
             }
         );
         assert_eq!(

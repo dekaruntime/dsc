@@ -528,10 +528,50 @@ impl<'a> Checker<'a> {
                         );
                     }
                 }
+                let has_client_directive = element
+                    .attributes
+                    .iter()
+                    .any(|attribute| attribute.name.starts_with("client:"));
+                if self.interactive_component_depth == 0
+                    && self.jsx_island_depth == 0
+                    && !has_client_directive
+                    && self.interactive_components.contains(element.tag)
+                {
+                    // JSX tags begin immediately after `<`, so derive a span
+                    // for the identifier rather than underlining the whole
+                    // element (or the component definition). This is the
+                    // range the LSP turns into its usage-site squiggly.
+                    let tag_span = ast::Span {
+                        start: ast::Pos {
+                            line: element.span.start.line,
+                            column: element.span.start.column + 1,
+                        },
+                        end: ast::Pos {
+                            line: element.span.start.line,
+                            column: element.span.start.column + 1 + element.tag.len(),
+                        },
+                        byte_start: element.span.byte_start + 1,
+                        byte_end: element.span.byte_start + 1 + element.tag.len(),
+                    };
+                    self.error_span_with_underline(
+                        tag_span,
+                        element.tag.len(),
+                        format!(
+                            "component `{}` uses interactive APIs and will not render without a client directive; add `client:load`, `client:idle`, or `client:visible`",
+                            element.tag
+                        ),
+                    );
+                }
                 self.check_jsx_attributes(element, *span);
+                if has_client_directive {
+                    self.jsx_island_depth += 1;
+                }
                 for child in element.children.iter() {
                     let child_type = self.check_expr(child);
                     self.reject_unrendered_option(&child_type, child.span());
+                }
+                if has_client_directive {
+                    self.jsx_island_depth -= 1;
                 }
                 // A JSX element is a `Component` (deka#461). It used to be
                 // `Infer`, which is universally assignable, so every JSX value

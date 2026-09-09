@@ -93,7 +93,9 @@ pub fn is_dekascript_context(context: &AnalysisContext) -> bool {
     Path::new(path)
         .extension()
         .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("ds"))
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("ds") || extension.eq_ignore_ascii_case("dsx")
+        })
 }
 
 fn should_skip_diagnostic(diagnostic: &CompilerDiagnostic) -> bool {
@@ -191,6 +193,32 @@ mod tests {
             diagnostics
                 .iter()
                 .all(|diagnostic| !diagnostic.code.is_empty())
+        );
+    }
+
+    #[test]
+    fn interactive_component_is_squiggled_at_unhydrated_dsx_tag() {
+        let source = "import { signal } from \"ui/reactive\"\n\
+fn Counter() Component { return <button onClick={clicked}>0</button> }\n\
+fn clicked() {}\n\
+const page = <Counter />\n";
+        let diagnostics = analyze(source, &AnalysisContext::new("file:///workspace/page.dsx"));
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.message.contains("uses interactive APIs"))
+            .expect("the unhydrated component usage must be diagnosed");
+        assert_eq!(
+            diagnostic.range,
+            AnalysisRange {
+                start: AnalysisPosition {
+                    line: 3,
+                    character: 14,
+                },
+                end: AnalysisPosition {
+                    line: 3,
+                    character: 21,
+                },
+            }
         );
     }
 

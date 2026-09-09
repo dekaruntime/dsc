@@ -648,6 +648,30 @@ pub fn compile_module_graph_with_options(
         }
     }
 
+    // Hydration is a property of a component's rendered subtree, not merely
+    // of the file that happens to import it. Compute that property from leaves
+    // to entry so an importer sees it through ordinary module exports and can
+    // point the diagnostic at its own JSX tag (dsc#65). `order` is
+    // entry-to-dependencies, hence the reverse traversal here.
+    for path in order.iter().rev() {
+        let Some(program) = programs.get(path) else {
+            continue;
+        };
+        let module = modules.get(path).expect("module in graph");
+        let mut combined: HashMap<&str, &deka_syntax::ModuleExports> = HashMap::new();
+        for (specifier, dependency) in module.dependencies.iter() {
+            if let Some(dependency_exports) = exports.get(dependency) {
+                combined.insert(specifier.as_str(), dependency_exports);
+            }
+        }
+        let interactive = deka_syntax::collect_interactive_components(program, &combined);
+        let exported = deka_syntax::collect_exported_interactive_components(program, &interactive);
+        exports
+            .get_mut(path)
+            .expect("module exports collected")
+            .interactive_components = exported;
+    }
+
     // Reject imports of names the dependency does not export. The typechecker
     // binds imported names loosely, so without this check a bad import only
     // surfaced as a runtime link error (deka#198), and browser project mode
@@ -963,12 +987,9 @@ pub fn compile_module_graph_with_options(
                 }
             }
             Err(diagnostics) => {
-                for d in diagnostics {
-                    errors.push(diag(
-                        d.line,
-                        d.column,
-                        format!("{}: {}", path.display(), d.message),
-                    ));
+                for mut diagnostic in diagnostics {
+                    diagnostic.message = format!("{}: {}", path.display(), diagnostic.message);
+                    errors.push(diagnostic);
                 }
             }
         }
@@ -2522,5 +2543,90 @@ mod tests {
         let js = &result.modules[&main];
         assert!(js.contains("ui/form"), "got: {js}");
         assert!(js.contains("Form"), "got: {js}");
+    }
+
+    #[test]
+    fn graph_requires_client_directive_for_transitively_interactive_component() {
+        let child = PathBuf::from("/project/counter.dsx");
+        let wrapper = PathBuf::from("/project/wrapper.dsx");
+        let page = PathBuf::from("/project/page.dsx");
+        let mut files = HashMap::new();
+        files.insert(
+            child.clone(),
+            "export fn Counter() Component {\n  return <button onClick={clicked}>0</button>\n}\nfn clicked() {}\n"
+                .to_string(),
+        );
+        files.insert(
+            wrapper.clone(),
+            "import { Counter } from \"./counter.dsx\"\nexport fn Wrapper() Component { return <Counter /> }\n"
+                .to_string(),
+        );
+        files.insert(
+            page.clone(),
+            "import { Wrapper } from \"./wrapper.dsx\"\nconst page = <Wrapper />\n".to_string(),
+        );
+        let aliases = HashMap::from([
+            (
+                (wrapper.clone(), "./counter.dsx".to_string()),
+                child.clone(),
+            ),
+            ((page.clone(), "./wrapper.dsx".to_string()), wrapper.clone()),
+        ]);
+
+        let errors = compile_module_graph(&page, &InMemoryLoader { files, aliases })
+            .expect_err("the page must hydrate Wrapper before its interactive child can render");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let error = &errors[0];
+        assert!(
+            error.message.contains("page.dsx")
+                && error.message.contains("Wrapper")
+                && error.message.contains("uses interactive APIs")
+                && error.message.contains("will not render"),
+            "{}",
+            error.message
+        );
+        assert_eq!(
+            (error.line, error.column, error.underline_length),
+            (2, 15, 7),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn graph_client_directive_keeps_transitive_interactive_component_as_an_island() {
+        let child = PathBuf::from("/project/counter.dsx");
+        let wrapper = PathBuf::from("/project/wrapper.dsx");
+        let page = PathBuf::from("/project/page.dsx");
+        let mut files = HashMap::new();
+        files.insert(
+            child.clone(),
+            "export fn Counter() Component {\n  return <button onClick={clicked}>0</button>\n}\nfn clicked() {}\n"
+                .to_string(),
+        );
+        files.insert(
+            wrapper.clone(),
+            "import { Counter } from \"./counter.dsx\"\nexport fn Wrapper() Component { return <Counter /> }\n"
+                .to_string(),
+        );
+        files.insert(
+            page.clone(),
+            "import { Wrapper } from \"./wrapper.dsx\"\nconst page = <Wrapper client:load />\n"
+                .to_string(),
+        );
+        let aliases = HashMap::from([
+            (
+                (wrapper.clone(), "./counter.dsx".to_string()),
+                child.clone(),
+            ),
+            ((page.clone(), "./wrapper.dsx".to_string()), wrapper.clone()),
+        ]);
+
+        let result = compile_module_graph(&page, &InMemoryLoader { files, aliases })
+            .expect("client:load is the island root for the whole component subtree");
+        assert!(
+            result.modules[&page].contains("\"client:load\": true"),
+            "client directive must reach emitted island code:\n{}",
+            result.modules[&page]
+        );
     }
 }

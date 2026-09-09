@@ -248,6 +248,21 @@ impl<'a> Checker<'a> {
         ));
     }
 
+    pub(super) fn error_span_with_underline(
+        &mut self,
+        span: ast::Span,
+        underline_length: usize,
+        message: impl Into<String>,
+    ) {
+        if self.infer_only {
+            return;
+        }
+        self.errors.push(
+            Diagnostic::error(span.start.line, span.start.column, message)
+                .with_underline(underline_length),
+        );
+    }
+
     pub(super) fn lookup_type_param(&self, name: &'a str) -> Option<Type<'a>> {
         for scope in self.type_scopes.iter().rev() {
             if let Some(ty) = scope.get(name) {

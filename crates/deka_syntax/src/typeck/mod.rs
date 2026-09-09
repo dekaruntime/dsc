@@ -192,6 +192,10 @@ pub struct ModuleExports<'a> {
     /// nested values it can name only through a fragment (dsc#52). Like
     /// `build_fragments`, invisible in DekaScript module metadata.
     pub build_receiver_methods: HashMap<(&'a str, &'a str), MethodInfo<'a>>,
+    /// Exported components whose rendered subtree uses client-only APIs.
+    /// This is checker metadata, not a language-level export surface: importers
+    /// use it to diagnose an unhydrated JSX usage at its own tag (dsc#65).
+    pub interactive_components: HashSet<&'a str>,
 }
 
 impl<'a> Default for ModuleExports<'a> {
@@ -206,8 +210,413 @@ impl<'a> Default for ModuleExports<'a> {
             re_exports: HashSet::new(),
             build_fragments: HashMap::new(),
             build_receiver_methods: HashMap::new(),
+            interactive_components: HashSet::new(),
         }
     }
+}
+
+/// Compute every local or imported component binding that requires hydration.
+///
+/// A component is direct-interactive when its module imports `ui/reactive`,
+/// calls `signal()`, or binds an `on*={...}` JSX handler. The result then
+/// closes over ordinary (unhydrated) uppercase JSX references, which makes the
+/// property transitive through statically resolved components. A child below a
+/// `client:*` island is deliberately excluded: its island root hydrates the
+/// whole subtree.
+pub fn collect_interactive_components<'a>(
+    program: &'a Program<'a>,
+    imports: &HashMap<&str, &ModuleExports<'a>>,
+) -> HashSet<&'a str> {
+    let imports_reactive = program.statements.iter().any(|stmt| {
+        matches!(stmt, ast::Stmt::Import { source, .. } if normalize_ui_specifier(source) == "ui/reactive")
+    });
+
+    let mut interactive = HashSet::new();
+    for stmt in program.statements.iter() {
+        match stmt {
+            ast::Stmt::Import {
+                specifiers, source, ..
+            } => {
+                let Some(exports) = imports.get(source) else {
+                    continue;
+                };
+                for specifier in specifiers.iter() {
+                    if exports.interactive_components.contains(specifier.imported) {
+                        interactive.insert(specifier.local);
+                    }
+                }
+            }
+            ast::Stmt::Export {
+                decl:
+                    ast::ExportDecl::NamedGroup {
+                        names,
+                        source: Some(source),
+                    },
+                ..
+            } => {
+                let Some(exports) = imports.get(source) else {
+                    continue;
+                };
+                for name in names.iter() {
+                    if exports.interactive_components.contains(name.name) {
+                        interactive.insert(name.name);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut summaries: HashMap<&str, (bool, HashSet<&str>)> = HashMap::new();
+    for stmt in program.statements.iter() {
+        let Some((name, body)) = component_body(stmt) else {
+            continue;
+        };
+        let mut direct = imports_reactive;
+        let mut references = HashSet::new();
+        summarize_statements(body, &mut direct, &mut references, false);
+        if direct {
+            interactive.insert(name);
+        }
+        summaries.insert(name, (direct, references));
+    }
+
+    loop {
+        let mut changed = false;
+        for (name, (direct, references)) in &summaries {
+            if (*direct
+                || references
+                    .iter()
+                    .any(|reference| interactive.contains(reference)))
+                && interactive.insert(name)
+            {
+                changed = true;
+            }
+        }
+        if !changed {
+            return interactive;
+        }
+    }
+}
+
+/// Project a module's local/imported analysis onto the names it exports.
+pub fn collect_exported_interactive_components<'a>(
+    program: &'a Program<'a>,
+    interactive: &HashSet<&'a str>,
+) -> HashSet<&'a str> {
+    let mut exported = HashSet::new();
+    for stmt in program.statements.iter() {
+        match stmt {
+            ast::Stmt::Export {
+                decl: ast::ExportDecl::Function { name, .. },
+                ..
+            } if interactive.contains(name) => {
+                exported.insert(*name);
+            }
+            ast::Stmt::Export {
+                decl: ast::ExportDecl::Const { name, .. },
+                ..
+            } if interactive.contains(name) => {
+                exported.insert(*name);
+            }
+            ast::Stmt::Export {
+                decl: ast::ExportDecl::NamedGroup { names, .. },
+                ..
+            } => {
+                for name in names.iter() {
+                    if interactive.contains(name.name) {
+                        exported.insert(name.alias.unwrap_or(name.name));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    exported
+}
+
+fn normalize_ui_specifier(specifier: &str) -> &str {
+    specifier
+        .trim()
+        .strip_prefix("@deka/")
+        .unwrap_or(specifier.trim())
+}
+
+fn component_body<'a>(stmt: &'a ast::Stmt<'a>) -> Option<(&'a str, &'a [ast::Stmt<'a>])> {
+    match stmt {
+        ast::Stmt::Function { name, body, .. }
+        | ast::Stmt::Export {
+            decl: ast::ExportDecl::Function { name, body, .. },
+            ..
+        } => Some((*name, *body)),
+        ast::Stmt::Const {
+            name,
+            value: ast::Expr::Function { body, .. },
+            ..
+        }
+        | ast::Stmt::Let {
+            name,
+            value: ast::Expr::Function { body, .. },
+            ..
+        }
+        | ast::Stmt::Export {
+            decl:
+                ast::ExportDecl::Const {
+                    name,
+                    value: ast::Expr::Function { body, .. },
+                    ..
+                },
+            ..
+        } => Some((*name, *body)),
+        _ => None,
+    }
+}
+
+fn summarize_statements<'a>(
+    statements: &'a [ast::Stmt<'a>],
+    direct: &mut bool,
+    references: &mut HashSet<&'a str>,
+    inside_island: bool,
+) {
+    for stmt in statements {
+        summarize_stmt(stmt, direct, references, inside_island);
+    }
+}
+
+fn summarize_stmt<'a>(
+    stmt: &'a ast::Stmt<'a>,
+    direct: &mut bool,
+    references: &mut HashSet<&'a str>,
+    inside_island: bool,
+) {
+    match stmt {
+        ast::Stmt::Const { value, .. } | ast::Stmt::Let { value, .. } => {
+            summarize_expr(value, direct, references, inside_island)
+        }
+        ast::Stmt::UnwrapLet {
+            scrutinee,
+            alternative,
+            ..
+        } => {
+            summarize_expr(scrutinee, direct, references, inside_island);
+            match alternative {
+                ast::UnwrapAlternative::Block(body) => {
+                    summarize_statements(body, direct, references, inside_island)
+                }
+                ast::UnwrapAlternative::Match(arms) => {
+                    for arm in arms.iter() {
+                        if let Some(guard) = &arm.guard {
+                            summarize_expr(guard, direct, references, inside_island);
+                        }
+                        summarize_expr(&arm.body, direct, references, inside_island);
+                    }
+                }
+            }
+        }
+        ast::Stmt::Function { body, .. }
+        | ast::Stmt::ReceiverMethod { body, .. }
+        | ast::Stmt::Block { body, .. } => {
+            summarize_statements(body, direct, references, inside_island)
+        }
+        ast::Stmt::Export {
+            decl: ast::ExportDecl::Const { value, .. },
+            ..
+        } => summarize_expr(value, direct, references, inside_island),
+        ast::Stmt::Export {
+            decl: ast::ExportDecl::Function { body, .. },
+            ..
+        } => summarize_statements(body, direct, references, inside_island),
+        ast::Stmt::Expr { expr, .. } => summarize_expr(expr, direct, references, inside_island),
+        ast::Stmt::Return { value, .. } => {
+            if let Some(value) = value {
+                summarize_expr(value, direct, references, inside_island);
+            }
+        }
+        ast::Stmt::If {
+            condition,
+            then_body,
+            else_body,
+            ..
+        } => {
+            summarize_expr(condition, direct, references, inside_island);
+            summarize_statements(then_body, direct, references, inside_island);
+            summarize_statements(else_body, direct, references, inside_island);
+        }
+        ast::Stmt::For {
+            init,
+            condition,
+            step,
+            body,
+            ..
+        } => {
+            if let Some(init) = init {
+                match init {
+                    ast::ForInit::Const { value, .. } | ast::ForInit::Let { value, .. } => {
+                        summarize_expr(value, direct, references, inside_island)
+                    }
+                    ast::ForInit::Expr(expr) => {
+                        summarize_expr(expr, direct, references, inside_island)
+                    }
+                }
+            }
+            if let Some(condition) = condition {
+                summarize_expr(condition, direct, references, inside_island);
+            }
+            if let Some(step) = step {
+                summarize_expr(step, direct, references, inside_island);
+            }
+            summarize_statements(body, direct, references, inside_island);
+        }
+        ast::Stmt::ForOf { iterable, body, .. } => {
+            summarize_expr(iterable, direct, references, inside_island);
+            summarize_statements(body, direct, references, inside_island);
+        }
+        ast::Stmt::Import { .. }
+        | ast::Stmt::Struct { .. }
+        | ast::Stmt::Enum { .. }
+        | ast::Stmt::TypeAlias { .. }
+        | ast::Stmt::Newtype { .. }
+        | ast::Stmt::Interface { .. }
+        | ast::Stmt::Break { .. }
+        | ast::Stmt::Continue { .. }
+        | ast::Stmt::Empty { .. }
+        | ast::Stmt::Export {
+            decl: ast::ExportDecl::NamedGroup { .. },
+            ..
+        } => {}
+    }
+}
+
+fn summarize_expr<'a>(
+    expr: &'a ast::Expr<'a>,
+    direct: &mut bool,
+    references: &mut HashSet<&'a str>,
+    inside_island: bool,
+) {
+    match expr {
+        ast::Expr::Call { callee, args, .. } => {
+            if matches!(**callee, ast::Expr::Identifier { name: "signal", .. }) {
+                *direct = true;
+            }
+            summarize_expr(callee, direct, references, inside_island);
+            for arg in args.iter() {
+                summarize_expr(arg, direct, references, inside_island);
+            }
+        }
+        ast::Expr::Binary { left, right, .. } => {
+            summarize_expr(left, direct, references, inside_island);
+            summarize_expr(right, direct, references, inside_island);
+        }
+        ast::Expr::Unary { operand, .. }
+        | ast::Expr::Await { expr: operand, .. }
+        | ast::Expr::Spread { expr: operand, .. }
+        | ast::Expr::Paren { expr: operand, .. } => {
+            summarize_expr(operand, direct, references, inside_island)
+        }
+        ast::Expr::FieldAccess { object, .. } => {
+            summarize_expr(object, direct, references, inside_island)
+        }
+        ast::Expr::IndexAccess { object, index, .. } => {
+            summarize_expr(object, direct, references, inside_island);
+            summarize_expr(index, direct, references, inside_island);
+        }
+        ast::Expr::StructLiteral { fields, .. } => {
+            for field in fields.iter() {
+                summarize_expr(&field.value, direct, references, inside_island);
+            }
+        }
+        ast::Expr::EnumConstructor { payload, .. } => {
+            if let Some(payload) = payload {
+                summarize_expr(payload, direct, references, inside_island);
+            }
+        }
+        ast::Expr::Match {
+            scrutinee, arms, ..
+        } => {
+            summarize_expr(scrutinee, direct, references, inside_island);
+            for arm in arms.iter() {
+                if let Some(guard) = &arm.guard {
+                    summarize_expr(guard, direct, references, inside_island);
+                }
+                summarize_expr(&arm.body, direct, references, inside_island);
+            }
+        }
+        ast::Expr::Build { body, .. } | ast::Expr::Function { body, .. } => {
+            summarize_statements(body, direct, references, inside_island)
+        }
+        ast::Expr::Bridge { args, .. } => {
+            for arg in args.iter() {
+                summarize_expr(arg, direct, references, inside_island);
+            }
+        }
+        ast::Expr::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            summarize_expr(condition, direct, references, inside_island);
+            summarize_expr(then_branch, direct, references, inside_island);
+            summarize_expr(else_branch, direct, references, inside_island);
+        }
+        ast::Expr::JsxElement { element, .. } => {
+            let has_client_directive = element
+                .attributes
+                .iter()
+                .any(|attribute| attribute.name.starts_with("client:"));
+            let in_hydrated_subtree = inside_island || has_client_directive;
+            if !in_hydrated_subtree && element.tag.chars().next().is_some_and(char::is_uppercase) {
+                references.insert(element.tag);
+            }
+            for attribute in element.attributes.iter() {
+                if is_event_handler(attribute) {
+                    *direct = true;
+                }
+                if let Some(value) = &attribute.value {
+                    summarize_expr(value, direct, references, in_hydrated_subtree);
+                }
+            }
+            for child in element.children.iter() {
+                summarize_expr(child, direct, references, in_hydrated_subtree);
+            }
+        }
+        ast::Expr::JsxFragment { children, .. }
+        | ast::Expr::Array {
+            elements: children, ..
+        } => {
+            for child in children.iter() {
+                summarize_expr(child, direct, references, inside_island);
+            }
+        }
+        ast::Expr::Object { fields, .. } => {
+            for field in fields.iter() {
+                summarize_expr(&field.value, direct, references, inside_island);
+            }
+        }
+        ast::Expr::TemplateLiteral { parts, .. } => {
+            for part in parts.iter() {
+                if let ast::TemplatePart::Expr(expr) = part {
+                    summarize_expr(expr, direct, references, inside_island);
+                }
+            }
+        }
+        ast::Expr::Number { .. }
+        | ast::Expr::BigInt { .. }
+        | ast::Expr::String { .. }
+        | ast::Expr::Boolean { .. }
+        | ast::Expr::None { .. }
+        | ast::Expr::Identifier { .. }
+        | ast::Expr::Unsafe { .. }
+        | ast::Expr::JsxText { .. } => {}
+    }
+}
+
+fn is_event_handler(attribute: &ast::JsxAttribute<'_>) -> bool {
+    attribute.value.is_some()
+        && attribute
+            .name
+            .strip_prefix("on")
+            .is_some_and(|suffix| suffix.chars().next().is_some_and(char::is_alphabetic))
 }
 
 /// The kind of a named factory an importer can reach only through a
@@ -251,7 +660,8 @@ fn collect_fragment_factory_kinds<'a>(
                 },
                 _ => crate::ast::NewtypeRepr::Number,
             };
-            out.entry(name).or_insert(BuildFactoryKind::Newtype(repr_kind));
+            out.entry(name)
+                .or_insert(BuildFactoryKind::Newtype(repr_kind));
             collect_fragment_factory_kinds(repr, out);
         }
         DescriptorTree::Enum { name, cases } => {
@@ -909,6 +1319,16 @@ struct Checker<'a> {
     program: &'a ast::Program<'a>,
     errors: Vec<Diagnostic>,
     warnings: Vec<Diagnostic>,
+    /// Component bindings known to require a hydrated client island. Includes
+    /// imported bindings whose exporting module computed the same fact.
+    interactive_components: HashSet<&'a str>,
+    /// A `client:*` root hydrates all JSX below it, so descendant component
+    /// tags must not be diagnosed again.
+    jsx_island_depth: usize,
+    /// An interactive component's own child tags are covered by hydration at
+    /// its eventual usage site. Diagnose that outer usage instead of requiring
+    /// every descendant tag to repeat the same directive.
+    interactive_component_depth: usize,
     /// Function and (eventually) global variable types.
     globals: HashMap<&'a str, Type<'a>>,
     /// User-defined type aliases without type parameters.
@@ -1013,10 +1433,14 @@ struct Checker<'a> {
 
 impl<'a> Checker<'a> {
     fn new(program: &'a ast::Program<'a>, imports: &HashMap<&str, &ModuleExports<'a>>) -> Self {
+        let interactive_components = collect_interactive_components(program, imports);
         let mut this = Self {
             program,
             errors: Vec::new(),
             warnings: Vec::new(),
+            interactive_components,
+            jsx_island_depth: 0,
+            interactive_component_depth: 0,
             globals: HashMap::new(),
             aliases: HashMap::new(),
             enums: HashMap::new(),
@@ -3359,5 +3783,41 @@ mod tests {
             "{}",
             errors[0].message
         );
+    }
+
+    #[test]
+    fn interactive_component_without_client_directive_errors_at_its_tag() {
+        let errors = typeck(
+            "fn Counter() Component {\n\
+               return <button onClick={clicked}>0</button>\n\
+             }\n\
+             fn clicked() {}\n\
+             const page = <Counter />\n",
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let error = &errors[0];
+        assert_eq!(
+            (error.line, error.column, error.underline_length),
+            (5, 15, 7)
+        );
+        assert!(
+            error.message.contains("uses interactive APIs")
+                && error.message.contains("will not render")
+                && error.message.contains("client:load"),
+            "{}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn client_directive_allows_interactive_component() {
+        let errors = typeck(
+            "fn Counter() Component {\n\
+               return <button onClick={clicked}>0</button>\n\
+             }\n\
+             fn clicked() {}\n\
+             const page = <Counter client:load />\n",
+        );
+        assert!(errors.is_empty(), "{errors:?}");
     }
 }

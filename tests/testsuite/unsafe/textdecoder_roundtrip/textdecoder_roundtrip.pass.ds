@@ -1,3 +1,6 @@
 import { echo } from "io"
 const r = unsafe<string> { new TextDecoder().decode(new TextEncoder().encode("cafe")) }
-echo(match (r) { Ok(v) => v, Err(e) => `err: ${e.message}` })
+echo(match (r) {
+  Ok(v) => v,
+  Err(e) => `err: ${e.message}`,
+})

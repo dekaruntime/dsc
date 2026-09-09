@@ -1,2 +1,2 @@
 import { echo } from "io"
-echo(3.14)
+echo(string(3.14))

@@ -6,12 +6,10 @@ const a = match (some) {
   None => 0,
   _ => -1,
 }
-
 const b = match (none) {
   Some(v) => v * 2,
   None => 0,
   _ => -1,
 }
-
-echo(a)
-echo(b)
+echo(string(a))
+echo(string(b))

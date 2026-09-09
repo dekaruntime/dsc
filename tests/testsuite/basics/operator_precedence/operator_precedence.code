@@ -1,2 +1,2 @@
 import { echo } from "io"
-echo(2 + 3 * 4)
+echo(string(2 + 3 * 4))

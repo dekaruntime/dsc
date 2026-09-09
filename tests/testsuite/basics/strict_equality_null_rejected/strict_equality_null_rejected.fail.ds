@@ -1,2 +1,2 @@
 import { echo } from "io"
-echo(null === null)
+echo(null == null)

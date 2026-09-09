@@ -1,2 +1,2 @@
-const localValue = 42;
-export { localValue };
+const localValue = 42
+export { localValue }

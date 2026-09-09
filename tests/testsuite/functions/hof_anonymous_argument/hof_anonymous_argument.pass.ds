@@ -2,6 +2,4 @@ import { echo } from "io"
 fn apply(f: fn(number) number, x: number) number {
   return f(x)
 }
-echo("" + apply(fn (n: number) number {
-  return n + 7
-}, 5))
+echo("" + apply(fn(n: number) number { return n + 7 }, 5))

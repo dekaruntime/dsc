@@ -2,5 +2,5 @@ import { echo } from "io"
 import { sleep_ms } from "time"
 echo(match (sleep_ms(2)) {
   Ok(v) => v,
-  Err(e) => -1
+  Err(e) => -1,
 })

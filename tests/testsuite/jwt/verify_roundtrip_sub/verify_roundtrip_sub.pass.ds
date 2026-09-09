@@ -1,21 +1,21 @@
 import { echo } from "io"
 import { sign, verify } from "jwt"
-fn utf8(value: string): bytes {
+fn utf8(value: string) bytes {
   let encoded = unsafe<bytes> { new TextEncoder().encode(value) }
   return match (encoded) {
     Ok(buf) => buf,
-    Err(err) => utf8("")
+    Err(err) => utf8(""),
   }
 }
-const token = match (sign({ sub: "abc" }, utf8("secret"), {})) {
+const token = match (sign({sub: "abc"}, utf8("secret"), {})) {
   Ok(v) => v,
-  Err(e) => ""
+  Err(e) => "",
 }
 const sub = match (verify(token, utf8("secret"), {})) {
   Err(e) => "",
   Ok(claims) => match (unsafe<string> { String(claims.sub || "") }) {
-    Ok(v) => v,
-    Err(e) => ""
-  }
+  Ok(v) => v,
+  Err(e) => "",
+},
 }
 echo(sub)

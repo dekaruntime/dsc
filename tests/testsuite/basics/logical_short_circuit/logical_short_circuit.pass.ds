@@ -1,5 +1,5 @@
 import { echo } from "io"
-fn side_effect(): boolean {
+fn side_effect() boolean {
   echo("x")
   return true
 }

@@ -1,4 +1,7 @@
 import { echo } from "io"
 import { uuid_v4 } from "crypto"
-const id: string = match (uuid_v4()) { Ok(v) => v, Err(e) => "" }
+const id: string = match (uuid_v4()) {
+  Ok(v) => v,
+  Err(e) => "",
+}
 echo(string(id.length))

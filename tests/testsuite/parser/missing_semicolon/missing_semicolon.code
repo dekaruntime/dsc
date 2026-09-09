@@ -5,4 +5,4 @@ struct Point {
 }
 
 const origin = Point { x: 3, y: 4 }
-echo(origin.x + origin.y)
+echo(string(origin.x + origin.y))

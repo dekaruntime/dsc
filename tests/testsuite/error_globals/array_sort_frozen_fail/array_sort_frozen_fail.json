@@ -1,5 +1,6 @@
 {
-  "title": "Array.sort on frozen array fails",
-  "stage": "run",
-  "notes": "Array literals are frozen, so in-place sort throws."
+  "title": "Array.sort on a const array fails",
+  "stage": "parse",
+  "notes": "The checker rejects mutation before emission.",
+  "expectedDiagnosticContains": "cannot call mutable method `sort` on an immutable receiver"
 }

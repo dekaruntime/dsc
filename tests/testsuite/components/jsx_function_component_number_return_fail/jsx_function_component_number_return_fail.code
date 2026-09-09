@@ -3,6 +3,5 @@ const ui = globalThis.deka.ui
 fn Bad(props: object) object {
   return 1
 }
-
 const html = ui.renderToString(ui.jsx(Bad, {}))
 echo(html.html)

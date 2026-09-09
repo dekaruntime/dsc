@@ -4,7 +4,7 @@ enum Color {
   Green,
   Blue,
 }
-echo(match (Color.Green) {
+echo("" + match (Color.Green) {
   Red => 1,
   Green => 2,
   Blue => 3,

@@ -1,0 +1,6 @@
+{
+  "title": "Mutating builtins reject a const array",
+  "stage": "parse",
+  "notes": "Each mutating builtin is checked against the const receiver.",
+  "expectedDiagnosticContains": "cannot call mutable method `shift` on an immutable receiver"
+}

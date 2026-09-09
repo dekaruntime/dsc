@@ -1,12 +1,12 @@
 enum Reply {
   Failed(string),
-  Empty
+  Empty,
 }
 
 // A binding would have to come from whichever alternative matched, and every
 // alternative would have to bind the same names for the body to be well typed.
-fn describe(r: Reply): string {
+fn describe(r: Reply) string {
   return match (r) {
-    Failed(message) | Empty => message
+    Failed(message) | Empty => message,
   }
 }

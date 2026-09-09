@@ -1,0 +1,6 @@
+{
+  "title": "JSON serialization rejects function-valued fields by name",
+  "stage": "parse",
+  "expectedDiagnosticContains": "run",
+  "notes": "rfd#43: functions are not representable in the language JSON mapping."
+}

@@ -1,0 +1,11 @@
+import { echo } from "io"
+
+enum Shape {
+  Rect(number)
+  Empty
+}
+
+const rect = Shape.Rect(3)
+const empty = Shape.Empty
+echo(rect.toJSON())
+echo(empty.toJSON())

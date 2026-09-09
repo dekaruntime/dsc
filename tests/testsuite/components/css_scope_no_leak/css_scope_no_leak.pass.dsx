@@ -1,0 +1,6 @@
+import { echo } from "io"
+import { renderToString } from "ui/server"
+import { CardA } from "./CardA.dsx"
+import { CardB } from "./CardB.dsx"
+const html = renderToString(<div><CardA /><CardB /></div>)
+echo(html.html)

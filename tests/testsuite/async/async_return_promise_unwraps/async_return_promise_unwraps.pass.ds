@@ -9,7 +9,9 @@ async fn value() Promise<number> {
 
 async fn indirect() Promise<number> {
   let resolved = unsafe { Promise.resolve(2) }
-  let pending = unwrap(resolved) or { 0 }
+  let pending = unwrap(resolved) or {
+    0
+  }
   return await pending
 }
 

@@ -1,0 +1,6 @@
+{
+  "title": "A function whose body never returns fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "declares return type `string` but does not return a value on every path",
+  "notes": "A body that runs statements but never returns is not a string (deka#476)."
+}

@@ -2,9 +2,7 @@ import { echo } from "io"
 fn makeSum() {
   const a = 10
   const b = 20
-  const sum = fn() number {
-    return a + b
-  }
+  const sum = fn() number { return a + b }
   return sum
 }
 const f = makeSum()

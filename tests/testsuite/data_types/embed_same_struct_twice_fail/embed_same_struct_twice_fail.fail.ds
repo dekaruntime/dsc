@@ -1,8 +1,8 @@
 struct A {
-  value: number
+  value: number;
 }
 struct B {
-  A
-  A
+  A;
+  A;
 }
 const b = B { A: A { value: 1 } }

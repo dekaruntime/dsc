@@ -1,6 +1,6 @@
 import { echo } from "io"
 struct Box {
-  value: number
+  value: number;
 }
 fn makeBox(v: number) Box {
   return Box { value: v }

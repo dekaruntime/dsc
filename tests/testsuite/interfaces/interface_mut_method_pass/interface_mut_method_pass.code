@@ -1,20 +1,16 @@
 import { echo } from "io"
 interface Counter {
-  fn increment() void {}
+  fn increment() void;
 }
-
 struct Clicker {
   count: number;
 }
-
 fn (c mut Clicker) increment() void {
   c.count = c.count + 1
 }
-
 fn bump(i: Counter) {
   i.increment()
 }
-
 let c = Clicker { count: 0 }
 bump(c)
-echo(c.count)
+echo(string(c.count))

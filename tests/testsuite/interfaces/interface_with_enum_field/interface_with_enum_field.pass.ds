@@ -1,13 +1,17 @@
 import { echo } from "io"
 enum Shape {
-  Circle(number)
-  Square(number)
+  Circle(number),
+  Square(number),
 }
 interface HasShape {
-  shape: Shape
+  shape: Shape;
 }
 fn area(h: HasShape) number {
-  return match (h.shape) { Shape.Circle(r) => r * r, Shape.Square(s) => s * s, _ => 0 }
+  return match (h.shape) {
+    Circle(r) => r * r,
+    Square(s) => s * s,
+    _ => 0,
+  }
 }
-echo("" + area({ shape: Shape.Circle(3) }))
-echo("" + area({ shape: Shape.Square(2) }))
+echo("" + area({shape: Shape.Circle(3)}))
+echo("" + area({shape: Shape.Square(2)}))

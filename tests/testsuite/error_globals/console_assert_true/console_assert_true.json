@@ -1,8 +1,5 @@
 {
-  "title": "console.assert true passes silently",
+  "title": "console.assert is not a DekaScript global",
   "stage": "run",
-  "notes": "",
-  "hosts": [
-    "browser"
-  ]
+  "notes": "console is gone from plain DekaScript per RFD 32; the migrated form uses io.echo, matching console_log."
 }

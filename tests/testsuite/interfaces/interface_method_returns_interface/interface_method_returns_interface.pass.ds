@@ -1,10 +1,10 @@
 import { echo } from "io"
 interface Counter {
-  value: number
-  fn next() Counter
+  value: number;
+  fn next() Counter;
 }
 struct Step {
-  value: number
+  value: number;
 }
 fn (s Step) next() Counter {
   return Step { value: s.value + 1 }

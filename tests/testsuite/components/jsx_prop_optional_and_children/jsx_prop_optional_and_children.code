@@ -1,10 +1,10 @@
 interface CardProps {
-  title: string
-  subtitle?: string
+  title: string;
+  subtitle?: string;
 }
 
 interface LayoutProps {
-  children: Component
+  children: Component;
 }
 
 fn Card(props: CardProps) Component {
@@ -16,6 +16,6 @@ fn Layout(props: LayoutProps) Component {
   return <main>{props.children}</main>
 }
 
-const bare = <Card title="Hello" />
-const full = <Card title="Hello" subtitle="World" />
-const page = <Layout><Card title="Hello" /></Layout>
+const bare = <Card title={"Hello"} />
+const full = <Card title={"Hello"} subtitle={"World"} />
+const page = <Layout><Card title={"Hello"} /></Layout>

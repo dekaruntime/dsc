@@ -1,7 +1,8 @@
 {
   "title": "Fragment with undefined child fails",
-  "stage": "run",
-  "notes": "A fragment whose children are an undefined variable should fail at runtime.",
+  "stage": "parse",
+  "expectedDiagnosticContains": "unknown identifier `missing`",
+  "notes": "v2 catches the undefined child variable at compile time rather than at runtime.",
   "hosts": [
     "browser"
   ]

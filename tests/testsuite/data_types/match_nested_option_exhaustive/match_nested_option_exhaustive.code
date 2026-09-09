@@ -1,15 +1,15 @@
 import { echo } from "io"
-fn read(hit: boolean): Result<Option<number>, string> {
+fn read(hit: boolean) Result<Option<number>, string> {
   if (hit) {
-    return Ok(Some(4))
+    return Result.Ok(Option.Some(4))
   }
-  return Ok(None)
+  return Result.Ok(None)
 }
-fn value(hit: boolean): number {
+fn value(hit: boolean) number {
   return match (read(hit)) {
     Err(e) => 0,
     Ok(None) => 1,
-    Ok(Some(v)) => v
+    Ok(Some(v)) => v,
   }
 }
 echo(string(value(true)))

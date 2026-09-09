@@ -1,0 +1,2 @@
+fn validate(s: string) string { return "ok:" + s }
+export { validate }

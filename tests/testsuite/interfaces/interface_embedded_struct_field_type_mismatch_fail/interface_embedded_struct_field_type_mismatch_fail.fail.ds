@@ -1,14 +1,14 @@
 import { echo } from "io"
 interface Named {
-  name: string
+  name: string;
 }
 struct Label {
-  name: number
+  name: number;
 }
 struct Person {
-  Label
+  Label;
 }
 fn show(n: Named) {
   echo(n.name)
 }
-show(Person { Label: Label {} })
+show(Person { Label: Label {  } })

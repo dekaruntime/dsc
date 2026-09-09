@@ -1,0 +1,5 @@
+/* Same-named class as CardB's stylesheet. Scoping keys each file to its
+   importing module, so CardA's rules never match CardB's elements. */
+.card {
+  color: red;
+}

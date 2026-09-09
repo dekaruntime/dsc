@@ -1,0 +1,5 @@
+{
+  "title": "toNumber() widens number and bool primitives",
+  "stage": "run",
+  "notes": "deka#528: toNumber() handles bare primitives; newtypes must be unboxed first."
+}

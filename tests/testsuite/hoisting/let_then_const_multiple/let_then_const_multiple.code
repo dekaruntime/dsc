@@ -3,4 +3,4 @@ let a = 1
 const b = a + 1
 let c = b + 1
 const d = c + 1
-echo(d)
+echo(string(d))

@@ -1,11 +1,11 @@
 interface Opts {
-  path?: string
+  path?: string;
 }
 
-fn go(o: Opts): string {
+fn go(o: Opts) string {
   return match (o.path) {
     Some(p) => p,
-    None => "/"
+    None => "/",
   }
 }
 

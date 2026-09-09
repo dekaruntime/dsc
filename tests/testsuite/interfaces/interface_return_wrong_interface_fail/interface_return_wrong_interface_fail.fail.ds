@@ -1,11 +1,11 @@
 import { echo } from "io"
 interface A {
-  x: number
+  x: number;
 }
 interface B {
-  y: string
+  y: string;
 }
 fn getA() A {
-  return { y: "oops" }
+  return {y: "oops"}
 }
 echo(getA().x)

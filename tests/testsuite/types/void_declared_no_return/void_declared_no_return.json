@@ -1,0 +1,5 @@
+{
+  "title": "A void function with no return is accepted",
+  "stage": "run",
+  "notes": "`void` is the annotation that explicitly declares no return value, so missing-return analysis must not fire (deka#476)."
+}

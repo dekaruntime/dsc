@@ -2,4 +2,4 @@ import { echo } from "io"
 import { now } from "time"
 const a = now()
 const b = now()
-echo(b >= a)
+echo(string(b >= a))

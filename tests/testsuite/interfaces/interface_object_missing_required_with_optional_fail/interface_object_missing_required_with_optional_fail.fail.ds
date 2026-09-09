@@ -1,9 +1,9 @@
 import { echo } from "io"
 interface Card {
-  title: string
-  subtitle?: string
+  title: string;
+  subtitle?: string;
 }
 fn show(c: Card) {
   echo(c.title)
 }
-show({ subtitle: "World" })
+show({subtitle: "World"})

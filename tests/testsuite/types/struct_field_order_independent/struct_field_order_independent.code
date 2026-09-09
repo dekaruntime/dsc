@@ -3,6 +3,5 @@ struct Point {
   x: number;
   y: number;
 }
-
 const p = Point { y: 2, x: 1 }
-echo(p.x)
+echo(string(p.x))

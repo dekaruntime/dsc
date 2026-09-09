@@ -1,5 +1,5 @@
 struct Counter {
-  value: number
+  value: number;
 }
 fn (c Counter) get() string {
   return c.value

@@ -1,0 +1,5 @@
+import { first } from "./lib.ds"
+import { echo } from "io"
+
+const value: string = first(["ok"])
+echo(value)

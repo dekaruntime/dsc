@@ -1,0 +1,7 @@
+import { echo } from "io"
+const x = 1
+const x = 2
+fn read() number {
+  return x
+}
+echo(string(read()))

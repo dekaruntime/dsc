@@ -1,0 +1,7 @@
+{
+  "title": "inferred exported collection elements reject a wrong consumer type",
+  "stage": "typecheck",
+  "compiler": "v2",
+  "hosts": ["native"],
+  "expectedDiagnosticContains": "expected type `number`, found type `string`"
+}

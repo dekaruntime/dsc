@@ -1,0 +1,5 @@
+{
+  "title": "Duplicate module const declarations still fail at runtime even when a body reads them.",
+  "stage": "run",
+  "notes": "Negative control for deka#600: the value seeding must not silence duplicate declarations."
+}

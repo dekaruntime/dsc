@@ -1,2 +1,2 @@
 import { echo } from "io"
-echo(void 0)
+echo(void(0))

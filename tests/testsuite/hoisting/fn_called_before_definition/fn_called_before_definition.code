@@ -2,4 +2,4 @@ import { echo } from "io"
 fn add(x: number, y: number) number {
   return x + y
 }
-echo(add(1, 2))
+echo(string(add(1, 2)))

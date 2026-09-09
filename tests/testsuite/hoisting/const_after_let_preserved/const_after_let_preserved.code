@@ -1,4 +1,4 @@
 import { echo } from "io"
 let a = 1
 const b = a + 2
-echo(a + b)
+echo(string(a + b))

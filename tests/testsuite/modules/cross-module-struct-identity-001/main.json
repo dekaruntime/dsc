@@ -1,0 +1,5 @@
+{
+  "title": "Cross-module struct identity survives removal of the prelude globalThis write",
+  "stage": "run",
+  "notes": "deka#551. Struct declared in types.ds, constructed in factory.ds, matched via union type-pattern and reflected with .getType() in main. The brand is a string id compared by value; identity must hold with no globalThis merge."
+}

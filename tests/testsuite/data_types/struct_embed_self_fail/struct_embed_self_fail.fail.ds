@@ -1,4 +1,4 @@
 struct Node {
-  value: number
-  Node
+  Node;
+  value: number;
 }

@@ -3,4 +3,4 @@ async fn fetch() Promise<number> {
   return 1
 }
 const p = fetch()
-echo(await p)
+echo(string(await p))

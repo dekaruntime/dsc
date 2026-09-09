@@ -3,9 +3,8 @@ enum Shape {
   Circle(number),
   Square(number),
 }
-
 const s = Shape.Circle(5)
 match (s) {
-  Shape.Circle(r) => echo(r),
-  Shape.Square(side) => echo(side),
+  Circle(r) => echo(string(r)),
+  Square(side) => echo(string(side)),
 }

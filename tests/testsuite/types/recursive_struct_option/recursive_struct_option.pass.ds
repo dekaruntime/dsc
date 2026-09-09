@@ -1,7 +1,10 @@
 import { echo } from "io"
 struct Node {
-  value: number
-  next?: Node
+  value: number;
+  next?: Node;
 }
-const head = Node { value: 1, next: Some(Node { value: 2 }) }
-echo("" + match (head.next) { Some(n) => n.value, None => 0 })
+const head = Node { value: 1, next: Option.Some(Node { value: 2 }) }
+echo("" + match (head.next) {
+  Some(n) => n.value,
+  None => 0,
+})

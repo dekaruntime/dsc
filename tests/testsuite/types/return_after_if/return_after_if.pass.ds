@@ -1,0 +1,8 @@
+import { echo } from "io"
+fn after(x: number) string {
+  if (x > 0) {
+    return "positive"
+  }
+  return "other"
+}
+echo(after(1))

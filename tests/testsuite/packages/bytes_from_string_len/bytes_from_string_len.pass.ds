@@ -2,4 +2,4 @@ import { echo } from "io"
 import { from_string, len } from "bytes"
 
 const encoded = from_string("hello")
-echo(len(encoded))
+echo(string(len(encoded)))

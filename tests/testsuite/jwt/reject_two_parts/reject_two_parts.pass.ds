@@ -1,13 +1,13 @@
 import { echo } from "io"
 import { verify } from "jwt"
-fn utf8(value: string): bytes {
+fn utf8(value: string) bytes {
   let encoded = unsafe<bytes> { new TextEncoder().encode(value) }
   return match (encoded) {
     Ok(buf) => buf,
-    Err(err) => utf8("")
+    Err(err) => utf8(""),
   }
 }
 echo(match (verify("a.b", utf8("secret"), {})) {
   Ok(v) => "ok",
-  Err(e) => "err"
+  Err(e) => "err",
 })

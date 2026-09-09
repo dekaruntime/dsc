@@ -1,9 +1,9 @@
 import { echo } from "io"
 struct User {
-  name: string
-  email?: string
+  name: string;
+  email?: string;
 }
-const u = User { name: "A", email: Some("a@b.com") }
+const u = User { name: "A", email: Option.Some("a@b.com") }
 match (u.email) {
   Some(e) => echo(e),
   None => echo(""),

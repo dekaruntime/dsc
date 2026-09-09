@@ -1,0 +1,5 @@
+{
+  "title": "Static JSON serialization preserves tagged Option identity",
+  "stage": "run",
+  "notes": "rfd#43: Some(\"\"), None, and Some(0) must remain distinct through toJSON/parseJSON."
+}

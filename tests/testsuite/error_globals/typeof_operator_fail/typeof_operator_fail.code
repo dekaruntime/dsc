@@ -1,2 +1,2 @@
 import { echo } from "io"
-echo(typeof console.log)
+echo(typeof(console.log))

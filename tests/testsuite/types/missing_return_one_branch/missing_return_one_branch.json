@@ -1,0 +1,6 @@
+{
+  "title": "A return on only one branch fails",
+  "stage": "parse",
+  "expectedDiagnosticContains": "declares return type `string` but does not return a value on every path",
+  "notes": "An if with no else always leaves a path that falls through (deka#476)."
+}

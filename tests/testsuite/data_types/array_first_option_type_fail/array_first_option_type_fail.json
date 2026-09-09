@@ -1,0 +1,6 @@
+{
+  "title": "first() is Option<number> and cannot be assigned to string",
+  "stage": "typecheck",
+  "expectedDiagnosticContains": "Option<number>",
+  "notes": "deka#561: first()/last() are typed Option<T> and the type is real, unlike pop/shift."
+}

@@ -1,6 +1,6 @@
 import { echo } from "io"
 struct Counter {
-  count: number
+  count: number;
 }
 
 async fn (c Counter) fetch() number {

@@ -2,6 +2,5 @@ import { echo } from "io"
 fn f(x: number) number {
   return x
 }
-
 const g = f
-echo(g(42))
+echo(string(g(42)))

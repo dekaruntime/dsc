@@ -1,12 +1,12 @@
 import { echo } from "io"
 interface Mover {
-  fn move() string
+  fn move() string;
 }
 struct Wheels {}
 struct Robot {
-  Wheels
+  Wheels;
 }
 fn run(m: Mover) {
   echo(m.move())
 }
-run(Robot { Wheels: Wheels {} })
+run(Robot { Wheels: Wheels {  } })

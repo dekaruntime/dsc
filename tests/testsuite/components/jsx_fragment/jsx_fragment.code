@@ -1,4 +1,5 @@
 import { echo } from "io"
-const ui = globalThis.deka.ui
-const html = ui.renderToString(ui.jsxs(ui.Fragment, {children: ["a", "b"]}))
+import { jsxs, Fragment } from "ui/jsx"
+import { renderToString } from "ui/server"
+const html = renderToString(jsxs(Fragment, {children: ["a", "b"]}))
 echo(html.html)

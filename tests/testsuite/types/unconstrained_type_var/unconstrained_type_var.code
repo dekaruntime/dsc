@@ -4,23 +4,31 @@ import { echo } from "io"
 // mentions. `Ok(x)` fixes T and says nothing about E; `None` names no payload
 // at all; `[]` has no element. Those are *unconstrained*, not unresolved, so
 // they unify with whatever the context declares.
-fn ok_only(): Result<string, string> {
-  return Ok("y")
+fn ok_only() Result<string, string> {
+  return Result.Ok("y")
 }
 
-fn err_only(): Result<string, string> {
-  return Err("e")
+fn err_only() Result<string, string> {
+  return Result.Err("e")
 }
 
-fn none_only(): Option<number> {
+fn none_only() Option<number> {
   return None
 }
 
 const empty: Array<string> = []
 
-echo(match (ok_only()) { Ok(v) => v, Err(e) => e })
-echo(match (err_only()) { Ok(v) => v, Err(e) => e })
+echo(match (ok_only()) {
+  Ok(v) => v,
+  Err(e) => e,
+})
+echo(match (err_only()) {
+  Ok(v) => v,
+  Err(e) => e,
+})
 // `unwrap ... or` is a binding form, not an expression (deka#445).
-let n = unwrap(none_only()) or { 0 }
+let n = unwrap(none_only()) or {
+  0
+}
 echo(string(n))
 echo(string(empty.length))

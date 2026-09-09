@@ -1,16 +1,26 @@
 import { echo } from "io"
 import { Suspense } from "ui/suspense"
 
+interface RenderResult {
+  html: string;
+}
+
 async fn Slow() Promise<Component> {
   return <p>ready</p>
 }
 
 async fn htmlAsync(node: Component) Promise<string> {
-  const boxed = unsafe { deka.ui.renderToStringAsync(node) }
-  const prom = match (boxed) {
-    Ok(p) => p,
-    Err(e) => e.message,
-    _ => "nomatch",
+  // `renderToStringAsync` resolves to the render result, so the block hands back a
+  // Promise. Awaiting inside the Ok arm keeps both arms `string` -- the
+  // previous shape mixed a Promise arm with string arms and only typechecked
+  // because every arm was `<infer>` (deka#469).
+  // `renderToStringAsync` resolves to the render record, so the block hands
+  // back a Promise. `unwrap ... or` is the binding form for taking the happy
+  // path and leaving on failure -- a match arm cannot hold statements, because
+  // `{` after `=>` parses as an object literal (deka#445, deka#469).
+  const boxed = unsafe<Promise<RenderResult>> { deka.ui.renderToStringAsync(node) }
+  let prom = unwrap(boxed) or {
+    return "render failed"
   }
   const resolved = await prom
   return resolved.html
@@ -18,7 +28,7 @@ async fn htmlAsync(node: Component) Promise<string> {
 
 const tree = <Suspense fallback={<p>wait</p>}><Slow /></Suspense>
 
-const syncResult = unsafe { deka.ui.renderToString(tree) }
+const syncResult = unsafe<RenderResult> { deka.ui.renderToString(tree) }
 match (syncResult) {
   Ok(r) => echo(r.html),
   Err(e) => echo(e.message),
@@ -28,11 +38,9 @@ match (syncResult) {
 echo(await htmlAsync(tree))
 
 const bareTree = <Slow />
-const bare = unsafe { deka.ui.renderToString(bareTree) }
+const bare = unsafe<RenderResult> { deka.ui.renderToString(bareTree) }
 match (bare) {
   Ok(r) => echo(r.html),
   Err(e) => echo(e.message),
   _ => echo("bare-nomatch"),
 }
-
-

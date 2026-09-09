@@ -1,7 +1,8 @@
 import { echo } from "io"
-const ui = globalThis.deka.ui
-fn Boom(props: object) object {
+import { jsx } from "ui/jsx"
+import { renderToString } from "ui/server"
+fn Boom() Component {
   deka.panic("boom")
 }
-const html = ui.renderToString(ui.jsx(Boom, {}))
+const html = renderToString(jsx(Boom, {}))
 echo(html.html)

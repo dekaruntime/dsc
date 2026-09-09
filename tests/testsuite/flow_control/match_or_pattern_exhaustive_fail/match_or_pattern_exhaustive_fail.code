@@ -1,13 +1,13 @@
 enum Colour {
   Red,
   Green,
-  Blue
+  Blue,
 }
 
 // `Red | Green` covers exactly those two -- it is not a catch-all, so `Blue`
 // is still missing.
-fn warmth(c: Colour): string {
+fn warmth(c: Colour) string {
   return match (c) {
-    Red | Green => "warm"
+    Red | Green => "warm",
   }
 }

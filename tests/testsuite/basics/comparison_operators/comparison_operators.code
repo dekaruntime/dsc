@@ -1,4 +1,4 @@
 import { echo } from "io"
-echo(1 < 2)
-echo(5 >= 5)
-echo("a" === "a")
+echo(string(1 < 2))
+echo(string(5 >= 5))
+echo(string("a" == "a"))

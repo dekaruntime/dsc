@@ -1,2 +1,3 @@
+// this is a single-line comment
 import { echo } from "io"
-echo(1)
+echo(string(1))

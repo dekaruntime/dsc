@@ -1,0 +1,8 @@
+{
+  "title": "Two components with a same-named class get distinct scopes",
+  "stage": "run",
+  "notes": "RFD 24 §10.6: the cid is a content hash of each component module, so CardA and CardB stamp their host elements with different data-deka-cid values even though both render class=\"card\". Each .css file is rewritten with the importing module's cid, so the rules cannot leak across components.",
+  "hosts": [
+    "native"
+  ]
+}

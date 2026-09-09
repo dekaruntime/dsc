@@ -1,0 +1,4 @@
+import { echo } from "io"
+struct Type { x: number }
+const t: Type = Type { x: 1 }
+echo(t.x)

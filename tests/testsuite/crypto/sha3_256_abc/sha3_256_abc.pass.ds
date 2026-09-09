@@ -1,13 +1,13 @@
 import { echo } from "io"
 import { sha3_256 } from "crypto"
-fn utf8(value: string): bytes {
+fn utf8(value: string) bytes {
   let encoded = unsafe<bytes> { new TextEncoder().encode(value) }
   return match (encoded) {
     Ok(buf) => buf,
-    Err(err) => utf8("")
+    Err(err) => utf8(""),
   }
 }
-fn to_hex(value: bytes): string {
+fn to_hex(value: bytes) string {
   let r = unsafe {
     var s = "";
     var i = 0;
@@ -19,11 +19,11 @@ fn to_hex(value: bytes): string {
   }
   return match (r) {
     Ok(v) => v,
-    Err(e) => ""
+    Err(e) => "",
   }
 }
 const r = sha3_256(utf8("abc"))
 echo(match (r) {
   Ok(v) => to_hex(v),
-  Err(e) => "fail"
+  Err(e) => "fail",
 })

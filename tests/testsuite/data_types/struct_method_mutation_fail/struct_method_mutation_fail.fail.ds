@@ -1,5 +1,5 @@
 struct Counter {
-  count: number
+  count: number;
 }
 fn (c Counter) reset() {
   c.count = 0

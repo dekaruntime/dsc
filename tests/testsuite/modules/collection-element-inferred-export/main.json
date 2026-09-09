@@ -1,0 +1,6 @@
+{
+  "title": "inferred exported collection elements keep their type",
+  "stage": "run",
+  "compiler": "v2",
+  "hosts": ["native"]
+}

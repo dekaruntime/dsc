@@ -1,13 +1,13 @@
 import { echo } from "io"
 interface Named {
-  name: string
+  name: string;
 }
 interface Aged {
-  age: number
+  age: number;
 }
 struct Person {
-  name: string
-  age: number
+  name: string;
+  age: number;
 }
 fn describe(n: Named, a: Aged) {
   echo(n.name + " " + a.age)

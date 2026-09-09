@@ -3,7 +3,6 @@ const r = unsafe {
   const u = new URL("https://example.com/path")
   return u.href
 }
-
 echo(match (r) {
   Ok(v) => `ok: ${v}`,
   Err(e) => `err: ${e.message}`,

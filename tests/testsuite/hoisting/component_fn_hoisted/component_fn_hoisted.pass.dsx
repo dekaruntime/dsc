@@ -1,6 +1,8 @@
 import { echo } from "io"
 const app = <Card />
-fn Card() Component { return <div>hi</div> }
+fn Card() Component {
+  return <div>hi</div>
+}
 const result = unsafe { deka.ui.renderToString(app) }
 match (result) {
   Ok(r) => echo(r.html),

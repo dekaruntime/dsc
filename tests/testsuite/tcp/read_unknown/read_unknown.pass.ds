@@ -3,5 +3,5 @@ import { read } from "tcp"
 
 echo(match (read(0, 16)) {
   Ok(v) => "ok",
-  Err(e) => "err"
+  Err(e) => "err",
 })

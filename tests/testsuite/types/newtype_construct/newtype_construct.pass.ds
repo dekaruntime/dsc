@@ -2,4 +2,4 @@ import { echo } from "io"
 
 type Cents number
 const c = Cents(500)
-echo(string(number(c)))
+echo(string(unboxNumber(c)))

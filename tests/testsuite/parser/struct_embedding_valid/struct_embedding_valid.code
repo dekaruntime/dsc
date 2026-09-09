@@ -3,11 +3,9 @@ struct Point {
   x: number;
   y: number;
 }
-
 struct LabeledPoint {
   Point;
   label: string;
 }
-
 const p = LabeledPoint { Point: Point { x: 1, y: 2 }, label: "origin" }
 echo(p.label)

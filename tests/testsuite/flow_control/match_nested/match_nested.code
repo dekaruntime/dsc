@@ -7,5 +7,4 @@ const result = match (value) {
 },
   _ => "other",
 }
-
 echo(result)

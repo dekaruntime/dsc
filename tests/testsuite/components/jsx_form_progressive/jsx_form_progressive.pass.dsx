@@ -1,8 +1,12 @@
 import { echo } from "io"
 import { Form } from "ui/form"
 
-const tree = <Form action="/api/hello" method="post">Send</Form>
-const result = unsafe { deka.ui.renderToString(tree) }
+interface RenderResult {
+  html: string;
+}
+
+const tree = <Form action={"/api/hello"} method={"post"}>Send</Form>
+const result = unsafe<RenderResult> { deka.ui.renderToString(tree) }
 match (result) {
   Ok(r) => echo(r.html),
   Err(e) => echo(e.message),

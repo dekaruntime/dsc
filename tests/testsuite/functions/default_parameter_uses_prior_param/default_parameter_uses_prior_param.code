@@ -2,6 +2,5 @@ import { echo } from "io"
 fn scale(x: number, factor: number = x) number {
   return x * factor
 }
-
-echo(scale(3))
-echo(scale(3, 4))
+echo(string(scale(3)))
+echo(string(scale(3, 4)))

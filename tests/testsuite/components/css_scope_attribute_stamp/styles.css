@@ -1,0 +1,5 @@
+/* Component-authored CSS: rewritten at build time to
+   `.greeting[data-deka-cid-<hash>]` (RFD 24 §10.6). */
+.greeting {
+  color: rebeccapurple;
+}

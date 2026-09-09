@@ -1,8 +1,9 @@
 {
   "title": "Undefined variable in boolean JSX attribute fails",
-  "stage": "run",
-  "notes": "A boolean JSX attribute expression referencing an undefined variable should fail at runtime.",
+  "stage": "parse",
+  "notes": "A boolean JSX attribute expression referencing an undefined variable should fail at runtime. v2 catches the undefined variable at compile time rather than at runtime.",
   "hosts": [
     "browser"
-  ]
+  ],
+  "expectedDiagnosticContains": "unknown identifier `missing`"
 }

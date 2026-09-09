@@ -1,0 +1,5 @@
+{
+  "title": "getType() reports struct, newtype, and enum names",
+  "stage": "run",
+  "notes": "deka#529: descriptors for branded values read the runtime tags (`__deka_struct`, `__deka_newtype`, `__enum`) directly."
+}

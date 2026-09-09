@@ -1,7 +1,7 @@
 import { echo } from "io"
 const ui = globalThis.deka.ui
 fn Bad(props: object) object {
-  return [ui.jsx("span", { children: "a" }), ui.jsx("span", { children: "b" })]
+  return [ui.jsx("span", {children: "a"}), ui.jsx("span", {children: "b"})]
 }
 const html = ui.renderToString(ui.jsx(Bad, {}))
 echo(html.html)

@@ -3,6 +3,6 @@ async fn value() Promise<number> {
   return 1
 }
 
-for (i = await value(); i < 3; i = i + 1) {
-  echo(i)
+for (let i = await value(); i < 3; i = i + 1) {
+  echo(string(i))
 }

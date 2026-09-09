@@ -1,6 +1,12 @@
 import { echo } from "io"
-struct Person { name: string }
-fn (p Person) greet() string { return "hello" }
-struct Employee { Person }
+struct Person {
+  name: string;
+}
+fn (p Person) greet() string {
+  return "hello"
+}
+struct Employee {
+  Person;
+}
 const e = Employee { name: "Bob" }
 echo(e.greet())

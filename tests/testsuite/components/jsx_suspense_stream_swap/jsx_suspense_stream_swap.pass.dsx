@@ -1,16 +1,22 @@
 import { echo } from "io"
 import { Suspense } from "ui/suspense"
 
+interface RenderResult {
+  html: string;
+}
+
 async fn Slow() Promise<Component> {
   return <p>ready</p>
 }
 
 async fn collect(node: Component) Promise<string> {
-  const boxed = unsafe { deka.ui.renderToStreamHtml(node) }
-  const prom = match (boxed) {
-    Ok(p) => p,
-    Err(e) => e.message,
-    _ => "",
+  // `renderToStreamHtml` resolves to the stream HTML itself, not the render
+  // record, so this is `Promise<string>`. The previous match mixed a Promise
+  // arm with string arms and only typechecked because every arm was `<infer>`
+  // (deka#469).
+  const boxed = unsafe<Promise<string>> { deka.ui.renderToStreamHtml(node) }
+  let prom = unwrap(boxed) or {
+    return ""
   }
   return await prom
 }

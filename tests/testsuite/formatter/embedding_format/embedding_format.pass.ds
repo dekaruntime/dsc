@@ -4,8 +4,8 @@ fn (p Person) greet() string {
   return "Hello"
 }
 struct Employee {
-  Person
-  name: string
+  Person;
+  name: string;
 }
 fn (e Employee) greet() string {
   return "Hi, " + e.name

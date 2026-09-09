@@ -1,3 +1,4 @@
+// leading comment
 import { echo } from "io"
 const a = 1 + 2
-echo(a)
+echo(string(a))

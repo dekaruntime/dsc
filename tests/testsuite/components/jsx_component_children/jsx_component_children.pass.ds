@@ -1,7 +1,12 @@
 import { echo } from "io"
-const ui = globalThis.deka.ui
-fn Box(props: object) object {
-  return ui.jsxs("div", { class: props.class, children: props.children })
+import { jsx, jsxs } from "ui/jsx"
+import { renderToString } from "ui/server"
+interface BoxProps {
+  class: string;
+  children: Array<Component>;
 }
-const html = ui.renderToString(ui.jsxs(Box, { class: "card", children: [ui.jsx("p", { children: "hi" })] }))
+fn Box(props: BoxProps) Component {
+  return jsxs("div", {class: props.class, children: props.children})
+}
+const html = renderToString(jsxs(Box, {class: "card", children: [jsx("p", {children: "hi"})]}))
 echo(html.html)

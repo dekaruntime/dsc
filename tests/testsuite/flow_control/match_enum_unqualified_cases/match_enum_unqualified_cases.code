@@ -1,19 +1,19 @@
 import { echo } from "io"
 
 enum Colour {
-  Red
-  Green
-  Blue
+  Red,
+  Green,
+  Blue,
 }
 
 // Payload-free cases spelled without the enum name. These used to parse as
 // bindings, so `Red` compiled to a test of `true` and every arm after it was
 // dead -- the match returned "r" for every input (deka#450).
-fn warmth(c: Colour): string {
+fn warmth(c: Colour) string {
   return match (c) {
     Red => "r",
     Green => "g",
-    Blue => "b"
+    Blue => "b",
   }
 }
 

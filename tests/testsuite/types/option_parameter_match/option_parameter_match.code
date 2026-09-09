@@ -5,6 +5,5 @@ fn greet(name: Option<string>) string {
     None => "Hello stranger",
   }
 }
-
 echo(greet(Option.Some("Deka")))
 echo(greet(Option.None))

@@ -1,3 +1,2 @@
-/* block comment */
 import { echo } from "io"
 echo(string(1))

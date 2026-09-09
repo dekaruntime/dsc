@@ -1,8 +1,8 @@
 import { echo } from "io"
-const ui = globalThis.deka.ui
-fn Counter(props: object) object {
-  return ui.jsx("button", {children: "0"})
+import { jsx } from "ui/jsx"
+import { renderToString } from "ui/server"
+fn Counter() Component {
+  return jsx("button", {children: "0"})
 }
-
-const html = ui.renderToString(ui.jsx(Counter, {"client:load": true}))
+const html = renderToString(jsx(Counter, {"client:load": true}))
 echo(html.html)

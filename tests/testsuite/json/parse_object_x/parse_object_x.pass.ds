@@ -1,10 +1,7 @@
 import { echo } from "io"
-import { parse } from "json"
-const v = match (parse("{\"x\":2}")) {
-  Ok(o) => o,
-  Err(e) => { x: 0 }
-}
-echo(match (unsafe<number> { Number(v.x) }) {
-  Ok(n) => n,
-  Err(e) => -1
+struct X { x: number }
+const text = X { x: 2 }.toJSON()
+echo(match (text.parseJSON<X>()) {
+  Ok(o) => string(o.x),
+  Err(e) => "-1",
 })

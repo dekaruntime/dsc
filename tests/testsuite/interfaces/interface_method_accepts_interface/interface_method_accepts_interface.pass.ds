@@ -1,12 +1,12 @@
 import { echo } from "io"
 interface Named {
-  name: string
+  name: string;
 }
 interface Greeter {
-  fn greet(other: Named) string
+  fn greet(other: Named) string;
 }
 struct Person {
-  name: string
+  name: string;
 }
 fn (p Person) greet(other: Named) string {
   return "Hello, " + other.name + " from " + p.name

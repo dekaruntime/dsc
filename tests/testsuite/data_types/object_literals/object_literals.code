@@ -1,4 +1,4 @@
 import { echo } from "io"
 const user = {name: "Deka", score: 100}
-echo(user.name)
-echo(user.score)
+echo(string(user.name))
+echo(string(user.score))

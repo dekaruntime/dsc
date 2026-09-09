@@ -48,6 +48,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_statement(&mut self, in_block: bool) -> Option<Stmt<'a>> {
+        let _guard = self.enter_recursion()?;
         self.skip_newlines();
         let (start, start_byte) = self.span_start();
 
@@ -406,6 +407,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_if_statement(&mut self, start: Pos, start_byte: usize) -> Option<Stmt<'a>> {
+        let _guard = self.enter_recursion()?;
         self.advance(); // `if`
         self.expect(TokenKind::LParen)?;
         let condition = self.parse_expression()?;

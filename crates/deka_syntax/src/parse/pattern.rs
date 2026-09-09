@@ -77,6 +77,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_pattern(&mut self) -> Option<Pattern<'a>> {
+        let _guard = self.enter_recursion()?;
         self.skip_newlines();
         let (start, start_byte) = self.span_start();
 

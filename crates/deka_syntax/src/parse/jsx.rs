@@ -28,6 +28,7 @@ impl<'a> Parser<'a> {
         start: crate::ast::Pos,
         start_byte: usize,
     ) -> Option<Expr<'a>> {
+        let _guard = self.enter_recursion()?;
         self.expect(TokenKind::Lt)?;
 
         // Fragment: `<>`

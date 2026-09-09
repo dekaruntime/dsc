@@ -2077,6 +2077,48 @@ fn load() string {
         );
     }
 
+    /// dsc#72: input nested up to the parser's recursion limit (64 levels)
+    /// must compile end-to-end (parse -> typeck -> emit). Runs on the ~2 MiB
+    /// test-thread stack — the tightest stack any real caller has — so it
+    /// also pins the stack-safety of the depth limit for the later passes,
+    /// which recurse over the AST in step with its (now bounded) depth.
+    #[test]
+    fn deep_nesting_compiles_below_limit() {
+        // 64 nested blocks, one statement frame per level: exactly the limit.
+        let source = "{".repeat(64) + &"}".repeat(64);
+        compile_to_js(&source, "deep.ds").expect("nesting at the limit must compile");
+
+        // Deep-but-legal expression nesting in a typed binding.
+        let source = format!("const x = {}{}{}", "(".repeat(60), "1", ")".repeat(60));
+        compile_to_js(&source, "deep.ds").expect("60-deep parens must compile");
+    }
+
+    /// dsc#72: input nested past the limit must fail with the positioned
+    /// `nesting too deep` diagnostic — never the uncatchable SIGABRT a stack
+    /// overflow produces. Covers every recursive parse path: expressions,
+    /// blocks, and JSX children.
+    #[test]
+    fn deep_nesting_beyond_limit_is_a_positioned_diagnostic() {
+        for source in [
+            format!("const x = {}{}{}", "(".repeat(1000), "1", ")".repeat(1000)),
+            "{".repeat(1000),
+            format!(
+                "export fn P() {{ return {}text{} }}",
+                "<div>".repeat(1000),
+                "</div>".repeat(1000)
+            ),
+        ] {
+            let errors = compile_to_js(&source, "deep.dsx").expect_err("must not compile");
+            assert!(
+                errors.iter().any(|e| e.message.contains("nesting too deep")),
+                "{errors:?}"
+            );
+            for e in &errors {
+                assert!(e.line >= 1 && e.column >= 1, "unpositioned: {e:?}");
+            }
+        }
+    }
+
     /// Feeds exotic and malformed source through the full compile pipeline
     /// (lexer -> parser -> typecheck -> emit). The contract under test: user
     /// input never panics and never yields a diagnostic without a line and
@@ -2084,9 +2126,10 @@ fn load() string {
     ///
     /// Non-ASCII coverage now spans every lexer path, not just JSX text
     /// (dekaruntime/dsc#70), and quotes/backticks may sit at EOF
-    /// (dekaruntime/dsc#71). Deeply nested input is capped at 32 levels
-    /// because the parser has no recursion limit yet (dsc#72); a stack
-    /// overflow aborts the process and cannot be asserted in-process.
+    /// (dekaruntime/dsc#71). Deeply nested input goes far past the parser's
+    /// recursion limit (64 levels, dsc#72) and must surface the positioned
+    /// `nesting too deep` diagnostic — never the uncatchable stack-overflow
+    /// abort, which would kill this whole test binary.
     #[test]
     fn malformed_input_never_panics_and_diagnostics_are_positioned() {
         let mut corpus: Vec<String> = Vec::new();
@@ -2139,7 +2182,11 @@ fn load() string {
             corpus.push(source.to_string());
         }
 
-        // Deeply nested, unclosed constructs.
+        // Deeply nested constructs, balanced and unclosed. Depths go well past
+        // the parser's recursion limit (64, dsc#72) so the harness exercises
+        // the depth-limit diagnostic path — thousands of levels must produce
+        // a positioned diagnostic, never a stack-overflow abort (the abort is
+        // uncatchable and would kill this whole test binary).
         for open_close in [
             ("<div>", ""),
             ("<div><span>", ""),
@@ -2147,10 +2194,12 @@ fn load() string {
             ("[", "]"),
             ("{", "}"),
             ("(", ")"),
+            ("f(", ")"),
+            ("Option<", ">"),
             ("/*", "*/"),
             ("unsafe {", "}"),
         ] {
-            for depth in [1usize, 8, 32] {
+            for depth in [1usize, 8, 32, 256] {
                 let mut s = String::new();
                 for _ in 0..depth {
                     s.push_str(open_close.0);
@@ -2160,9 +2209,10 @@ fn load() string {
                 }
                 corpus.push(s);
             }
-            // Fully unclosed variants (32 deep; deeper hits dsc#72).
+            // Fully unclosed variants (256 deep; the parser's depth limit
+            // makes these cheap — the diagnostic fires at level 65).
             let mut s = String::new();
-            for _ in 0..32 {
+            for _ in 0..256 {
                 s.push_str(open_close.0);
             }
             corpus.push(s);

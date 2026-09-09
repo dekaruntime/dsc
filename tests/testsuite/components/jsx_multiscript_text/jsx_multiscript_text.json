@@ -1,0 +1,5 @@
+{
+  "title": "JSX text survives multi-script text, emoji, and combining marks byte-for-byte",
+  "stage": "run",
+  "hosts": ["native"]
+}

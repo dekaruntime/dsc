@@ -1843,7 +1843,9 @@ mod tests {
         let input = "fn View() Object { return <div class=\"test\">hello {name}</div>; }";
         let output = format_ds(input).unwrap();
         assert!(output.contains("<div class={\"test\"}>"), "got: {}", output);
-        assert!(output.contains("hello{name}"), "got: {}", output);
+        // JSX text is verbatim (deka#67): the space before `{name}` is part
+        // of the text run and must survive formatting.
+        assert!(output.contains("hello {name}"), "got: {}", output);
         assert!(output.contains("</div>"), "got: {}", output);
     }
 

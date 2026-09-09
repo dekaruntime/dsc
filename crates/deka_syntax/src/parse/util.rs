@@ -127,6 +127,7 @@ pub(super) fn token_name(kind: TokenKind) -> &'static str {
         LtJsx => "`<`",
         GtJsx => "`>`",
         SlashJsx => "`/`",
+        JsxText => "JSX text",
         Newline => "newline",
         Comment => "comment",
         Eof => "end of file",

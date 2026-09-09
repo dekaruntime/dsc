@@ -1,11 +1,12 @@
 //! JSX parsing for DekaScript (Compiler v2).
 //!
 //! JSX is parsed lazily when the main parser sees `<` in prefix position.
-//! The lexer still tokenises the structural characters (`<`, `>`, `/`, `{`, `}`,
-//! `=`, identifiers, strings) normally; this module reads those tokens and
-//! extracts raw text children from the source bytes between structural tokens.
+//! The lexer tokenises the structural characters (`<`, `>`, `/`, `{`, `}`,
+//! `=`, identifiers, strings) and emits the text between them as a single
+//! verbatim `JsxText` token per run (deka#67, deka#68); this module reads
+//! those tokens and builds the element tree.
 
-use crate::ast::{self, Expr, JsxAttribute, JsxElement, Span};
+use crate::ast::{self, Expr, JsxAttribute, JsxElement};
 use crate::lexer::TokenKind;
 
 use super::Parser;
@@ -156,21 +157,18 @@ impl<'a> Parser<'a> {
                 if let Some(child) = child {
                     children.push(child);
                 }
+            } else if self.at(TokenKind::JsxText) {
+                children.push(Expr::JsxText {
+                    value: self.bump_str(self.current_text()),
+                    span: self.current_span(),
+                });
+                self.advance();
             } else if self.at(TokenKind::Eof) {
                 break;
             } else {
-                let text = self.consume_jsx_text();
-                if !text.is_empty() {
-                    children.push(Expr::JsxText {
-                        value: self.bump_str(text),
-                        span: Span {
-                            start: self.prev.span.end,
-                            end: self.prev.span.end,
-                            byte_start: self.prev.span.byte_end,
-                            byte_end: self.prev.span.byte_end,
-                        },
-                    });
-                }
+                // Stray token from malformed input: stop and let the missing
+                // closing-tag diagnostic fire rather than looping forever.
+                break;
             }
         }
         Some(children)
@@ -205,22 +203,6 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::Lt)?;
         self.expect(TokenKind::Slash)?;
         self.expect(TokenKind::Gt)
-    }
-
-    /// Consume raw text from the source until the next structural JSX token.
-    fn consume_jsx_text(&mut self) -> &'a str {
-        let start_byte = self.current_span().byte_start;
-        let mut end_byte = start_byte;
-
-        while !self.at(TokenKind::Lt)
-            && !self.at(TokenKind::LBrace)
-            && !self.at(TokenKind::Eof)
-        {
-            end_byte = self.current_span().byte_end;
-            self.advance();
-        }
-
-        &self.source[start_byte..end_byte]
     }
 
     pub(super) fn peek_kind(&self, offset: usize) -> Option<TokenKind> {

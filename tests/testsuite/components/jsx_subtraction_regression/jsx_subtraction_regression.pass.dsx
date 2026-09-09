@@ -1,0 +1,7 @@
+import { echo } from "io"
+
+const a = 10
+const b = 3
+const el = <p data-count={a - b} title={a - 1}>x</p>
+echo(string(a - b))
+echo(string(a - 1))

@@ -1411,6 +1411,59 @@ mod tests {
     }
 
     #[test]
+    fn parse_jsx_hyphenated_attributes() {
+        // dsc#69: every valid HTML attribute name must be writable, not just
+        // data-*/aria-*. `data-count` exercises `{a - b}` as an attribute
+        // value: the subtraction must survive next to the joined name.
+        let arena = Bump::new();
+        let result = parse(
+            "const el = <p data-x=\"1\" aria-label=\"y\" http-equiv=\"z\" data-count={a - b}>t</p>;",
+            &arena,
+        );
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[0] {
+            Stmt::Const { value, .. } => match value {
+                Expr::JsxElement { element, .. } => {
+                    assert_eq!(element.tag, "p");
+                    let names: Vec<&str> = element.attributes.iter().map(|a| a.name).collect();
+                    assert_eq!(
+                        names,
+                        vec!["data-x", "aria-label", "http-equiv", "data-count"]
+                    );
+                    match &element.attributes[3].value {
+                        Some(Expr::Binary { op, .. }) => {
+                            assert_eq!(*op, BinOp::Sub);
+                        }
+                        other => panic!("expected subtraction in attribute value, got {:?}", other),
+                    }
+                }
+                _ => panic!("expected jsx element, got {:?}", value),
+            },
+            _ => panic!("expected const declaration"),
+        }
+    }
+
+    #[test]
+    fn parse_subtraction_untouched_outside_attribute_names() {
+        // dsc#69: joining `-` in attribute-name position must not leak into
+        // ordinary code — `a - b` and `x - 1` stay subtraction.
+        let arena = Bump::new();
+        let result = parse("const n = a - b; const m = x - 1;", &arena);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        for stmt in program.statements.iter() {
+            match stmt {
+                Stmt::Const { value, .. } => match value {
+                    Expr::Binary { op, .. } => assert_eq!(*op, BinOp::Sub),
+                    other => panic!("expected subtraction, got {:?}", other),
+                },
+                other => panic!("expected const declaration, got {:?}", other),
+            }
+        }
+    }
+
+    #[test]
     fn parse_jsx_with_children() {
         let arena = Bump::new();
         let result = parse("const el = <p>hello {name}</p>;", &arena);

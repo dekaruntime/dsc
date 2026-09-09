@@ -1,0 +1,6 @@
+{
+  "title": "Keywords are untouched outside JSX attribute names",
+  "stage": "run",
+  "hosts": ["native"],
+  "notes": "Regression pin for dsc#77: type/for/if/else/const keep their statement meaning next to a JSX element using them as attribute names."
+}

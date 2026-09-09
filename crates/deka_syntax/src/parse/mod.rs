@@ -1464,6 +1464,137 @@ mod tests {
     }
 
     #[test]
+    fn parse_jsx_keyword_attributes() {
+        // dsc#77: any keyword is legal in JSX attribute-name position —
+        // attribute-name position is not statement/expression position, so a
+        // keyword there is just a name. `type`/`for`/`class` are the common
+        // form attributes; the rest of the keyword list is swept in
+        // parse_jsx_keyword_attribute_sweep.
+        let arena = Bump::new();
+        let result = parse(
+            "const el = <form><label for=\"email\">Email</label><input type=\"text\" id=\"email\" /><button type=\"submit\">Send</button></form>;",
+            &arena,
+        );
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[0] {
+            Stmt::Const { value, .. } => match value {
+                Expr::JsxElement { element, .. } => {
+                    assert_eq!(element.tag, "form");
+                    let form = element;
+                    match &form.children[0] {
+                        Expr::JsxElement { element, .. } => {
+                            assert_eq!(element.tag, "label");
+                            assert_eq!(element.attributes[0].name, "for");
+                        }
+                        other => panic!("expected label element, got {:?}", other),
+                    }
+                    match &form.children[1] {
+                        Expr::JsxElement { element, .. } => {
+                            assert_eq!(element.tag, "input");
+                            let names: Vec<&str> =
+                                element.attributes.iter().map(|a| a.name).collect();
+                            assert_eq!(names, vec!["type", "id"]);
+                        }
+                        other => panic!("expected input element, got {:?}", other),
+                    }
+                    match &form.children[2] {
+                        Expr::JsxElement { element, .. } => {
+                            assert_eq!(element.tag, "button");
+                            assert_eq!(element.attributes[0].name, "type");
+                        }
+                        other => panic!("expected button element, got {:?}", other),
+                    }
+                }
+                _ => panic!("expected jsx element, got {:?}", value),
+            },
+            _ => panic!("expected const declaration"),
+        }
+    }
+
+    #[test]
+    fn parse_jsx_keyword_attribute_sweep() {
+        // dsc#77: the general rule, not an enumeration — every keyword the
+        // lexer emits must be writable as an attribute name, alone and as a
+        // hyphen continuation. `super` is included: its reservation only
+        // applies where a declaration could start.
+        let arena = Bump::new();
+        let result = parse(
+            "const el = <div if=\"1\" else=\"2\" for=\"3\" of=\"4\" return=\"5\" match=\"6\" unsafe=\"7\" super=\"8\" async=\"9\" await=\"10\" break=\"11\" continue=\"12\" fn=\"13\" let=\"14\" const=\"15\" mut=\"16\" function=\"17\" struct=\"18\" enum=\"19\" interface=\"20\" type=\"21\" alias=\"22\" import=\"23\" export=\"24\" from=\"25\" as=\"26\" pub=\"27\" build=\"28\" bridge=\"29\" true=\"30\" false=\"31\" None=\"32\" if-led=\"33\" />;",
+            &arena,
+        );
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[0] {
+            Stmt::Const { value, .. } => match value {
+                Expr::JsxElement { element, .. } => {
+                    let names: Vec<&str> = element.attributes.iter().map(|a| a.name).collect();
+                    assert_eq!(
+                        names,
+                        vec![
+                            "if", "else", "for", "of", "return", "match", "unsafe", "super",
+                            "async", "await", "break", "continue", "fn", "let", "const", "mut",
+                            "function", "struct", "enum", "interface", "type", "alias",
+                            "import", "export", "from", "as", "pub", "build", "bridge", "true",
+                            "false", "None", "if-led"
+                        ]
+                    );
+                }
+                _ => panic!("expected jsx element, got {:?}", value),
+            },
+            _ => panic!("expected const declaration"),
+        }
+    }
+
+    #[test]
+    fn parse_jsx_unsafe_boolean_attribute() {
+        // dsc#77: `unsafe` as a boolean attribute must not trip the lexer's
+        // pending-brace machinery (`unsafe { ... }` raw-JS blocks), and an
+        // `unsafe={...}` value must lex as an ordinary expression, with code
+        // after the element unaffected.
+        let arena = Bump::new();
+        let result = parse(
+            "const el = <div unsafe unsafe={v} />; const n = a - b;",
+            &arena,
+        );
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[0] {
+            Stmt::Const { value, .. } => match value {
+                Expr::JsxElement { element, .. } => {
+                    assert_eq!(element.attributes[0].name, "unsafe");
+                    assert_eq!(element.attributes[1].name, "unsafe");
+                }
+                _ => panic!("expected jsx element, got {:?}", value),
+            },
+            _ => panic!("expected const declaration"),
+        }
+        match &program.statements[1] {
+            Stmt::Const { value, .. } => match value {
+                Expr::Binary { op, .. } => assert_eq!(*op, BinOp::Sub),
+                other => panic!("expected subtraction after element, got {:?}", other),
+            },
+            other => panic!("expected const declaration, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_keywords_untouched_outside_jsx_attribute_names() {
+        // dsc#77 regression pin: outside attribute-name position, `for`,
+        // `if`/`else`, and `type` remain hard keywords with their usual
+        // statement meaning.
+        let arena = Bump::new();
+        let result = parse(
+            "type Email string; for (const x of xs) { if (x) { break } else { continue } }",
+            &arena,
+        );
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        assert!(matches!(program.statements[0], Stmt::Newtype { .. }));
+        assert!(matches!(program.statements[1], Stmt::ForOf { .. }));
+    }
+
+    #[test]
     fn parse_jsx_with_children() {
         let arena = Bump::new();
         let result = parse("const el = <p>hello {name}</p>;", &arena);

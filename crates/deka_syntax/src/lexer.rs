@@ -956,6 +956,21 @@ impl<'a> Lexer<'a> {
             }
         }
         self.skip_whitespace();
+        if self.unsafe_expect_brace
+            && self.pos >= self.unsafe_type_end
+            && matches!(
+                self.jsx_stack.last(),
+                Some(JsxFrame::OpenTag | JsxFrame::SelfClose | JsxFrame::CloseTag)
+            )
+        {
+            // `unsafe` inside a JSX tag is an attribute (or tag) name, not the
+            // start of an unsafe block (dsc#77): no declaration can begin in
+            // tag position, so the pending-brace expectation is cancelled and
+            // lexing continues normally. (`{ ... }` attribute values push a
+            // `Braces` frame, so a genuine `unsafe { }` inside one is
+            // unaffected.)
+            self.unsafe_expect_brace = false;
+        }
         if self.unsafe_expect_brace && self.pos >= self.unsafe_type_end {
             if self.current() == Some('<') {
                 // `unsafe<T> { ... }` (deka#460). Find the matching `>` by

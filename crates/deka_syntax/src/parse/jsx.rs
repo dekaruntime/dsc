@@ -9,7 +9,7 @@
 use crate::ast::{self, Expr, JsxAttribute, JsxElement};
 use crate::lexer::TokenKind;
 
-use super::Parser;
+use super::{kind_is_name_capable, util::token_name, Parser};
 
 impl<'a> Parser<'a> {
     /// Entry point called from the expression parser when it sees `<`.
@@ -139,20 +139,49 @@ impl<'a> Parser<'a> {
         Some(attrs)
     }
 
-    /// One segment of an attribute name: an identifier plus any number of
-    /// `-identifier` continuations, so every valid HTML attribute name
+    /// One segment of an attribute name: a name plus any number of
+    /// `-name` continuations, so every valid HTML attribute name
     /// (`data-*`, `aria-*`, `http-equiv`, ...) is writable (dsc#69). `-` is
     /// not an operator in attribute-name position — subtraction only occurs
     /// inside `{ ... }` attribute values, which parse as ordinary
     /// expressions — so joining here cannot swallow a real operator.
+    ///
+    /// The leading segment (and each continuation) may be any keyword, not
+    /// just an identifier (dsc#77): attribute-name position is neither
+    /// statement nor expression position, so a keyword there can only be a
+    /// name. This is the same contextual-name rule already used for field
+    /// access (`o.type`, dsc#69's precedent), extended to every keyword —
+    /// enumerating `type`/`for`/`class` would just miss the next collision.
+    /// `super` is included even though `expect_field_name` excludes it:
+    /// there it guards a future declaration form, but no declaration can
+    /// start after `<tag` or `-`, so the reservation does not apply here.
+    /// Keyword-led hyphenation (`for-action="x"`) falls out naturally.
     fn parse_jsx_attr_name_part(&mut self) -> Option<&'a str> {
-        let mut name = self.expect_identifier()?;
+        let mut name = self.parse_jsx_attr_name_segment()?;
         while self.at(TokenKind::Minus) {
             self.advance();
-            let part = self.expect_identifier()?;
+            let part = self.parse_jsx_attr_name_segment()?;
             name = self.bump_str(&format!("{name}-{part}"));
         }
         Some(name)
+    }
+
+    /// A single `-`-free segment of an attribute name: an identifier or any
+    /// keyword token (see `parse_jsx_attr_name_part`).
+    fn parse_jsx_attr_name_segment(&mut self) -> Option<&'a str> {
+        self.skip_newlines();
+        let kind = self.current_kind();
+        if kind_is_name_capable(kind) || kind == TokenKind::Super {
+            let name = self.bump_str(self.current_text());
+            self.advance();
+            Some(name)
+        } else {
+            self.error(format!(
+                "expected identifier, found `{}`",
+                token_name(kind)
+            ));
+            None
+        }
     }
 
     fn parse_jsx_children(&mut self) -> Option<Vec<Expr<'a>>> {

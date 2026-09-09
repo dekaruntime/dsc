@@ -1570,6 +1570,41 @@ fn load() string {
     }
 
     #[test]
+    fn compile_jsx_hyphenated_attributes() {
+        // dsc#69: hyphenated HTML attribute names must survive into the
+        // emitted props object — the emitter already emits `data-deka-id`,
+        // so the name string flows through untouched once the parser
+        // accepts it.
+        let result = compile_to_js(
+            "const n = 1; const el = <p data-x=\"1\" aria-label=\"y\" data-count={n - 1}>z</p>;",
+            "test.dsx",
+        )
+        .expect("compile should succeed");
+        assert!(
+            result.js.contains("\"data-x\": \"1\""),
+            "got: {}",
+            result.js
+        );
+        assert!(
+            result.js.contains("\"aria-label\": \"y\""),
+            "got: {}",
+            result.js
+        );
+        // The subtraction inside the attribute value is untouched.
+        assert!(result.js.contains("n - 1"), "got: {}", result.js);
+    }
+
+    #[test]
+    fn compile_subtraction_untouched_by_hyphenated_attributes() {
+        // dsc#69: joining `-` in attribute-name position must not change how
+        // ordinary subtraction compiles.
+        let result = compile_to_js("const a = 10; const b = 3; const n = a - b; const m = a - 1;", "test.ds")
+            .expect("compile should succeed");
+        assert!(result.js.contains("a - b"), "got: {}", result.js);
+        assert!(result.js.contains("a - 1"), "got: {}", result.js);
+    }
+
+    #[test]
     fn compile_form_import_from_ui_form() {
         let result = compile_to_js(
             "import { Form } from \"ui/form\";\nconst el = <Form action=\"/api/hello\" method=\"post\">Send</Form>;",

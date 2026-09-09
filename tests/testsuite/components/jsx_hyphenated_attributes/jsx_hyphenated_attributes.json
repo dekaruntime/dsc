@@ -1,0 +1,5 @@
+{
+  "title": "Hyphenated JSX attribute names (data-*, aria-*, any HTML name)",
+  "stage": "run",
+  "hosts": ["native"]
+}

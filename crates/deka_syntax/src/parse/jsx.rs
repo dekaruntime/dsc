@@ -98,9 +98,9 @@ impl<'a> Parser<'a> {
                 return None;
             }
 
-            let first = self.expect_identifier()?;
+            let first = self.parse_jsx_attr_name_part()?;
             let name = if self.eat(TokenKind::Colon) {
-                let second = self.expect_identifier()?;
+                let second = self.parse_jsx_attr_name_part()?;
                 self.bump_str(&format!("{first}:{second}"))
             } else {
                 first
@@ -137,6 +137,22 @@ impl<'a> Parser<'a> {
             });
         }
         Some(attrs)
+    }
+
+    /// One segment of an attribute name: an identifier plus any number of
+    /// `-identifier` continuations, so every valid HTML attribute name
+    /// (`data-*`, `aria-*`, `http-equiv`, ...) is writable (dsc#69). `-` is
+    /// not an operator in attribute-name position — subtraction only occurs
+    /// inside `{ ... }` attribute values, which parse as ordinary
+    /// expressions — so joining here cannot swallow a real operator.
+    fn parse_jsx_attr_name_part(&mut self) -> Option<&'a str> {
+        let mut name = self.expect_identifier()?;
+        while self.at(TokenKind::Minus) {
+            self.advance();
+            let part = self.expect_identifier()?;
+            name = self.bump_str(&format!("{name}-{part}"));
+        }
+        Some(name)
     }
 
     fn parse_jsx_children(&mut self) -> Option<Vec<Expr<'a>>> {

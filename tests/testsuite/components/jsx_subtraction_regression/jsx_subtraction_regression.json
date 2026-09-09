@@ -1,0 +1,6 @@
+{
+  "title": "Subtraction is untouched by hyphenated JSX attribute names",
+  "stage": "run",
+  "hosts": ["native"],
+  "notes": "Regression pin for dsc#69: `a - b` and `x - 1` stay subtraction, including inside JSX attribute values."
+}

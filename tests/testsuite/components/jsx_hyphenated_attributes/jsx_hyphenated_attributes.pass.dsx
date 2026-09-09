@@ -1,0 +1,11 @@
+import { echo } from "io"
+
+const p = <p data-x="1" aria-label="y">z</p>
+const iconButton = <button aria-label="Close dialog" data-testid="close">×</button>
+const region = <div aria-live="polite">Saved</div>
+const tree = <div>{p}{iconButton}{region}</div>
+const result = unsafe { deka.ui.renderToString(tree) }
+match (result) {
+  Ok(r) => echo(r.html),
+  Err(e) => echo(e.message),
+}

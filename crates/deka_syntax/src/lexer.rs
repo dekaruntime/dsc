@@ -350,6 +350,7 @@ impl<'a> Lexer<'a> {
         let quote = self.current().unwrap();
         self.advance(); // opening quote
         let start_pos = self.pos;
+        let mut terminated = false;
         loop {
             match self.current() {
                 None => {
@@ -369,6 +370,7 @@ impl<'a> Lexer<'a> {
                 }
                 Some(c) if c == quote => {
                     self.advance();
+                    terminated = true;
                     break;
                 }
                 Some(_) => {
@@ -376,7 +378,11 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
-        let text = &self.source[start_pos..self.pos - 1];
+        // Only strip the closing quote when one was actually consumed; at EOF
+        // `pos` may equal `start_pos`, so `pos - 1` would underflow the slice
+        // (dekaruntime/dsc#71).
+        let end = if terminated { self.pos - 1 } else { self.pos };
+        let text = &self.source[start_pos..end];
         Token {
             kind: TokenKind::String,
             text,
@@ -393,6 +399,7 @@ impl<'a> Lexer<'a> {
         let start_byte = self.pos;
         self.advance(); // opening backtick
         let start_pos = self.pos;
+        let mut terminated = false;
         loop {
             match self.current() {
                 None => {
@@ -412,6 +419,7 @@ impl<'a> Lexer<'a> {
                 }
                 Some('`') => {
                     self.advance();
+                    terminated = true;
                     break;
                 }
                 Some(_) => {
@@ -419,7 +427,10 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
-        let text = &self.source[start_pos..self.pos - 1];
+        // Only strip the closing backtick when one was actually consumed; at
+        // EOF `pos - 1` can underflow the slice (dekaruntime/dsc#71).
+        let end = if terminated { self.pos - 1 } else { self.pos };
+        let text = &self.source[start_pos..end];
         Token {
             kind: TokenKind::BacktickString,
             text,
@@ -1682,6 +1693,31 @@ mod tests {
             for d in &diags {
                 assert!(d.line >= 1 && d.column >= 1, "bad diagnostic: {d:?}");
             }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Unterminated string/backtick at EOF (dekaruntime/dsc#71)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn lone_quote_at_eof_is_diagnostic_not_panic() {
+        for source in ["\"", "'", "`", "const x = '", "const x = `", "\"café"] {
+            let (kinds, _, diags) = lex_all(source);
+            assert!(
+                diags
+                    .iter()
+                    .any(|d| d.message.contains("unterminated")),
+                "expected unterminated diagnostic for {source:?}: {diags:?}"
+            );
+            for d in &diags {
+                assert!(d.line >= 1 && d.column >= 1, "bad diagnostic: {d:?}");
+            }
+            // The offending quote/backtick token must still be produced.
+            assert!(
+                kinds.iter().any(|k| matches!(k, TokenKind::String | TokenKind::BacktickString)),
+                "expected a string token for {source:?}"
+            );
         }
     }
 }

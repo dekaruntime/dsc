@@ -2115,11 +2115,14 @@ fn load() string {
     ///   (`error()` unexpected-character path, `read_identifier`), including
     ///   BOM-prefixed files, lossy-decoded truncated UTF-8, and non-ASCII
     ///   identifiers.
-    /// - dsc#71: `pos - 1` slice underflow for an unterminated
-    ///   one-character string or backtick string at EOF.
     ///
-    /// Each input must currently panic with the known slice error; once the
-    /// issues are fixed, this test starts failing — fold its corpus into
+    /// (The dsc#71 cases — `pos - 1` slice underflow for an unterminated
+    /// one-character string or backtick string at EOF — were fixed alongside;
+    /// their repros now live in the lexer's
+    /// `lone_quote_at_eof_is_diagnostic_not_panic` test.)
+    ///
+    /// Each remaining input must currently panic with the known slice error;
+    /// once dsc#70 is fixed, this test starts failing — fold its corpus into
     /// `malformed_input_never_panics_and_diagnostics_are_positioned` and
     /// delete it.
     #[test]
@@ -2143,10 +2146,6 @@ fn load() string {
             &b"\xf0\x9f\x8e"[..],              // truncated emoji
         ] {
             known.push(String::from_utf8_lossy(bytes).into_owned());
-        }
-        // dsc#71: unterminated one-character string/backtick at EOF.
-        for source in ["\"", "'", "`", "const x = '", "const x = `"] {
-            known.push(source.to_string());
         }
 
         for source in &known {

@@ -1,0 +1,5 @@
+{
+  "title": "Struct literal syntax inside an unsafe body emits a factory call",
+  "stage": "run",
+  "notes": "dsc#58: `User { ... }` inside unsafe raw JavaScript is rewritten to the factory call `User({ ... })`; arrow bodies, direct expressions, and statement returns all execute."
+}

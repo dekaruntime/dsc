@@ -1,0 +1,22 @@
+import { echo } from "io"
+struct User {
+  name: string;
+}
+const direct = unsafe<User> { User { name: "Ada" } }
+echo(match (direct) {
+  Ok(v) => v.name,
+  Err(e) => "err",
+})
+const arrow = unsafe { () => User { name: "Bob" } }
+const called = match (arrow) {
+  Ok(v) => v(),
+  Err(e) => User { name: "err" },
+}
+echo(called.name)
+const stmt = unsafe<User> { return User {
+  name: "Cid"
+} }
+echo(match (stmt) {
+  Ok(v) => v.name,
+  Err(e) => "err",
+})

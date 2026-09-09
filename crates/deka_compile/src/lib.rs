@@ -1337,6 +1337,100 @@ fn load() string {
         );
     }
 
+    /// dsc#58: a struct literal written inside an `unsafe` body is raw
+    /// JavaScript text, and `User { ... }` is a syntax error in JavaScript
+    /// expression position — arrow bodies in particular took the whole
+    /// emitted module down with them. The emitter rewrites the known-struct
+    /// spelling to the factory call the syntax denotes.
+    #[test]
+    fn unsafe_struct_literal_rewrites_to_factory_call() {
+        let source = r#"
+struct User { name: string }
+const direct = unsafe { User { name: "Ada" } }
+const arrow = unsafe { () => User { name: "Bob" } }
+"#;
+        let result = compile_to_js(source, "app/unsafe.ds").expect("compile should succeed");
+        assert!(
+            result.js.contains("User({ name: \"Ada\" })"),
+            "direct struct literal must become a factory call:\n{}",
+            result.js
+        );
+        assert!(
+            result.js.contains("() => User({ name: \"Bob\" })"),
+            "arrow-body struct literal must become a factory call:\n{}",
+            result.js
+        );
+    }
+
+    /// dsc#58: the rewrite must not touch text where `Identifier {` is
+    /// already valid JavaScript — class declarations, strings, templates.
+    #[test]
+    fn unsafe_rewrite_preserves_valid_js_named_like_structs() {
+        let source = "struct User { name: string }\n\
+                      const c = unsafe { class User { constructor() { this.n = 1 } } ; 5 }\n\
+                      const s = unsafe { \"User { not: code }\" }";
+        let result = compile_to_js(source, "app/unsafe.ds").expect("compile should succeed");
+        assert!(
+            result.js.contains("class User {"),
+            "class declaration must pass through verbatim:\n{}",
+            result.js
+        );
+        assert!(
+            !result.js.contains("class User({"),
+            "class declaration must not be rewritten:\n{}",
+            result.js
+        );
+        assert!(
+            result.js.contains("\"User { not: code }\""),
+            "string literal must pass through verbatim:\n{}",
+            result.js
+        );
+    }
+
+    /// dsc#51: `import { User as Person }` binds the union type-pattern to
+    /// the local name, but the runtime factory was instantiated under the
+    /// declared name, so the brand tag reads "User". The emitted test must
+    /// compare against the declared brand — testing the local spelling
+    /// never matches and the match falls through to non-exhaustive.
+    #[test]
+    fn aliased_import_union_type_pattern_uses_declared_brand() {
+        use bumpalo::Bump;
+        use deka_syntax::{collect_module_exports, parse};
+        use std::collections::HashMap;
+        let arena = Bump::new();
+        let lib_src = "struct User { name: string }\n\
+                       fn (u User) greet() string { return \"hi \" + u.name }\n\
+                       export { User }";
+        let lib_parse = parse(lib_src, &arena);
+        assert!(lib_parse.errors.is_empty(), "{:?}", lib_parse.errors);
+        let lib_program = lib_parse.program.unwrap();
+        let lib_exports = collect_module_exports(&lib_program, &arena);
+
+        let main_src = "import { User as Person } from \"./lib.ds\";\n\
+                        fn describe(e: Person | number) string {\n\
+                          return match (e) {\n\
+                            Person(p) => p.greet(),\n\
+                            number(n) => string(n),\n\
+                          }\n\
+                        }";
+        let result = compile_to_js_with_imports(main_src, "main.ds", &arena, &{
+            let mut m: HashMap<&str, &deka_syntax::typeck::ModuleExports> = HashMap::new();
+            m.insert("./lib.ds", &lib_exports);
+            m
+        })
+        .expect("compile should succeed");
+        assert!(
+            result.js.contains("__deka_struct === \"User\""),
+            "brand test must use the declared name:\n{}",
+            result.js
+        );
+        assert!(
+            !result.js.contains("__deka_struct === \"Person\""),
+            "brand test must not use the local alias:\n{}",
+            result.js
+        );
+    }
+
     /// The PR B feature case of the baseline above: `super struct` declared
     /// in lib, `User.type()` called from the importing module. The descriptor
     /// const must be emitted where the call is recorded (the importer), the

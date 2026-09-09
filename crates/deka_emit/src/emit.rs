@@ -1189,6 +1189,11 @@ struct StructMeta {
     /// `Some(expr)` means auto-fill with the pre-emitted default value.
     optional: HashMap<String, Option<String>>,
     empty_embeds: HashSet<String>,
+    /// The brand the runtime factory carries: the declared name for local
+    /// structs, the exported name when an import renames the binding
+    /// (`import { User as Person }`). Brand comparisons (union type-patterns)
+    /// must test this, never the local spelling (dsc#51).
+    brand: String,
 }
 
 #[derive(Default, Clone)]
@@ -1891,6 +1896,7 @@ impl<'a> Emitter<'a> {
                     ..
                 } => {
                     let mut meta = StructMeta::default();
+                    meta.brand = name.to_string();
                     for field in fields.iter() {
                         meta.fields.insert(field.name.to_string());
                         if field.default_value.is_some()
@@ -2027,7 +2033,7 @@ impl<'a> Emitter<'a> {
         for exports in imports.values() {
             for (name, info) in exports.structs.iter() {
                 if !self.structs.contains_key(*name) {
-                    self.seed_struct_export(name, info);
+                    self.seed_struct_export(name, name, info);
                 }
             }
             for (name, info) in exports.enums.iter() {
@@ -2044,7 +2050,7 @@ impl<'a> Emitter<'a> {
         for (local, imported, exports) in renamed {
             if let Some(info) = exports.structs.get(imported) {
                 if !self.structs.contains_key(local) {
-                    self.seed_struct_export(local, info);
+                    self.seed_struct_export(local, imported, info);
                 }
             }
             if let Some(info) = exports.enums.get(imported) {
@@ -2061,8 +2067,9 @@ impl<'a> Emitter<'a> {
         self.compute_empty_embeds();
     }
 
-    fn seed_struct_export(&mut self, name: &str, info: &deka_syntax::StructInfo<'a>) {
+    fn seed_struct_export(&mut self, name: &str, brand: &str, info: &deka_syntax::StructInfo<'a>) {
         let mut meta = StructMeta::default();
+        meta.brand = brand.to_string();
         for field in info.fields.iter() {
             meta.fields.insert(field.name.to_string());
             if field.default_value.is_some() || field.optional || is_optional_type(&field.ty) {
@@ -3927,6 +3934,20 @@ impl<'a> Emitter<'a> {
             return Ok(());
         }
 
+        // A DekaScript struct literal spliced into the raw JavaScript does not
+        // parse (`User { ... }` is a syntax error in expression position), so
+        // rewrite known-struct spellings to the factory call the syntax
+        // denotes before choosing the wrapper shape (dsc#58).
+        let rewritten;
+        let trimmed = if self.structs.is_empty() || !trimmed.contains('{') {
+            trimmed
+        } else {
+            rewritten = rewrite_struct_literals_in_js(trimmed, 0, &|name| {
+                self.structs.contains_key(name)
+            });
+            rewritten.as_str()
+        };
+
         let is_async = js_has_top_level_await(trimmed);
         let is_statement_block = raw_js_looks_like_statements(trimmed);
 
@@ -4240,6 +4261,22 @@ impl<'a> Emitter<'a> {
         }
     }
 
+    /// The factory brand a local struct name resolves to. For an aliased
+    /// import the brand is the exported name the declaring module
+    /// instantiated the factory with, not the local spelling (dsc#51).
+    fn struct_brand(&self, name: &str) -> String {
+        self.structs
+            .get(name)
+            .map(|meta| {
+                if meta.brand.is_empty() {
+                    name.to_string()
+                } else {
+                    meta.brand.clone()
+                }
+            })
+            .unwrap_or_else(|| name.to_string())
+    }
+
     /// The runtime predicate for a union member type-pattern (rfd#42,
     /// deka#530). Structs read the `__deka_struct` brand tag directly — no
     /// factory, no helper, nothing to force (deka#551).
@@ -4259,7 +4296,11 @@ impl<'a> Emitter<'a> {
             deka_syntax::typeck::UnionMemberTest::Struct(name) => {
                 // Read the brand tag directly, the same way
                 // `__deka_type_of` does — no prelude helper needed (deka#551).
-                format!("{}?.__deka_struct === \"{}\"", scrutinee_var, name)
+                // The brand is the declared name, though: through a renamed
+                // import (`import { User as Person }`) the local spelling
+                // never matches the factory tag (dsc#51).
+                let brand = self.struct_brand(name);
+                format!("{}?.__deka_struct === \"{}\"", scrutinee_var, brand)
             }
             deka_syntax::typeck::UnionMemberTest::Enum(name) => {
                 format!("{}.__enum === \"{}\"", scrutinee_var, name)
@@ -4542,6 +4583,235 @@ enum RawJsTokenClass {
 /// old string searches were not safe: punctuation and keywords inside
 /// literals, comments, and regexes changed the emitted wrapper. Keeping this
 /// scanner lexical also means native and WASM compilers make the same choice.
+/// Rewrite DekaScript struct literals spliced into a raw `unsafe` body into
+/// factory calls. `User { name: "Ada" }` denotes the factory construction
+/// `User({ name: "Ada" })`, but the body is spliced verbatim, and
+/// `Identifier {` is a syntax error in JavaScript expression position —
+/// arrow bodies in particular (`() => User { ... }`) took the whole emitted
+/// module down with them (dsc#58).
+///
+/// Only names this module knows as structs are rewritten, and only where
+/// `Identifier {` cannot already be valid JavaScript: never after `.`
+/// (member access), never where a class name or `extends` clause could sit,
+/// and never across a line break (ASI may already split the two tokens).
+/// Everything else — strings, templates, comments, regexes, foreign names —
+/// passes through byte-for-byte.
+fn rewrite_struct_literals_in_js(
+    raw: &str,
+    depth: usize,
+    is_struct: &impl Fn(&str) -> bool,
+) -> String {
+    const MAX_DEPTH: usize = 64;
+    let bytes = raw.as_bytes();
+    let mut out = String::with_capacity(raw.len());
+    // Start of the not-yet-copied span.
+    let mut copy_from = 0usize;
+    let mut i = 0usize;
+    // Class of the previous significant token.
+    let mut prev_dot = false;
+    let mut prev_guard_word = false;
+    let mut previous_allows_regex = true;
+    let mut changed = false;
+
+    while i < bytes.len() {
+        let start = i;
+        match bytes[i] {
+            b' ' | b'\t' | b'\r' | b'\n' => i += 1,
+            b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'/' => {
+                i += 2;
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'*' => {
+                i += 2;
+                while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                    i += 1;
+                }
+                i = (i + 2).min(bytes.len());
+            }
+            b'\'' | b'"' => {
+                i = skip_js_quoted(raw, i);
+                previous_allows_regex = false;
+            }
+            b'`' => {
+                i = skip_js_template(raw, i);
+                previous_allows_regex = false;
+            }
+            b'/' if previous_allows_regex => {
+                i = skip_js_regex(raw, i);
+                previous_allows_regex = false;
+            }
+            b'0'..=b'9' => {
+                i = skip_js_number(bytes, i);
+                previous_allows_regex = false;
+            }
+            b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'$' => {
+                i += 1;
+                while i < bytes.len()
+                    && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' || bytes[i] == b'$')
+                {
+                    i += 1;
+                }
+                let word = &raw[start..i];
+                let (next, crossed_newline) = skip_js_ws_and_comments(raw, i);
+                let rewritable = is_struct(word)
+                    && !prev_dot
+                    && !prev_guard_word
+                    && !crossed_newline
+                    && next < bytes.len()
+                    && bytes[next] == b'{'
+                    && depth < MAX_DEPTH
+                    && js_matching_brace(raw, next).is_some();
+                if rewritable {
+                    let after = js_matching_brace(raw, next).unwrap();
+                    out.push_str(&raw[copy_from..start]);
+                    out.push_str(word);
+                    out.push_str("({");
+                    let inner = rewrite_struct_literals_in_js(&raw[next + 1..after - 1], depth + 1, is_struct);
+                    out.push_str(&inner);
+                    out.push_str("})");
+                    i = after;
+                    copy_from = after;
+                    changed = true;
+                    previous_allows_regex = false;
+                } else {
+                    previous_allows_regex = word_allows_regex_after(word);
+                }
+                prev_dot = false;
+                prev_guard_word = matches!(
+                    word,
+                    "class" | "extends" | "new" | "typeof" | "instanceof" | "in" | "of"
+                        | "delete" | "void" | "case"
+                );
+            }
+            punct => {
+                i += 1;
+                if i < bytes.len() && is_two_byte_js_punctuation(punct, bytes[i]) {
+                    i += 1;
+                }
+                prev_dot = punct == b'.';
+                prev_guard_word = false;
+                previous_allows_regex = punctuation_allows_regex_after(punct);
+            }
+        }
+    }
+    if changed {
+        out.push_str(&raw[copy_from..]);
+        out
+    } else {
+        raw.to_string()
+    }
+}
+
+/// Whitespace and comments starting at `i`; reports whether a line break was
+/// crossed (which lets JavaScript ASI split an identifier from a block).
+fn skip_js_ws_and_comments(raw: &str, mut i: usize) -> (usize, bool) {
+    let bytes = raw.as_bytes();
+    let mut saw_newline = false;
+    loop {
+        while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t' || bytes[i] == b'\r') {
+            i += 1;
+        }
+        if i < bytes.len() && bytes[i] == b'\n' {
+            saw_newline = true;
+            i += 1;
+            continue;
+        }
+        if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'/' {
+            i += 2;
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'*' {
+            let start = i;
+            i += 2;
+            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                i += 1;
+            }
+            i = (i + 2).min(bytes.len());
+            if raw[start..i].contains('\n') {
+                saw_newline = true;
+            }
+            continue;
+        }
+        return (i, saw_newline);
+    }
+}
+
+/// The position just past the `}` matching the `{` at `open`, skipping
+/// strings, templates, comments, and (best-effort) regex literals so braces
+/// inside them do not skew the count. `None` when unbalanced.
+fn js_matching_brace(raw: &str, open: usize) -> Option<usize> {
+    let bytes = raw.as_bytes();
+    let mut depth = 1usize;
+    let mut i = open + 1;
+    let mut previous_allows_regex = true;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' => {
+                depth += 1;
+                i += 1;
+                previous_allows_regex = true;
+            }
+            b'}' => {
+                depth -= 1;
+                i += 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+                previous_allows_regex = false;
+            }
+            b'\'' | b'"' => {
+                i = skip_js_quoted(raw, i);
+                previous_allows_regex = false;
+            }
+            b'`' => {
+                i = skip_js_template(raw, i);
+                previous_allows_regex = false;
+            }
+            b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'/' => {
+                i += 2;
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'*' => {
+                i += 2;
+                while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                    i += 1;
+                }
+                i = (i + 2).min(bytes.len());
+            }
+            b'/' if previous_allows_regex => {
+                i = skip_js_regex(raw, i);
+                previous_allows_regex = false;
+            }
+            b'0'..=b'9' => {
+                i = skip_js_number(bytes, i);
+                previous_allows_regex = false;
+            }
+            b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'$' => {
+                let word_start = i;
+                i += 1;
+                while i < bytes.len()
+                    && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' || bytes[i] == b'$')
+                {
+                    i += 1;
+                }
+                previous_allows_regex = word_allows_regex_after(&raw[word_start..i]);
+            }
+            punct => {
+                i += 1;
+                previous_allows_regex = punctuation_allows_regex_after(punct);
+            }
+        }
+    }
+    None
+}
+
 fn scan_raw_js(raw: &str) -> RawJsScan<'_> {
     let bytes = raw.as_bytes();
     let mut scan = RawJsScan::default();

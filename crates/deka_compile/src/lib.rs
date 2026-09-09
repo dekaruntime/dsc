@@ -1909,4 +1909,263 @@ fn load() string {
             err
         );
     }
+
+    // ------------------------------------------------------------------
+    // JSX text (deka#67, deka#68)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn compile_jsx_text_survives_byte_for_byte() {
+        // The dsc#67 done-when fixture: every character — Latin-1 accents,
+        // emoji, CJK, Greek, Cyrillic, Arabic, Ge'ez, combining marks, and
+        // every character the code lexer rejects (`' $ £ # @ ~ \``) — must
+        // survive byte-for-byte into the emitted JS string literal.
+        let source = r#"export fn P() {
+  return <section>
+    <h1>Café Yirgacheffe — 18,50 €</h1>
+    <p>Ethiopian የቡና ☕ — don't miss it: $18.50 / £15, #1 seller @ 100% arabica</p>
+    <p>日本語 · Ελληνικά · Русский · العربية</p>
+  </section>
+}
+"#;
+        let result = compile_to_js(source, "page.dsx").expect("compile should succeed");
+        for expected in [
+            "Café Yirgacheffe — 18,50 €",
+            "Ethiopian የቡና ☕ — don't miss it: $18.50 / £15, #1 seller @ 100% arabica",
+            "日本語 · Ελληνικά · Русский · العربية",
+        ] {
+            assert!(
+                result.js.contains(expected),
+                "emitted JS must contain {:?} verbatim, got:\n{}",
+                expected,
+                result.js
+            );
+        }
+        // Every non-ASCII character of the source must appear in the output.
+        for ch in source.chars().filter(|c| !c.is_ascii()) {
+            assert!(
+                result.js.contains(ch),
+                "emitted JS lost non-ASCII character {:?}\n{}",
+                ch,
+                result.js
+            );
+        }
+    }
+
+    /// Feeds exotic and malformed source through the full compile pipeline
+    /// (lexer -> parser -> typecheck -> emit). The contract under test: user
+    /// input never panics and never yields a diagnostic without a line and
+    /// column. A panic fails the test naturally; nothing catches here.
+    ///
+    /// Inputs that still hit PRE-EXISTING code-lexer panics (anything outside
+    /// the JSX-text paths fixed in deka#67/#68) live in
+    /// `known_pre_existing_lexer_panics_are_tracked` below instead; see
+    /// dekaruntime/dsc#70 and dekaruntime/dsc#71. Deeply nested input is
+    /// capped at 32 levels because the parser has no recursion limit yet
+    /// (dsc#72); a stack overflow aborts the process and cannot be asserted
+    /// in-process.
+    #[test]
+    fn malformed_input_never_panics_and_diagnostics_are_positioned() {
+        let mut corpus: Vec<String> = Vec::new();
+
+        // Every ASCII character rejected by deka#67 in every position: bare,
+        // in code, in strings, and in JSX text/attributes.
+        for c in ['$', '#', '@', '~', '`', '\'', '"', '\\'] {
+            for template in [
+                "{c}",
+                "const x = {c}",
+                "const x = \"{c}\"",
+                "fn f() {{ return {c} }}",
+                "export fn P() {{ return <p>{c}</p> }}",
+                "export fn P() {{ return <p a={c} /> }}",
+                "export fn P() {{ return <p>{c} {c} {c}</p> }}",
+            ] {
+                let mut source = template.replace("{c}", &c.to_string());
+                // A backtick or quote as the very last byte before EOF hits
+                // the pre-existing `pos - 1` slice underflow (dsc#71); keep
+                // at least one byte after it so the diagnostic path runs.
+                if matches!(c, '`' | '\'' | '"') && !source.contains("<p>") {
+                    source.push('x');
+                }
+                corpus.push(source);
+            }
+        }
+        // Multi-byte characters in the positions this fix covers: JSX text,
+        // attribute values, and string literals. Bare/in-code positions still
+        // hit the pre-existing char-boundary panics (dsc#70).
+        for c in ['€', '£', '©', '日', '\u{FFFD}'] {
+            for template in [
+                "const x = \"{c}\"",
+                "export fn P() {{ return <p>{c}</p> }}",
+                "export fn P() {{ return <p a=\"{c}\" /> }}",
+                "export fn P() {{ return <p>{c} {c} {c}</p> }}",
+            ] {
+                corpus.push(template.replace("{c}", &c.to_string()));
+            }
+        }
+
+        // Deeply nested, unclosed constructs.
+        for open_close in [
+            ("<div>", ""),
+            ("<div><span>", ""),
+            ("<div>", "</span>"),
+            ("[", "]"),
+            ("{", "}"),
+            ("(", ")"),
+            ("/*", "*/"),
+            ("unsafe {", "}"),
+        ] {
+            for depth in [1usize, 8, 32] {
+                let mut s = String::new();
+                for _ in 0..depth {
+                    s.push_str(open_close.0);
+                }
+                for _ in 0..depth {
+                    s.push_str(open_close.1);
+                }
+                corpus.push(s);
+            }
+            // Fully unclosed variants (32 deep; deeper hits dsc#72).
+            let mut s = String::new();
+            for _ in 0..32 {
+                s.push_str(open_close.0);
+            }
+            corpus.push(s);
+        }
+        // Balanced quote/backtick nesting; unterminated-at-EOF variants are
+        // in dsc#71's bucket below.
+        for quote in ["\"", "'", "`"] {
+            for depth in [1usize, 8, 32] {
+                let mut s = String::new();
+                for _ in 0..depth {
+                    s.push_str(quote);
+                }
+                for _ in 0..depth {
+                    s.push_str(quote);
+                }
+                corpus.push(s);
+            }
+        }
+
+        // Deterministic pseudo-random ASCII soup (xorshift64) in both flat
+        // and code-shaped forms; non-ASCII soup is in dsc#70's bucket below.
+        let mut state = 0x243F6A8885A308D3u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for _ in 0..64 {
+            let len = (next() % 200) as usize;
+            let s: String = (0..len)
+                .map(|_| (32 + (next() % 95)) as u8 as char)
+                .collect();
+            corpus.push(s);
+        }
+
+        // Structured soup: random slivers of plausible-looking code.
+        let fragments = [
+            "export fn", "return", "<div>", "</div>", "{c}", "\"", "'",
+            "<p>", "$", "const x =", "match (x) {", "=>", "}}}", "{{{",
+            "unsafe {", "`x", "\n", "fn f(", ": number", "import", "from",
+            ".dsx", "caf", "1_000",
+        ];
+        for _ in 0..200 {
+            let len = (next() % 12) as usize;
+            let mut s = String::new();
+            for _ in 0..len {
+                s.push_str(fragments[(next() as usize) % fragments.len()]);
+                s.push(' ');
+            }
+            corpus.push(s);
+        }
+
+        for source in &corpus {
+            for path in ["fuzzer.ds", "fuzzer.dsx"] {
+                match compile_to_js(source, path) {
+                    Ok(_) => {}
+                    Err(diags) => {
+                        assert!(
+                            !diags.is_empty(),
+                            "compile failed without diagnostics for {:?} ({})",
+                            source,
+                            path
+                        );
+                        for d in &diags {
+                            assert!(
+                                d.line >= 1 && d.column >= 1,
+                                "diagnostic without line/column for {:?} ({}): {:?}",
+                                source,
+                                path,
+                                d
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Tripwire for the PRE-EXISTING code-lexer panics that the dsc#67
+    /// no-panic harness surfaced and that are intentionally NOT fixed in that
+    /// PR:
+    ///
+    /// - dsc#70: byte-wise slicing of multi-byte characters outside JSX text
+    ///   (`error()` unexpected-character path, `read_identifier`), including
+    ///   BOM-prefixed files, lossy-decoded truncated UTF-8, and non-ASCII
+    ///   identifiers.
+    /// - dsc#71: `pos - 1` slice underflow for an unterminated
+    ///   one-character string or backtick string at EOF.
+    ///
+    /// Each input must currently panic with the known slice error; once the
+    /// issues are fixed, this test starts failing — fold its corpus into
+    /// `malformed_input_never_panics_and_diagnostics_are_positioned` and
+    /// delete it.
+    #[test]
+    fn known_pre_existing_lexer_panics_are_tracked() {
+        let mut known: Vec<String> = Vec::new();
+        // dsc#70: non-ASCII outside JSX text.
+        for template in [
+            "const x = {c}",
+            "{c}",
+            "const {c}foo = 1",
+            "const x = \"{c}\" + caf\u{FFFD}",
+        ] {
+            for c in ['©', '€', '\u{FEFF}', '\u{FFFD}', 'é'] {
+                known.push(template.replace("{c}", &c.to_string()));
+            }
+        }
+        for bytes in [
+            &b"caf\xc3"[..],                   // truncated 2-byte char
+            &b"\xed\xa0\x80"[..],              // UTF-8-encoded lone surrogate
+            &b"\xef\xbb\xbfconst x = 1"[..],   // BOM-prefixed file
+            &b"\xf0\x9f\x8e"[..],              // truncated emoji
+        ] {
+            known.push(String::from_utf8_lossy(bytes).into_owned());
+        }
+        // dsc#71: unterminated one-character string/backtick at EOF.
+        for source in ["\"", "'", "`", "const x = '", "const x = `"] {
+            known.push(source.to_string());
+        }
+
+        for source in &known {
+            let result = std::panic::catch_unwind(|| compile_to_js(source, "known.ds"));
+            let payload = result.err().unwrap_or_else(|| {
+                panic!(
+                    "known pre-existing panic disappeared for {source:?} — the input is fixed; \
+                     fold it into malformed_input_never_panics_and_diagnostics_are_positioned"
+                )
+            });
+            let msg = payload
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| payload.downcast_ref::<&str>().copied())
+                .unwrap_or("<non-string panic>");
+            assert!(
+                msg.contains("char boundary") || msg.contains("byte range"),
+                "unexpected panic for {source:?}: {msg}",
+            );
+        }
+    }
 }

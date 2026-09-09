@@ -1466,6 +1466,84 @@ mod tests {
     }
 
     #[test]
+    fn parse_jsx_text_is_verbatim_multi_script() {
+        // deka#67 / deka#68: JSX text is raw text, not code. Every script,
+        // emoji, combining mark, and code-lexing trigger character must
+        // survive byte-for-byte in the JsxText child.
+        let text = "Café Yirgacheffe — 18,50 € · don't miss it: $18.50 / £15, #1 @ 100% `tick` ~ \\
+日本語 · Ελληνικά · Русский · العربية · የቡና ☕ 🎉 café";
+        let source = format!("const el = <p>{text}</p>;");
+        let arena = Bump::new();
+        let result = parse(&source, &arena);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[0] {
+            Stmt::Const { value, .. } => match value {
+                Expr::JsxElement { element, .. } => {
+                    assert_eq!(element.children.len(), 1);
+                    match &element.children[0] {
+                        Expr::JsxText { value, .. } => assert_eq!(value.to_string(), text),
+                        other => panic!("expected JsxText, got {:?}", other),
+                    }
+                }
+                other => panic!("expected jsx element, got {:?}", other),
+            },
+            other => panic!("expected const declaration, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_jsx_text_never_breaks_into_code_tokens() {
+        // Characters that are string openers or lex errors in code must not
+        // split a JSX text run (deka#67).
+        let arena = Bump::new();
+        let result = parse(
+            "const el = <p>it's a `test` of $ & % # @ ~ \"quotes\"</p>;",
+            &arena,
+        );
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[0] {
+            Stmt::Const { value, .. } => match value {
+                Expr::JsxElement { element, .. } => {
+                    assert_eq!(
+                        element.children.len(),
+                        1,
+                        "text must stay a single verbatim child"
+                    );
+                }
+                other => panic!("expected jsx element, got {:?}", other),
+            },
+            other => panic!("expected const declaration, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_jsx_unterminated_reports_line_and_column() {
+        // Malformed JSX must produce positioned diagnostics, never panic.
+        for source in [
+            "const el = <div>\n  text\n",
+            "const el = <div>{x</div>;",
+            "const el = <div",
+        ] {
+            let arena = Bump::new();
+            let result = parse(source, &arena);
+            assert!(
+                !result.errors.is_empty(),
+                "expected diagnostics for {:?}",
+                source
+            );
+            for e in &result.errors {
+                assert!(
+                    e.line >= 1 && e.column >= 1,
+                    "diagnostic must carry a line and column: {:?}",
+                    e
+                );
+            }
+        }
+    }
+
+    #[test]
     fn parse_template_literal() {
         let arena = Bump::new();
         let result = parse("const s = `hello ${x}`;", &arena);

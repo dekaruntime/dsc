@@ -104,6 +104,10 @@ pub enum TokenKind {
     LtJsx,
     GtJsx,
     SlashJsx,
+    /// A verbatim run of JSX text between structural tokens. Emitted while the
+    /// lexer is inside JSX children; the text is consumed raw, so its contents
+    /// are never tokenised as code (deka#67, deka#68).
+    JsxText,
 
     // Special
     Newline,
@@ -119,6 +123,25 @@ pub struct Token<'a> {
     pub span: Span,
 }
 
+/// Position inside an in-progress JSX construct, tracked by the lexer so that
+/// element children are consumed as verbatim text rather than tokenised.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum JsxFrame {
+    /// Inside `<div ...` — waiting for `>` (children follow) or `/>` (pop).
+    OpenTag,
+    /// The `/` of `/>` has been seen — the next `>` self-closes the tag and
+    /// returns to the parent context without entering text mode.
+    SelfClose,
+    /// Inside `</div` — the next `>` closes the element and pops its
+    /// children (`Text`) frame as well.
+    CloseTag,
+    /// Inside a `{ ... }` group nested in JSX (attribute value, spread, or
+    /// expression child). `}` at depth 1 pops back to the surrounding frame.
+    Braces(u32),
+    /// Directly inside an element's children: raw text until `<` or `{`.
+    Text,
+}
+
 pub struct Lexer<'a> {
     source: &'a str,
     bytes: &'a [u8],
@@ -126,6 +149,15 @@ pub struct Lexer<'a> {
     line: usize,
     column: usize,
     diagnostics: Vec<Diagnostic>,
+    /// Stack of in-progress JSX constructs. While any frame is on the stack,
+    /// `<`, `>`, `{`, `}` and `/` take on JSX structural roles; element
+    /// children are consumed verbatim as `JsxText` tokens instead of being
+    /// tokenised as code (deka#67, deka#68).
+    jsx_stack: Vec<JsxFrame>,
+    /// Kind of the most recent emitted token other than a newline. Used to
+    /// decide whether a `<` opens a JSX tag (prefix position) or is a
+    /// comparison operator / type-argument list (infix position).
+    prev_significant: Option<TokenKind>,
     /// Set to true immediately after lexing the `unsafe` keyword so the next
     /// non-whitespace token can switch the lexer into raw-JS mode for the
     /// following `{ ... }` block.
@@ -156,6 +188,8 @@ impl<'a> Lexer<'a> {
             raw_depth: 0,
             raw_start_pos: Pos { line: 1, column: 1 },
             raw_start_byte: 0,
+            jsx_stack: Vec::new(),
+            prev_significant: None,
         }
     }
 
@@ -230,6 +264,83 @@ impl<'a> Lexer<'a> {
             } else {
                 break;
             }
+        }
+    }
+
+    /// Consume a run of JSX text verbatim, up to the next `<` or `{` (or EOF).
+    /// Iterates `char_indices` so multi-byte characters are never split at a
+    /// byte offset that is not a char boundary (deka#68).
+    fn read_jsx_text(&mut self) -> Token<'a> {
+        let start = self.pos_at();
+        let start_byte = self.pos;
+        let rest = &self.source[self.pos..];
+        let mut end = rest.len();
+        for (i, ch) in rest.char_indices() {
+            if ch == '<' || ch == '{' {
+                end = i;
+                break;
+            }
+        }
+        let text = &rest[..end];
+        for ch in text.chars() {
+            self.pos += ch.len_utf8();
+            if ch == '\n' {
+                self.line += 1;
+                self.column = 1;
+            } else {
+                self.column += 1;
+            }
+        }
+        Token {
+            kind: TokenKind::JsxText,
+            text,
+            span: self.span_from(start, start_byte),
+        }
+    }
+
+    /// True if the previous significant token can end an expression, in which
+    /// case a following `<` is a comparison (or type arguments), not a JSX tag.
+    fn prev_ends_expression(&self) -> bool {
+        matches!(
+            self.prev_significant,
+            Some(
+                TokenKind::Identifier
+                    | TokenKind::Number
+                    | TokenKind::BigInt
+                    | TokenKind::String
+                    | TokenKind::BacktickString
+                    | TokenKind::True
+                    | TokenKind::False
+                    | TokenKind::None
+                    | TokenKind::RParen
+                    | TokenKind::RBracket
+                    | TokenKind::RBrace
+                    | TokenKind::Gt
+                    | TokenKind::Shr
+                    | TokenKind::RawJs
+            )
+        )
+    }
+
+    /// Bookkeeping for a `>` that closes a JSX tag: an open tag starts its
+    /// children (raw text); a closing tag pops the element's children frame
+    /// too; a self-closing tag returns to the parent context untouched.
+    fn close_jsx_tag(&mut self) {
+        match self.jsx_stack.last() {
+            Some(JsxFrame::OpenTag) => {
+                self.jsx_stack.pop();
+                self.jsx_stack.push(JsxFrame::Text);
+            }
+            Some(JsxFrame::SelfClose) => {
+                self.jsx_stack.pop();
+            }
+            Some(JsxFrame::CloseTag) => {
+                self.jsx_stack.pop();
+                if matches!(self.jsx_stack.last(), Some(JsxFrame::Text)) {
+                    self.jsx_stack.pop();
+                }
+            }
+            _ => {}
         }
     }
 
@@ -787,8 +898,53 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn next_token(&mut self) -> Token<'a> {
+        let token = self.next_token_inner();
+        // Newlines are insignificant for the JSX `<` heuristic; everything
+        // else updates the previous-significant-token marker.
+        if token.kind != TokenKind::Newline {
+            self.prev_significant = Some(token.kind);
+        }
+        token
+    }
+
+    fn next_token_inner(&mut self) -> Token<'a> {
         if self.raw_depth > 0 {
             return self.read_raw_js_body();
+        }
+        // JSX children are raw text: consume everything verbatim up to the
+        // next `<` or `{` instead of tokenising it as code (deka#67).
+        if matches!(self.jsx_stack.last(), Some(JsxFrame::Text)) {
+            match self.current() {
+                Some('<') => {
+                    let start = self.pos_at();
+                    let start_byte = self.pos;
+                    self.advance();
+                    let frame = if self.current() == Some('/') {
+                        JsxFrame::CloseTag
+                    } else {
+                        JsxFrame::OpenTag
+                    };
+                    self.jsx_stack.push(frame);
+                    return Token {
+                        kind: TokenKind::Lt,
+                        text: "<",
+                        span: self.span_from(start, start_byte),
+                    };
+                }
+                Some('{') => {
+                    let start = self.pos_at();
+                    let start_byte = self.pos;
+                    self.advance();
+                    self.jsx_stack.push(JsxFrame::Braces(1));
+                    return Token {
+                        kind: TokenKind::LBrace,
+                        text: "{",
+                        span: self.span_from(start, start_byte),
+                    };
+                }
+                Some(_) => return self.read_jsx_text(),
+                None => {} // EOF: fall through to the normal EOF token
+            }
         }
         self.skip_whitespace();
         if self.unsafe_expect_brace && self.pos >= self.unsafe_type_end {
@@ -868,6 +1024,11 @@ impl<'a> Lexer<'a> {
             }
             '{' => {
                 self.advance();
+                match self.jsx_stack.last_mut() {
+                    Some(JsxFrame::Braces(depth)) => *depth += 1,
+                    Some(_) => self.jsx_stack.push(JsxFrame::Braces(1)),
+                    None => {}
+                }
                 Token {
                     kind: TokenKind::LBrace,
                     text: "{",
@@ -876,6 +1037,13 @@ impl<'a> Lexer<'a> {
             }
             '}' => {
                 self.advance();
+                if let Some(JsxFrame::Braces(depth)) = self.jsx_stack.last_mut() {
+                    if *depth == 1 {
+                        self.jsx_stack.pop();
+                    } else {
+                        *depth -= 1;
+                    }
+                }
                 Token {
                     kind: TokenKind::RBrace,
                     text: "}",
@@ -1020,6 +1188,18 @@ impl<'a> Lexer<'a> {
                             span: self.span_from(start, start_byte),
                         }
                     }
+                    Some('>') if matches!(self.jsx_stack.last(), Some(JsxFrame::OpenTag)) => {
+                        // `/>` self-closes the open tag. Swap the frame for a
+                        // SelfClose so the following `>` pops it without
+                        // entering text mode.
+                        self.jsx_stack.pop();
+                        self.jsx_stack.push(JsxFrame::SelfClose);
+                        Token {
+                            kind: TokenKind::Slash,
+                            text: "/",
+                            span: self.span_from(start, start_byte),
+                        }
+                    }
                     _ => Token {
                         kind: TokenKind::Slash,
                         text: "/",
@@ -1096,6 +1276,18 @@ impl<'a> Lexer<'a> {
             }
             '<' => {
                 self.advance();
+                if self.current() != Some('=')
+                    && self.current() != Some('<')
+                    && self.current() != Some('/')
+                    && !self.unsafe_expect_brace
+                    && !self.prev_ends_expression()
+                {
+                    // `<` in prefix position opens a JSX tag. The parser reads
+                    // every prefix `<` as JSX, so the lexer tracks the
+                    // element's structure; comparison `<` and `f<T>(...)` type
+                    // arguments appear only after expression-ending tokens.
+                    self.jsx_stack.push(JsxFrame::OpenTag);
+                }
                 if self.current() == Some('=') {
                     self.advance();
                     Token {
@@ -1135,6 +1327,9 @@ impl<'a> Lexer<'a> {
                         span: self.span_from(start, start_byte),
                     }
                 } else {
+                    if self.jsx_stack.last().is_some() {
+                        self.close_jsx_tag();
+                    }
                     Token {
                         kind: TokenKind::Gt,
                         text: ">",
@@ -1323,4 +1518,171 @@ mod tests {
             lexer.diagnostics()
         );
     }
+
+    // ------------------------------------------------------------------
+    // JSX text (deka#67, deka#68)
+    // ------------------------------------------------------------------
+
+    /// Collect the full token stream of `source`.
+    fn lex_all(source: &str) -> (Vec<TokenKind>, Vec<String>, Vec<Diagnostic>) {
+        let mut lexer = Lexer::new(source);
+        let mut kinds = Vec::new();
+        let mut texts = Vec::new();
+        loop {
+            let tok = lexer.next_token();
+            let is_eof = tok.kind == TokenKind::Eof;
+            kinds.push(tok.kind);
+            texts.push(tok.text.to_string());
+            if is_eof {
+                break;
+            }
+        }
+        (kinds, texts, lexer.diagnostics().to_vec())
+    }
+
+    #[test]
+    fn jsx_text_is_verbatim_and_never_tokenised() {
+        // Every character the code lexer rejects or mis-reads in JSX text
+        // must survive verbatim in a single JsxText token (deka#67).
+        let text = "Café — don't: $18.50 / £15 #1 @ 100% `tick` ~ done";
+        let source = format!("<p>{text}</p>");
+        let (kinds, texts, diags) = lex_all(&source);
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Lt,
+                TokenKind::Identifier,
+                TokenKind::Gt,
+                TokenKind::JsxText,
+                TokenKind::Lt,
+                TokenKind::Slash,
+                TokenKind::Identifier,
+                TokenKind::Gt,
+                TokenKind::Eof,
+            ]
+        );
+        assert_eq!(texts[3], text);
+    }
+
+    #[test]
+    fn jsx_text_multi_script_and_emoji_survive_byte_for_byte() {
+        // deka#68: byte-offset tokenisation panicked inside multi-byte
+        // characters. Combining marks (e + U+0301) and emoji included.
+        let text = "日本語 · Ελληνικά · Русский · العربية · የቡና ☕ 🎉 cafe\u{301}";
+        let source = format!("<h1>{text}</h1>");
+        let (kinds, texts, diags) = lex_all(&source);
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        assert_eq!(kinds[3], TokenKind::JsxText);
+        assert_eq!(texts[3], text);
+        // The text token is sliced on char boundaries even when followed
+        // immediately by a structural character.
+        assert_eq!(texts[4], "<");
+    }
+
+    #[test]
+    fn jsx_nested_elements_and_expression_children() {
+        let source = "<div><br/><span>a {x} b</span> tail</div>";
+        let (kinds, texts, diags) = lex_all(source);
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let texts: Vec<&str> = texts.iter().map(String::as_str).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Lt,
+                TokenKind::Identifier, // div
+                TokenKind::Gt,
+                TokenKind::Lt,
+                TokenKind::Identifier, // br
+                TokenKind::Slash,
+                TokenKind::Gt,
+                TokenKind::Lt,
+                TokenKind::Identifier, // span
+                TokenKind::Gt,
+                TokenKind::JsxText, // "a "
+                TokenKind::LBrace,
+                TokenKind::Identifier, // x
+                TokenKind::RBrace,
+                TokenKind::JsxText, // " b"
+                TokenKind::Lt,
+                TokenKind::Slash,
+                TokenKind::Identifier, // span
+                TokenKind::Gt,
+                TokenKind::JsxText, // " tail"
+                TokenKind::Lt,
+                TokenKind::Slash,
+                TokenKind::Identifier, // div
+                TokenKind::Gt,
+                TokenKind::Eof,
+            ]
+        );
+        assert_eq!(texts[10], "a ");
+        assert_eq!(texts[14], " b");
+        assert_eq!(texts[19], " tail");
+    }
+
+    #[test]
+    fn jsx_fragment_frames_balance() {
+        let source = "<><span>a</span><span>b</span></>";
+        let (kinds, _, diags) = lex_all(source);
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        assert_eq!(kinds.first(), Some(&TokenKind::Lt));
+        assert_eq!(kinds.last(), Some(&TokenKind::Eof));
+        // The last structural token is the fragment-closing `>`.
+        assert_eq!(kinds[kinds.len() - 2], TokenKind::Gt);
+    }
+
+    #[test]
+    fn comparison_and_type_args_still_lex_as_code() {
+        // `<` after an expression-ending token is a comparison, not JSX.
+        let (kinds, _, diags) = lex_all("a < b > c");
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Identifier,
+                TokenKind::Lt,
+                TokenKind::Identifier,
+                TokenKind::Gt,
+                TokenKind::Identifier,
+                TokenKind::Eof,
+            ]
+        );
+        // `f<T>(x)` type arguments are not a JSX tag either.
+        let (kinds, _, diags) = lex_all("f<T>(x)");
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Identifier,
+                TokenKind::Lt,
+                TokenKind::Identifier,
+                TokenKind::Gt,
+                TokenKind::LParen,
+                TokenKind::Identifier,
+                TokenKind::RParen,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn unterminated_jsx_reports_diagnostics_without_panic() {
+        for source in [
+            "<div>",
+            "<div>text",
+            "<div>{x",
+            "<div attr=",
+            "<div attr={x",
+            "<div><span></div>",
+            "<div",
+            "<",
+        ] {
+            let (_, _, diags) = lex_all(source);
+            for d in &diags {
+                assert!(d.line >= 1 && d.column >= 1, "bad diagnostic: {d:?}");
+            }
+        }
+    }
 }
+

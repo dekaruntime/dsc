@@ -1318,12 +1318,20 @@ impl<'a> Checker<'a> {
         let saved_in_function = self.in_function;
         let saved_in_async = self.in_async_function;
         let saved_return_type = self.return_type.clone();
+        let is_interactive_component = self.interactive_components.contains(name);
         self.in_function = true;
         self.in_async_function = is_async;
         self.return_type = body_expected_ret.clone();
+        if is_interactive_component {
+            self.interactive_component_depth += 1;
+        }
 
         for stmt in body {
             self.check_statement(stmt);
+        }
+
+        if is_interactive_component {
+            self.interactive_component_depth -= 1;
         }
 
         // A function that declares a value-producing return type must actually

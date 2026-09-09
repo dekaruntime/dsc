@@ -14,4 +14,4 @@ fn handleClick() void {
   echo("clicked")
 }
 
-<Button label="Click me" onClick={handleClick} />
+<Button label="Click me" onClick={handleClick} client:load />

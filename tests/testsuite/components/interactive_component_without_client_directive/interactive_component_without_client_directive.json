@@ -1,0 +1,5 @@
+{
+  "title": "Interactive components require a client directive at their tag",
+  "stage": "typecheck",
+  "expectedDiagnosticContains": "uses interactive APIs and will not render"
+}

@@ -1189,6 +1189,11 @@ struct StructMeta {
     /// `Some(expr)` means auto-fill with the pre-emitted default value.
     optional: HashMap<String, Option<String>>,
     empty_embeds: HashSet<String>,
+    /// The brand the runtime factory carries: the declared name for local
+    /// structs, the exported name when an import renames the binding
+    /// (`import { User as Person }`). Brand comparisons (union type-patterns)
+    /// must test this, never the local spelling (dsc#51).
+    brand: String,
 }
 
 #[derive(Default, Clone)]
@@ -1891,6 +1896,7 @@ impl<'a> Emitter<'a> {
                     ..
                 } => {
                     let mut meta = StructMeta::default();
+                    meta.brand = name.to_string();
                     for field in fields.iter() {
                         meta.fields.insert(field.name.to_string());
                         if field.default_value.is_some()
@@ -2027,7 +2033,7 @@ impl<'a> Emitter<'a> {
         for exports in imports.values() {
             for (name, info) in exports.structs.iter() {
                 if !self.structs.contains_key(*name) {
-                    self.seed_struct_export(name, info);
+                    self.seed_struct_export(name, name, info);
                 }
             }
             for (name, info) in exports.enums.iter() {
@@ -2044,7 +2050,7 @@ impl<'a> Emitter<'a> {
         for (local, imported, exports) in renamed {
             if let Some(info) = exports.structs.get(imported) {
                 if !self.structs.contains_key(local) {
-                    self.seed_struct_export(local, info);
+                    self.seed_struct_export(local, imported, info);
                 }
             }
             if let Some(info) = exports.enums.get(imported) {
@@ -2061,8 +2067,9 @@ impl<'a> Emitter<'a> {
         self.compute_empty_embeds();
     }
 
-    fn seed_struct_export(&mut self, name: &str, info: &deka_syntax::StructInfo<'a>) {
+    fn seed_struct_export(&mut self, name: &str, brand: &str, info: &deka_syntax::StructInfo<'a>) {
         let mut meta = StructMeta::default();
+        meta.brand = brand.to_string();
         for field in info.fields.iter() {
             meta.fields.insert(field.name.to_string());
             if field.default_value.is_some() || field.optional || is_optional_type(&field.ty) {
@@ -4254,6 +4261,22 @@ impl<'a> Emitter<'a> {
         }
     }
 
+    /// The factory brand a local struct name resolves to. For an aliased
+    /// import the brand is the exported name the declaring module
+    /// instantiated the factory with, not the local spelling (dsc#51).
+    fn struct_brand(&self, name: &str) -> String {
+        self.structs
+            .get(name)
+            .map(|meta| {
+                if meta.brand.is_empty() {
+                    name.to_string()
+                } else {
+                    meta.brand.clone()
+                }
+            })
+            .unwrap_or_else(|| name.to_string())
+    }
+
     /// The runtime predicate for a union member type-pattern (rfd#42,
     /// deka#530). Structs read the `__deka_struct` brand tag directly — no
     /// factory, no helper, nothing to force (deka#551).
@@ -4273,7 +4296,11 @@ impl<'a> Emitter<'a> {
             deka_syntax::typeck::UnionMemberTest::Struct(name) => {
                 // Read the brand tag directly, the same way
                 // `__deka_type_of` does — no prelude helper needed (deka#551).
-                format!("{}?.__deka_struct === \"{}\"", scrutinee_var, name)
+                // The brand is the declared name, though: through a renamed
+                // import (`import { User as Person }`) the local spelling
+                // never matches the factory tag (dsc#51).
+                let brand = self.struct_brand(name);
+                format!("{}?.__deka_struct === \"{}\"", scrutinee_var, brand)
             }
             deka_syntax::typeck::UnionMemberTest::Enum(name) => {
                 format!("{}.__enum === \"{}\"", scrutinee_var, name)

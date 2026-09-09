@@ -1,0 +1,14 @@
+import { echo } from "io"
+
+type Email string
+const xs = [1, 2, 3]
+let total = 0
+for (const x of xs) {
+  if (x > 1) {
+    total = total + x
+  } else {
+    total = total + 0
+  }
+}
+const input = <input type="text" id="email" />
+echo(string(total))

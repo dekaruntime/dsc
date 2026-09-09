@@ -1605,6 +1605,57 @@ fn load() string {
     }
 
     #[test]
+    fn compile_jsx_keyword_attributes() {
+        // dsc#77: keyword attribute names must survive into the emitted props
+        // object — `type`/`for` are the two most common form attributes, and
+        // the accessible label/input association is `for` + `id`.
+        let result = compile_to_js(
+            "const el = <form><label for=\"email\">Email</label><input type=\"text\" id=\"email\" /><button type=\"submit\">Send</button></form>;",
+            "test.dsx",
+        )
+        .expect("compile should succeed");
+        assert!(
+            result.js.contains("\"for\": \"email\""),
+            "got: {}",
+            result.js
+        );
+        assert!(
+            result.js.contains("\"type\": \"text\""),
+            "got: {}",
+            result.js
+        );
+        assert!(
+            result.js.contains("\"id\": \"email\""),
+            "got: {}",
+            result.js
+        );
+        assert!(
+            result.js.contains("\"type\": \"submit\""),
+            "got: {}",
+            result.js
+        );
+    }
+
+    #[test]
+    fn compile_keywords_untouched_by_jsx_attribute_names() {
+        // dsc#77 regression pin: outside attribute-name position, `for`,
+        // `if`/`else`, and `type` keep their keyword meaning in the emitted
+        // JS.
+        let result = compile_to_js(
+            "type Email string; const xs = [1]; let total = 0; for (const x of xs) { if (x > 0) { total = total + x } else { total = total } }",
+            "test.ds",
+        )
+        .expect("compile should succeed");
+        assert!(
+            result.js.contains("for (const x of xs)"),
+            "got: {}",
+            result.js
+        );
+        assert!(result.js.contains("if (x > 0)"), "got: {}", result.js);
+        assert!(result.js.contains("else"), "got: {}", result.js);
+    }
+
+    #[test]
     fn compile_form_import_from_ui_form() {
         let result = compile_to_js(
             "import { Form } from \"ui/form\";\nconst el = <Form action=\"/api/hello\" method=\"post\">Send</Form>;",

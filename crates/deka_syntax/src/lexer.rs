@@ -144,7 +144,9 @@ enum JsxFrame {
 
 pub struct Lexer<'a> {
     source: &'a str,
-    bytes: &'a [u8],
+    /// Byte offset into `source`. Invariant: `pos` always sits on a char
+    /// boundary, because every mutation goes through the char-aware
+    /// `advance()` (dekaruntime/dsc#70).
     pos: usize,
     line: usize,
     column: usize,
@@ -178,7 +180,6 @@ impl<'a> Lexer<'a> {
     pub fn new(source: &'a str) -> Self {
         Self {
             source,
-            bytes: source.as_bytes(),
             pos: 0,
             line: 1,
             column: 1,
@@ -197,17 +198,22 @@ impl<'a> Lexer<'a> {
         &self.diagnostics
     }
 
+    /// The `offset`-th character after `pos`, if any. Offsets are in
+    /// characters, not bytes: multi-byte input is never split (dsc#70).
     fn peek(&self, offset: usize) -> Option<char> {
-        self.bytes.get(self.pos + offset).map(|&b| b as char)
+        self.source.get(self.pos..)?.chars().nth(offset)
     }
 
     fn current(&self) -> Option<char> {
         self.peek(0)
     }
 
+    /// Decode the character at `pos` and step past all of its bytes, so the
+    /// new `pos` is again on a char boundary and `column` counts characters
+    /// rather than bytes (dekaruntime/dsc#70).
     fn advance(&mut self) -> Option<char> {
         let ch = self.current()?;
-        self.pos += 1;
+        self.pos += ch.len_utf8();
         if ch == '\n' {
             self.line += 1;
             self.column = 1;
@@ -350,6 +356,7 @@ impl<'a> Lexer<'a> {
         let quote = self.current().unwrap();
         self.advance(); // opening quote
         let start_pos = self.pos;
+        let mut terminated = false;
         loop {
             match self.current() {
                 None => {
@@ -369,6 +376,7 @@ impl<'a> Lexer<'a> {
                 }
                 Some(c) if c == quote => {
                     self.advance();
+                    terminated = true;
                     break;
                 }
                 Some(_) => {
@@ -376,7 +384,11 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
-        let text = &self.source[start_pos..self.pos - 1];
+        // Only strip the closing quote when one was actually consumed; at EOF
+        // `pos` may equal `start_pos` (or end inside nothing) and `pos - 1`
+        // would underflow the slice (dekaruntime/dsc#71).
+        let end = if terminated { self.pos - 1 } else { self.pos };
+        let text = &self.source[start_pos..end];
         Token {
             kind: TokenKind::String,
             text,
@@ -393,6 +405,7 @@ impl<'a> Lexer<'a> {
         let start_byte = self.pos;
         self.advance(); // opening backtick
         let start_pos = self.pos;
+        let mut terminated = false;
         loop {
             match self.current() {
                 None => {
@@ -412,6 +425,7 @@ impl<'a> Lexer<'a> {
                 }
                 Some('`') => {
                     self.advance();
+                    terminated = true;
                     break;
                 }
                 Some(_) => {
@@ -419,7 +433,10 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
-        let text = &self.source[start_pos..self.pos - 1];
+        // Only strip the closing backtick when one was actually consumed; at
+        // EOF `pos - 1` can underflow the slice (dekaruntime/dsc#71).
+        let end = if terminated { self.pos - 1 } else { self.pos };
+        let text = &self.source[start_pos..end];
         Token {
             kind: TokenKind::BacktickString,
             text,
@@ -732,22 +749,14 @@ impl<'a> Lexer<'a> {
     }
 
     /// Walk backwards over whitespace to find the character immediately
-    /// preceding the current `/` in the source.
+    /// preceding the current `/` in the source. Iterates chars so a multi-byte
+    /// character is never read as individual continuation bytes (dsc#70).
     fn prev_non_space_char(&self) -> Option<char> {
-        let mut i = self.pos;
-        if i == 0 {
-            return None;
-        }
-        loop {
-            i -= 1;
-            let c = self.source.as_bytes().get(i).copied()? as char;
-            if !c.is_whitespace() {
-                return Some(c);
-            }
-            if i == 0 {
-                return None;
-            }
-        }
+        self.source
+            .get(..self.pos)?
+            .chars()
+            .rev()
+            .find(|c| !c.is_whitespace())
     }
 
     /// Consume a `/.../[flags]` regex literal from raw JS. Does not validate
@@ -1005,7 +1014,11 @@ impl<'a> Lexer<'a> {
             '"' | '\'' => self.read_string(),
             '`' => self.read_backtick_string(),
             '0'..='9' => self.read_number(),
+            // Identifier starters: ASCII letters, `_`, and any alphabetic
+            // character, so multi-script identifiers (café, 日本語,
+            // العربية) are one token instead of per-char errors (dsc#70).
             'a'..='z' | 'A'..='Z' | '_' => self.read_identifier(),
+            ch if ch.is_alphabetic() => self.read_identifier(),
             '(' => {
                 self.advance();
                 Token {
@@ -1682,6 +1695,87 @@ mod tests {
             for d in &diags {
                 assert!(d.line >= 1 && d.column >= 1, "bad diagnostic: {d:?}");
             }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Non-ASCII outside JSX text (dekaruntime/dsc#70)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn non_ascii_identifier_lexes_as_single_token() {
+        // `é` must not be split into per-byte fake chars (`Ã` + `©`); the
+        // whole identifier is one token sliced on char boundaries (dsc#70).
+        let (kinds, texts, diags) = lex_all("café_日本語");
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        assert_eq!(kinds, vec![TokenKind::Identifier, TokenKind::Eof]);
+        assert_eq!(texts[0], "café_日本語");
+    }
+
+    #[test]
+    fn non_ascii_string_body_survives_byte_for_byte() {
+        let body = "日本語 · العربية · የቡና ☕\u{FE0F} cafe\u{301}";
+        let source = format!("\"{body}\"");
+        let (kinds, texts, diags) = lex_all(&source);
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        assert_eq!(kinds, vec![TokenKind::String, TokenKind::Eof]);
+        assert_eq!(texts[0], body);
+    }
+
+    #[test]
+    fn unexpected_non_ascii_char_is_diagnostic_not_panic() {
+        for source in ["const x = ©", "\u{FEFF}const x = 1", "const x = \u{FFFD}", "€"] {
+            let (kinds, _, diags) = lex_all(source);
+            assert!(
+                kinds.contains(&TokenKind::Error),
+                "expected an Error token for {source:?}"
+            );
+            assert!(
+                diags.iter().any(|d| d.message.contains("unexpected character")),
+                "expected unexpected-character diagnostic for {source:?}: {diags:?}"
+            );
+            for d in &diags {
+                assert!(d.line >= 1 && d.column >= 1, "bad diagnostic: {d:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn columns_count_characters_not_bytes() {
+        // `café` before the error: byte-wise columns would report 15, char
+        // columns report 14. The same holds across a multi-byte comment on a
+        // previous line, which must not shift line 2's columns either.
+        let (_, _, diags) = lex_all("const café = ©");
+        let d = diags.first().expect("diagnostic for ©");
+        assert_eq!((d.line, d.column), (1, 14), "bad diagnostic: {d:?}");
+
+        let (_, _, diags) = lex_all("// 日本語 comment\nconst x = ©");
+        let d = diags.first().expect("diagnostic for ©");
+        assert_eq!((d.line, d.column), (2, 11), "bad diagnostic: {d:?}");
+    }
+
+    // ------------------------------------------------------------------
+    // Unterminated string/backtick at EOF (dekaruntime/dsc#71)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn lone_quote_at_eof_is_diagnostic_not_panic() {
+        for source in ["\"", "'", "`", "const x = '", "const x = `", "\"café"] {
+            let (kinds, _, diags) = lex_all(source);
+            assert!(
+                diags
+                    .iter()
+                    .any(|d| d.message.contains("unterminated")),
+                "expected unterminated diagnostic for {source:?}: {diags:?}"
+            );
+            for d in &diags {
+                assert!(d.line >= 1 && d.column >= 1, "bad diagnostic: {d:?}");
+            }
+            // The offending quote/backtick token must still be produced.
+            assert!(
+                kinds.iter().any(|k| matches!(k, TokenKind::String | TokenKind::BacktickString)),
+                "expected a string token for {source:?}"
+            );
         }
     }
 }

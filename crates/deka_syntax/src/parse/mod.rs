@@ -1,5 +1,8 @@
 //! DekaScript recursive-descent parser (Compiler v2).
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use bumpalo::Bump;
 
 use crate::ast::{Program, Span};
@@ -16,6 +19,35 @@ mod util;
 pub struct ParseResult<'a> {
     pub program: Option<Program<'a>>,
     pub errors: Vec<Diagnostic>,
+}
+
+/// Maximum parser recursion depth before a `nesting too deep` diagnostic is
+/// emitted instead of recursing further (dsc#72).
+///
+/// The parser is recursive descent, so every nesting level costs stack frames.
+/// The worst chain (parenthesised/array/unary expressions) measures ~22 KB of
+/// stack per level in a debug build; calls/blocks are ~10 KB/level and types
+/// ~4 KB/level. Callers do not all have the 8 MiB main-thread stack:
+/// `cargo test` threads, Rust's default spawned-thread stack, and tokio/LSP
+/// workers all get ~2 MiB. 64 levels keeps the worst case at ~1.4 MiB — under
+/// a 2 MiB stack with margin — while 8 MiB main-thread callers (the `dsc`
+/// CLI) get ~6x headroom. Realistic code is well under 50 levels deep; 64 is
+/// deliberately just above the range any human-written source plausibly
+/// reaches (serde uses 128 with ~100 B/level frames; our frames are ~200x
+/// larger, so our limit is ~200x smaller).
+const MAX_NESTING_DEPTH: usize = 64;
+
+/// RAII guard counting one live recursive parse frame. Acquired on entry to
+/// every recursive parse function; `Drop` decrements, so early-return and
+/// error paths (`?`) cannot leak the count.
+struct DepthGuard {
+    depth: Rc<Cell<usize>>,
+}
+
+impl Drop for DepthGuard {
+    fn drop(&mut self) {
+        self.depth.set(self.depth.get().saturating_sub(1));
+    }
 }
 
 /// Parse a full `.ds` source file into a DekaScript AST.
@@ -104,6 +136,11 @@ struct Parser<'a> {
     pos: usize,
     prev: Token<'a>,
     errors: Vec<Diagnostic>,
+    /// Live recursion depth, shared with outstanding [`DepthGuard`]s via
+    /// `Rc<Cell<..>>` so the guard can decrement on drop without borrowing
+    /// the parser (which is mutably borrowed by the parse functions
+    /// themselves).
+    depth: Rc<Cell<usize>>,
 }
 
 impl<'a> Parser<'a> {
@@ -115,7 +152,26 @@ impl<'a> Parser<'a> {
             errors: Vec::new(),
             tokens,
             source,
+            depth: Rc::new(Cell::new(0)),
         }
+    }
+
+    /// Enter one level of parse recursion. Returns a guard that decrements
+    /// the depth on drop, or `None` (after emitting a positioned diagnostic)
+    /// when the nesting limit is exceeded. Every recursive `parse_*` function
+    /// must acquire this guard before doing anything else.
+    fn enter_recursion(&mut self) -> Option<DepthGuard> {
+        let next = self.depth.get() + 1;
+        if next > MAX_NESTING_DEPTH {
+            self.error(format!(
+                "nesting too deep (limit is {MAX_NESTING_DEPTH} levels)"
+            ));
+            return None;
+        }
+        self.depth.set(next);
+        Some(DepthGuard {
+            depth: Rc::clone(&self.depth),
+        })
     }
 
     // ------------------------------------------------------------------
@@ -277,6 +333,98 @@ impl<'a> Parser<'a> {
 mod tests {
     use super::*;
     use crate::ast::{BinOp, Expr, Pattern, Stmt, TemplatePart, Type, UnOp};
+
+    // dsc#72: the parser must refuse pathological nesting with a positioned
+    // diagnostic instead of recursing until the process aborts (SIGABRT).
+    // These run on the ~2 MiB test-thread stack — the tightest stack any
+    // caller has — so they also pin the stack-safety of the chosen limit.
+
+    #[test]
+    fn nesting_below_limit_parses() {
+        let arena = Bump::new();
+        let source = format!("const x = {}{}{}", "(".repeat(32), "1", ")".repeat(32));
+        let result = parse(&source, &arena);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+    }
+
+    #[test]
+    fn nesting_at_limit_boundary() {
+        // Each nested block is one `parse_statement` recursion level, so 64
+        // blocks is exactly MAX_NESTING_DEPTH live frames: must parse.
+        let arena = Bump::new();
+        let source = "{".repeat(MAX_NESTING_DEPTH) + &"}".repeat(MAX_NESTING_DEPTH);
+        let result = parse(&source, &arena);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+
+        // One more level must fail with the depth diagnostic, not an abort.
+        let source =
+            "{".repeat(MAX_NESTING_DEPTH + 1) + &"}".repeat(MAX_NESTING_DEPTH + 1);
+        let result = parse(&source, &arena);
+        assert!(result.program.is_none());
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.message.contains("nesting too deep")),
+            "{:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn deep_nesting_yields_positioned_diagnostic_never_abort() {
+        // Thousands of levels of every recursive parse path: expression
+        // nesting (parens, arrays, calls, unary), statement nesting (blocks),
+        // type nesting (generics), and JSX children nesting. Before dsc#72
+        // each of these aborted the process; now the depth limit fires first.
+        let mut sources: Vec<String> = vec![
+            format!("const x = {}{}", "(".repeat(5000), "1"),
+            format!("const x = {}1", "[".repeat(5000)),
+            format!("const x = {}{}", "f(".repeat(5000), "1"),
+            format!("const x = {}1", "!".repeat(5000)),
+            "{".repeat(5000),
+            format!(
+                "const x: {}number{} = 1",
+                "Option<".repeat(5000),
+                ">".repeat(5000)
+            ),
+            format!(
+                "export fn P() {{ return {}text{} }}",
+                "<div>".repeat(5000),
+                "</div>".repeat(5000)
+            ),
+        ];
+        // Balanced variants too: they used to overflow while building the AST,
+        // not on the error path.
+        sources.push(format!(
+            "const x = {}{}{}",
+            "(".repeat(5000),
+            "1",
+            ")".repeat(5000)
+        ));
+
+        for source in &sources {
+            let arena = Bump::new();
+            let result = parse(source, &arena);
+            assert!(
+                result.program.is_none() && !result.errors.is_empty(),
+                "deep input must not parse: {}",
+                &source[..source.len().min(40)]
+            );
+            assert!(
+                result
+                    .errors
+                    .iter()
+                    .any(|e| e.message.contains("nesting too deep")),
+                "expected a depth diagnostic for {}: {:?}",
+                &source[..source.len().min(40)],
+                result.errors
+            );
+            for e in &result.errors {
+                assert!(e.line >= 1 && e.column >= 1, "unpositioned: {e:?}");
+            }
+        }
+    }
 
     // deka#511: the return-type colon is TypeScript's, not DekaScript's. Both
     // spellings used to parse to the same AST, so the corpus drifted into a mix.

@@ -13,6 +13,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expr(&mut self, min_prec: u8) -> Option<Expr<'a>> {
+        let _guard = self.enter_recursion()?;
         self.skip_newlines();
         let (start, start_byte) = self.span_start();
         let mut left = self.parse_prefix()?;

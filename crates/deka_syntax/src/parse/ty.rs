@@ -8,6 +8,7 @@ use super::Parser;
 
 impl<'a> Parser<'a> {
     pub(super) fn parse_type(&mut self) -> Option<Type<'a>> {
+        let _guard = self.enter_recursion()?;
         let first = self.parse_type_postfix()?;
         if !self.at(TokenKind::Bar) {
             return Some(first);

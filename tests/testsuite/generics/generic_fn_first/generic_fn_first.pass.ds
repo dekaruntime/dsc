@@ -1,0 +1,23 @@
+import { echo } from "io"
+
+// rfd#56 phase 1: call-site inference for a user-declared type parameter.
+// `first<T>(items: Array<T>) Option<T>` infers T from the argument, the same
+// machinery the builtin containers use (infer_type_args).
+fn first<T>(items: Array<T>) Option<T> {
+  return items.first()
+}
+
+let nums: Array<number> = [7, 8, 9]
+let head = unwrap(first(nums)) or { -1 }
+echo(string(head))
+
+// A different element type at another call site: T = string here. `unwrap …
+// or` is a binding form, not an expression, so it needs a let.
+let words: Array<string> = ["a", "b", "c"]
+let word = unwrap(first(words)) or { "none" }
+echo(word)
+
+// Empty array takes the absent branch.
+const empty: Array<number> = []
+let missing = unwrap(first(empty)) or { -1 }
+echo(string(missing))

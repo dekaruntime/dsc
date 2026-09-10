@@ -1,0 +1,6 @@
+// rfd#56 phase 1: iteration is not among the operations an unbounded T
+// supports.
+fn bad<T>(xs: T) {
+  for (const x of xs) {
+  }
+}

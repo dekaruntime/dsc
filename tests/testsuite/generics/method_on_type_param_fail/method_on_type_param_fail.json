@@ -1,0 +1,6 @@
+{
+  "title": "Calling a method on a value of unbounded type parameter T is rejected",
+  "stage": "typecheck",
+  "notes": "rfd#56 phase 1 capability rule: method calls are not among the four permitted operations on an unbounded T. The error is the normative one from the checker, not a generic unknown-method error.",
+  "expectedDiagnosticContains": "cannot call method `whatever` on a value of unbounded type parameter `T`"
+}

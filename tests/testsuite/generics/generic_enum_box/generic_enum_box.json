@@ -1,0 +1,6 @@
+{
+  "title": "User-declared generic enum: case payload substitution at use sites",
+  "stage": "run",
+  "expectedStdoutNative": "5\n0\nright\n2\n",
+  "notes": "rfd#56 phase 1 (dekaruntime/dsc#93): enum Box<T> and Pair<A, B>. Constructor calls infer the type arguments from payloads (Box.Full(5) is Box<number>); match arms see the substituted payload type (value: number). Proves the enum substitution path with fixtures rather than inspection."
+}

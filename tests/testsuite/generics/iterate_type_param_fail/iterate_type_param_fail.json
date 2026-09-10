@@ -1,0 +1,6 @@
+{
+  "title": "Iterating a value of unbounded type parameter T is rejected",
+  "stage": "typecheck",
+  "notes": "rfd#56 phase 1 capability rule: iteration is not among the four permitted operations on an unbounded T. Without the explicit check the element type would silently be `Infer`.",
+  "expectedDiagnosticContains": "cannot iterate over a value of unbounded type parameter `T`"
+}

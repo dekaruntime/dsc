@@ -1,0 +1,6 @@
+// rfd#56 phase 1: an unbounded type parameter has no fields. Field access
+// is rejected with the normative capability-rule error, not a generic
+// unknown-field error.
+fn bad<T>(x: T) {
+  return x.value
+}

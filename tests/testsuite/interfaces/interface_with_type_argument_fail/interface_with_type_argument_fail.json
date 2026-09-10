@@ -1,6 +1,6 @@
 {
-  "title": "Generic type parameters on interfaces are banned",
-  "stage": "parse",
-  "notes": "deka#561: user code cannot declare type parameters on any form, including interfaces. A generic interface would reopen user-defined generic containers through the back door — it can be used concretely (fn f(c: Container<number>)) with no function declaring a type parameter.",
-  "expectedDiagnosticContains": "user code cannot declare type parameters"
+  "title": "Declaring a generic interface parses and validates, but instantiating one is still unsupported",
+  "stage": "typecheck",
+  "notes": "Deliberate status change for rfd#56 phase 1: declaring `interface Box<T>` used to be a parse-time ban (deka#561); the declaration itself is now accepted and its members validate against T. Instantiating a generic interface at a use site (`Box<number>`) remains a phase-2 item and fails with the honest unsupported-generic-type error.",
+  "expectedDiagnosticContains": "unsupported generic type `Box`"
 }

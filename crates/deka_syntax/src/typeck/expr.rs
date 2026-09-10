@@ -3917,6 +3917,40 @@ impl<'a> Checker<'a> {
                     HashMap::new()
                 };
 
+                // rfd#56 phase 2: a bound is a contract at the call site.
+                // After inference solves a type parameter, the solution is
+                // verified against the declared bound; an argument outside
+                // the bound is an error naming the bound it failed. A
+                // missing or still-open solution means inference could not
+                // pin the parameter — the type error (if any) is reported by
+                // the argument check below, so the bound check stays silent
+                // rather than crashing or double-reporting.
+                if let ast::Expr::Identifier { name, .. } = callee {
+                    if let Some(bounds) = self.fn_param_bounds.get(name).cloned() {
+                        for (param, bound) in bounds {
+                            let Some(solution) = subst.get(param) else {
+                                continue;
+                            };
+                            if matches!(
+                                solution,
+                                Type::Var | Type::Infer | Type::Error | Type::Param { .. }
+                            ) {
+                                continue;
+                            }
+                            if !self.is_assignable(&bound, solution) {
+                                self.error_span(
+                                    span,
+                                    format!(
+                                        "type argument `{solution}` for type parameter \
+                                         `{param}` of function `{name}` does not satisfy \
+                                         the bound `{bound}` (rfd#56)"
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                }
+
                 // Parameters inference left unsolved name no type the call
                 // could pin: they are unconstrained (`Var`), not unresolved.
                 let substituted_params: Vec<Type<'a>> = params

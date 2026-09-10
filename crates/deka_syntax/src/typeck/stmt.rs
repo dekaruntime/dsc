@@ -594,6 +594,19 @@ impl<'a> Checker<'a> {
                 _ => continue,
             };
 
+            // rfd#56 phase 2: keep the declared bounds for the call-site
+            // check that verifies an inferred type argument against its
+            // bound. Resolution reuses the bound cache filled by
+            // push_type_params below.
+            let bounds: Vec<(&'a str, Type<'a>)> = type_params
+                .iter()
+                .filter(|p| p.bound.is_some())
+                .map(|p| (p.name, self.resolve_bound(p.bound.as_ref().unwrap())))
+                .collect();
+            if !bounds.is_empty() {
+                self.fn_param_bounds.insert(name, bounds);
+            }
+
             self.push_type_params(type_params);
 
             let param_types: Vec<Type<'a>> = params

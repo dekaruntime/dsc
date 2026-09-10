@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use bumpalo::Bump;
 use deka_emit::{dev_slot_id, dev_slot_source_path, emit_dev_entry, emit_js_module_with_options};
+use deka_syntax::typeck::Type;
 use deka_syntax::{
     Diagnostic, Expr, ModuleExports, Program, Span, Stmt, check_program_with_imports, parse,
     resolve_imported_enum_constructors,
@@ -192,6 +193,44 @@ pub(crate) fn is_stdlib_module_spec(spec: &str) -> bool {
         || bare.starts_with("db/")
         || bare == "ui"
         || bare.starts_with("ui/")
+}
+
+/// Build synthetic signatures for recognized virtual stdlib modules.
+///
+/// dsc#111 makes every *ordinary* unresolved import a hard error bound to the
+/// `Error` recovery sentinel. The recognized families below are the narrow,
+/// explicit exception: their runtime implementations exist, but this compiler
+/// has no real `ModuleExports` declarations for them yet. Keep this bypass
+/// visible until dsc#129 can replace it with declarations; that work is blocked
+/// while framework work is paused. Each imported value is consequently
+/// unchecked (`Infer`) only for these recognized specifiers.
+pub fn infer_stdlib_imports_for_source<'a>(
+    source: &'a str,
+    arena: &'a Bump,
+) -> HashMap<&'a str, ModuleExports<'a>> {
+    let mut exports_by_spec: HashMap<&'a str, ModuleExports<'a>> = HashMap::new();
+    let parse_result = parse(source, arena);
+    let Some(program) = parse_result.program else {
+        return exports_by_spec;
+    };
+    for stmt in program.statements.iter() {
+        let deka_syntax::Stmt::Import {
+            specifiers,
+            source: spec,
+            ..
+        } = stmt
+        else {
+            continue;
+        };
+        if !is_stdlib_module_spec(spec) {
+            continue;
+        }
+        let exports = exports_by_spec.entry(spec).or_default();
+        for spec_item in specifiers.iter() {
+            exports.values.insert(spec_item.imported, Type::Infer);
+        }
+    }
+    exports_by_spec
 }
 
 /// Module metadata extracted from a DekaScript source file.
@@ -508,7 +547,9 @@ pub fn compile_to_js_with_options(
     options: CompileOptions,
 ) -> Result<CompileResult, Vec<Diagnostic>> {
     let arena = Bump::new();
-    let imports = HashMap::new();
+    let stdlib_exports = infer_stdlib_imports_for_source(source, &arena);
+    let imports: HashMap<&str, &ModuleExports> =
+        stdlib_exports.iter().map(|(spec, exports)| (*spec, exports)).collect();
     compile_to_js_with_imports_and_options(source, file_path, &arena, &imports, options)
 }
 
@@ -645,7 +686,6 @@ pub fn format_diagnostics(diagnostics: &[Diagnostic]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use deka_syntax::typeck::Type;
 
     #[test]
     fn compile_const_number() {
@@ -1722,15 +1762,14 @@ const arrow = unsafe { () => User { name: "Bob" } }
     }
 
     #[test]
-    fn compile_form_import_from_ui_form_requires_declarations() {
-        let errors = compile_to_js(
+    fn compile_form_import_from_ui_form_uses_documented_virtual_stdlib_bypass() {
+        let result = compile_to_js(
             "import { Form } from \"ui/form\";\nconst el = <Form action=\"/api/hello\" method=\"post\">Send</Form>;",
             "test.dsx",
         )
-        .expect_err("virtual UI imports need declarations");
-        assert_eq!(errors.len(), 1, "got: {errors:?}");
-        assert!(errors[0].message.contains("imported name `Form`"));
-        assert!(errors[0].message.contains("ui/form"));
+        .expect("ui/form remains a documented virtual stdlib import pending dsc#129");
+        assert!(result.js.contains("from \"ui/form\""), "got: {}", result.js);
+        assert!(result.js.contains("Form"), "got: {}", result.js);
     }
 
     #[test]

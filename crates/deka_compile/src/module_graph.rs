@@ -538,7 +538,11 @@ pub fn compile_module_graph_with_options(
     let mut build_closures: HashMap<PathBuf, HashSet<String>> = HashMap::new();
     for (path, program) in programs.iter() {
         let module = modules.get(path).expect("module in graph");
+        let inferred = crate::infer_stdlib_imports_for_source(&module.source, &arena);
         let mut combined: HashMap<&str, &deka_syntax::ModuleExports> = HashMap::new();
+        for (spec, dep_exports) in &inferred {
+            combined.insert(*spec, dep_exports);
+        }
         for (spec, dep) in module.dependencies.iter() {
             if let Some(dep_exports) = exports.get(dep) {
                 combined.insert(spec.as_str(), dep_exports);
@@ -940,7 +944,11 @@ pub fn compile_module_graph_with_options(
         }
         let module = modules.get(&path).expect("module in graph");
         let input = path.to_string_lossy();
+        let inferred = crate::infer_stdlib_imports_for_source(&module.source, &arena);
         let mut combined: HashMap<&str, &deka_syntax::ModuleExports> = HashMap::new();
+        for (spec, exports) in &inferred {
+            combined.insert(*spec, exports);
+        }
         if let Some(graph_imports) = imports.get(&path) {
             for (spec, exports) in graph_imports {
                 combined.insert(*spec, *exports);
@@ -1409,7 +1417,7 @@ mod tests {
     }
 
     #[test]
-    fn graph_with_module_base_rejects_undeclared_stdlib_imports() {
+    fn graph_with_module_base_leaves_documented_stdlib_imports_virtual() {
         let root = PathBuf::from("/project");
         let math = root.join("math.ds");
         let main = root.join("main.ds");
@@ -1442,7 +1450,7 @@ mod tests {
             files: loader.files,
             aliases: loader.aliases,
         };
-        let errors = compile_module_graph_with_options(
+        let result = compile_module_graph_with_options(
             &main,
             &loader,
             GraphCompileOptions {
@@ -1451,10 +1459,14 @@ mod tests {
                 module_root: None,
             },
         )
-        .expect_err("virtual stdlib imports require declarations");
-        assert_eq!(errors.len(), 1, "got: {errors:?}");
-        assert!(errors[0].message.contains("imported name `echo`"));
-        assert!(errors[0].message.contains("io"));
+        .expect("virtual stdlib imports remain available pending dsc#129");
+        let main_js = &result.modules[&main];
+        assert!(
+            main_js.contains("import { echo } from \"https://hats.dump.invalid/modules/io.mjs\";"),
+            "got: {}",
+            main_js
+        );
+        assert!(main_js.contains("import { add } from \"./math.ds\";"), "got: {}", main_js);
     }
 
     #[test]
@@ -2564,7 +2576,7 @@ mod tests {
     }
 
     #[test]
-    fn graph_rejects_ui_runtime_without_declarations() {
+    fn graph_treats_ui_runtime_as_documented_virtual_stdlib() {
         let main = PathBuf::from("/project/page.dsx");
         let mut files = HashMap::new();
         files.insert(
@@ -2576,11 +2588,11 @@ mod tests {
             files,
             aliases: HashMap::new(),
         };
-        let errors = compile_module_graph(&main, &loader)
-            .expect_err("virtual UI imports require declarations instead of Infer");
-        assert_eq!(errors.len(), 1, "got: {errors:?}");
-        assert!(errors[0].message.contains("imported name `Form`"));
-        assert!(errors[0].message.contains("ui/form"));
+        let result = compile_module_graph(&main, &loader)
+            .expect("ui/form should remain virtual pending dsc#129");
+        let js = &result.modules[&main];
+        assert!(js.contains("ui/form"), "got: {js}");
+        assert!(js.contains("Form"), "got: {js}");
     }
 
     #[test]

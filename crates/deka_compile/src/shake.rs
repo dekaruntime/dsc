@@ -823,10 +823,11 @@ mod tests {
     }
 
     #[test]
-    fn unresolved_reactive_import_is_not_silently_typed_for_shaking() {
-        // Shaking can identify that `live` is unused, but it must not make an
-        // unresolved `ui/reactive` import typecheck. The emitter-level import
-        // deduplication behavior remains covered in deka_emit's tests.
+    fn live_import_unused_by_user_is_dropped_but_injection_still_binds_it() {
+        // End to end through graph shaking (deka#744 F3): the documented
+        // virtual-stdlib bypass (dsc#111/#129) keeps ui/reactive available.
+        // Shaking drops the user's unused `live` binding, so the compiler's
+        // injected import must still appear.
         let source = "import { signal, live } from \"ui/reactive\";\n\
                       export fn Page() {\n\
                         const s = signal(7);\n\
@@ -839,7 +840,7 @@ mod tests {
             !live.contains("live"),
             "the unused `live` import must not survive shaking: {live:?}"
         );
-        let errors = crate::compile_to_js_with_options(
+        let result = crate::compile_to_js_with_options(
             source,
             "page.dsx",
             crate::CompileOptions {
@@ -847,10 +848,21 @@ mod tests {
                 ..Default::default()
             },
         )
-        .expect_err("ui/reactive needs a declared module signature");
+        .expect("compile failed");
         assert!(
-            errors.iter().any(|error| error.message.contains("ui/reactive")),
-            "expected unresolved ui/reactive diagnostic: {errors:?}"
+            result.js.contains("import { signal } from \"ui/reactive\""),
+            "the user's import must keep the referenced `signal` binding: {}",
+            result.js
+        );
+        assert!(
+            result.js.contains("import { live } from \"ui/reactive\""),
+            "the injected live binding must survive even though the user's import was dropped: {}",
+            result.js
+        );
+        assert!(
+            !result.js.contains("import { signal, live }"),
+            "the unused user `live` binding should have been shaken: {}",
+            result.js
         );
     }
 }

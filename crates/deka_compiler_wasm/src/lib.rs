@@ -611,7 +611,7 @@ const labels: Array<string> = build {
     }
 
     #[test]
-    fn module_base_rejects_bare_stdlib_without_declarations() {
+    fn module_base_rewrites_documented_bare_stdlib_imports() {
         let response: Value = serde_json::from_str(&compile_request(
             r#"import { echo } from "io"; echo("hello");"#,
             "lesson.ds",
@@ -619,15 +619,13 @@ const labels: Array<string> = build {
         ))
         .expect("response JSON");
 
-        assert_eq!(response["ok"], false, "{response}");
-        let diagnostics = response["diagnostics"]
-            .as_array()
-            .expect("diagnostics should be present");
+        assert_eq!(response["ok"], true, "{response}");
+        let code = response["output"]["code"]
+            .as_str()
+            .expect("compiled code should be present");
         assert!(
-            diagnostics.iter().any(|diagnostic| diagnostic["message"]
-                .as_str()
-                .is_some_and(|message| message.contains("imported name `echo`"))),
-            "expected unresolved import diagnostic, got: {response}"
+            code.contains(r#"import { echo } from "/tour/modules/io.mjs";"#),
+            "expected moduleBase rewrite, got:\n{code}"
         );
     }
 

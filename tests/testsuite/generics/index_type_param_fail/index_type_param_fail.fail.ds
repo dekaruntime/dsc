@@ -1,0 +1,5 @@
+// rfd#56 phase 1: indexing is not among the operations an unbounded T
+// supports.
+fn bad<T>(x: T) {
+  return x[0]
+}

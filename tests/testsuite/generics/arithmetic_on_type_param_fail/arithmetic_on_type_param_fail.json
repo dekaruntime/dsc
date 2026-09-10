@@ -1,0 +1,6 @@
+{
+  "title": "Applying arithmetic to values of unbounded type parameter T is rejected",
+  "stage": "typecheck",
+  "notes": "rfd#56 phase 1 capability rule: `+` (and the other arithmetic/comparison operators) are not among the four permitted operations on an unbounded T.",
+  "expectedDiagnosticContains": "cannot apply `+` to a value of unbounded type parameter `T`"
+}

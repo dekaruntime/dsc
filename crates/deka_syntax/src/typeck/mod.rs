@@ -806,6 +806,7 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
             ast::Stmt::ReceiverMethod {
                 receiver_type,
                 name,
+                type_params,
                 params,
                 return_type,
                 ..
@@ -814,6 +815,7 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
                     (*receiver_type, *name),
                     MethodInfo {
                         params: *params,
+                        type_params: *type_params,
                         return_type: return_type.clone(),
                         mutable: false,
                         // Filled in the second pass below, once every
@@ -1297,6 +1299,10 @@ pub(super) fn is_primitive_receiver_name(name: &str) -> bool {
 #[derive(Clone, Debug)]
 pub struct MethodInfo<'a> {
     pub params: &'a [ast::Param<'a>],
+    /// Declared type parameters, e.g. `T` in `fn (s Signal) set<T>(next: T)`.
+    /// On a generic struct receiver the parameters bind positionally to the
+    /// receiver value's type arguments at each call site (rfd#56 phase 1).
+    pub type_params: &'a [ast::TypeParam<'a>],
     pub return_type: Option<ast::Type<'a>>,
     pub mutable: bool,
     /// Parameter types resolved once, in the declaring module (deka#494).
@@ -1312,6 +1318,11 @@ pub struct MethodInfo<'a> {
 #[derive(Clone, Debug)]
 pub struct InterfaceInfo<'a> {
     pub members: &'a [ast::InterfaceMember<'a>],
+    /// Declared type parameters, e.g. `T` in `interface Container<T>`. Generic
+    /// interface *use* (`Container<number>`) is not instantiated in phase 1
+    /// (rfd#56); the parameters are kept so member validation can resolve
+    /// them instead of reporting `unknown type T`.
+    pub type_params: &'a [ast::TypeParam<'a>],
     pub span: ast::Span,
 }
 
@@ -1750,6 +1761,14 @@ impl<'a> Checker<'a> {
         // any type until a concrete type is available. This is the deka#252
         // hole and is expected to be removed; `Var` above is not.
         if matches!(expected, Type::Infer) || matches!(actual, Type::Infer) {
+            return true;
+        }
+        // rfd#56 phase 1: one unbounded type parameter is assignable to
+        // another unbounded slot ("passing to another unbounded slot"). No
+        // operations exist on either side, so nothing a bound could guarantee
+        // is violated. Phase 2 (bounds) must refine this arm to check the
+        // bound before widening it.
+        if matches!(expected, Type::Param { .. }) && matches!(actual, Type::Param { .. }) {
             return true;
         }
         if expected == actual {
@@ -3838,5 +3857,185 @@ mod tests {
              const page = <Counter client:load />\n",
         );
         assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn generic_function_declares_and_infers() {
+        // rfd#56 phase 1: `Signal<T>`'s supporting shapes parse, check, and
+        // infer at call sites.
+        assert!(
+            typeck(
+                "struct Signal<T> { value: T }\n\
+                 fn signal<T>(initial: T) Signal<T> { return Signal { value: initial } }\n\
+                 fn first<T>(items: Array<T>) Option<T> { return items.first() }\n\
+                 const count = signal(0);\n\
+                 const n: number = count.value;\n\
+                 const one: Option<number> = first([1, 2, 3]);"
+            )
+            .is_empty()
+        );
+
+        // The concrete type is known at the call site: `signal("s")` gives
+        // `T = string`, so `.value` is not `number`.
+        let errors = typeck(
+            "struct Signal<T> { value: T }\n\
+             fn signal<T>(initial: T) Signal<T> { return Signal { value: initial } }\n\
+             const count = signal(\"s\");\n\
+             const n: number = count.value;",
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("string"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn generic_receiver_method_binds_type_argument_at_call_site() {
+        // `count.set("nope")` where `count: Signal<number>` is a check-time
+        // error with a span on the argument.
+        let source = "struct Signal<T> { value: T }\n\
+                      fn (s mut Signal) set<T>(next: T) { s.value = next }\n\
+                      fn signal<T>(initial: T) Signal<T> { return Signal { value: initial } }\n\
+                      fn main() {\n\
+                        let count = signal(0)\n\
+                        count.set(\"nope\")\n\
+                      }";
+        let errors = typeck(source);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("expected argument type `number`"),
+            "{}",
+            errors[0].message
+        );
+        assert_eq!((errors[0].line, errors[0].column), (6, 11));
+
+        // The well-typed call passes and the return type substitutes too.
+        assert!(
+            typeck(
+                "struct Signal<T> { value: T }\n\
+                 fn (s Signal) get<T>() T { return s.value }\n\
+                 fn signal<T>(initial: T) Signal<T> { return Signal { value: initial } }\n\
+                 fn main() {\n\
+                   let count = signal(0)\n\
+                   const n: number = count.get()\n\
+                 }"
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn generic_struct_literal_infers_type_arguments() {
+        // Two parameters, inferred from two fields.
+        assert!(
+            typeck(
+                "struct Pair<A, B> { first: A\n second: B }\n\
+                 const p = Pair { first: 1, second: \"s\" };\n\
+                 const n: number = p.first;\n\
+                 const s: string = p.second;"
+            )
+            .is_empty()
+        );
+        // A field value that contradicts the annotation is a check-time error.
+        let errors = typeck(
+            "struct Pair<A, B> { first: A\n second: B }\n\
+             const p: Pair<string, number> = Pair { first: 1, second: \"s\" };",
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+    }
+
+    #[test]
+    fn generic_enum_substitutes_case_payload_types() {
+        // The deka#372 path, now reachable from user code again (rfd#56).
+        assert!(
+            typeck(
+                "enum Box<T> { Empty, Full(T) }\n\
+                 fn unwrap(b: Box<number>) number {\n\
+                   return match (b) {\n\
+                     Full(value) => value,\n\
+                     Empty => 0,\n\
+                   }\n\
+                 }\n\
+                 const x = unwrap(Box.Full(5))"
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn unbounded_type_parameter_passes_to_another_unbounded_slot() {
+        // "Passing to another unbounded slot" is on the rfd#56 operation list.
+        assert!(
+            typeck(
+                "fn sink<U>(y: U) {}\n\
+                 fn f<T>(x: T) { sink(x) }\n\
+                 fn g<T>(x: T) T {\n\
+                   let y = x\n\
+                   return y\n\
+                 }"
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn unbounded_type_parameter_capability_rule() {
+        // The rfd#56 negative matrix: each illegal operation fails with the
+        // normative diagnostic, not an emergent one.
+        let cases: &[(&str, &str)] = &[
+            (
+                "fn f<T>(x: T) { x.whatever() }",
+                "cannot call method `whatever` on a value of unbounded type parameter `T`",
+            ),
+            (
+                "fn f<T>(x: T) { const y = x.field }",
+                "cannot access field `field` on a value of unbounded type parameter `T`",
+            ),
+            (
+                "fn f<T>(x: T, y: T) { const b = x == y }",
+                "cannot apply `==` to a value of unbounded type parameter `T`",
+            ),
+            (
+                "fn f<T>(x: T) { const n = x + 1 }",
+                "cannot apply `+` to a value of unbounded type parameter `T`",
+            ),
+            (
+                "fn f<T>(x: T) { const e = x[0] }",
+                "cannot index into a value of unbounded type parameter `T`",
+            ),
+            (
+                "fn f<T>(x: T) { const n = -x }",
+                "cannot negate a value of unbounded type parameter `T`",
+            ),
+            (
+                "fn f<T>(xs: T) { for (const x of xs) { } }",
+                "cannot iterate over a value of unbounded type parameter `T`",
+            ),
+        ];
+        for (source, expected) in cases {
+            let errors = typeck(source);
+            assert_eq!(
+                errors.len(),
+                1,
+                "{source:?} expected exactly one error, got: {errors:?}"
+            );
+            assert!(
+                errors[0].message.contains(expected),
+                "{source:?}\nexpected: {expected}\ngot: {}",
+                errors[0].message
+            );
+        }
+
+        // A type parameter of one name is not a concrete type either: `T`
+        // does not satisfy a `number` slot.
+        let errors = typeck("fn f<T>(x: T) { const n: number = x }");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("found type `T`"),
+            "{}",
+            errors[0].message
+        );
     }
 }

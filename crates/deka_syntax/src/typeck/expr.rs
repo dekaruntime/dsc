@@ -482,9 +482,20 @@ impl<'a> Checker<'a> {
                     fields: field_types,
                 }
             }
-            ast::Expr::IndexAccess { object, index, .. } => {
+            ast::Expr::IndexAccess {
+                object,
+                index,
+                span,
+            } => {
                 let object_type = self.check_expr(object);
                 self.check_expr(index);
+                if let Type::Param { name } = &object_type {
+                    // rfd#56 phase 1: indexing is not on the unbounded-T
+                    // operation list. Without this arm, collection_element
+                    // would silently return `Infer` (the dsc#90 shape).
+                    self.reject_param_operation(name, "index into", *span);
+                    return Type::Error;
+                }
                 object_type.collection_element()
             }
             ast::Expr::Spread { expr, .. } => {
@@ -805,8 +816,17 @@ impl<'a> Checker<'a> {
 
         let fields: Vec<(&'a str, &ast::Expr<'a>, ast::Span)> =
             fields.iter().map(|f| (f.name, &f.value, f.span)).collect();
-        self.check_struct_literal_fields(name, &info, &fields, span);
-        Type::Struct { name }
+        let args = self.check_struct_literal_fields(name, &info, &fields, span);
+        // A generic struct erases to the same runtime value as a plain one;
+        // the type arguments live only in the checker (rfd#56).
+        if info.type_params.is_empty() {
+            Type::Struct { name }
+        } else {
+            Type::Generic {
+                base: name,
+                args,
+            }
+        }
     }
 
     fn check_struct_literal_fields(
@@ -815,7 +835,12 @@ impl<'a> Checker<'a> {
         info: &super::StructInfo<'a>,
         fields: &[(&'a str, &ast::Expr<'a>, ast::Span)],
         span: ast::Span,
-    ) {
+    ) -> Vec<Type<'a>> {
+        let declared_params: Vec<&'a str> = info.type_params.iter().map(|p| p.name).collect();
+        // Type arguments inferred from the supplied field values, keyed by
+        // the struct's declared parameter name. `Signal { value: 0 }` pins
+        // `T = int` the same way `Signal<T>`'s annotation would.
+        let mut inferred: HashMap<&'a str, Type<'a>> = HashMap::new();
         let embed_names: HashSet<&str> = info.embeds.iter().map(|e| e.name).collect();
         let mut seen_fields = HashSet::new();
         for (field_name, value, field_span) in fields {
@@ -828,7 +853,15 @@ impl<'a> Checker<'a> {
 
             let expected_type = if let Some(f) = info.fields.iter().find(|f| f.name == *field_name)
             {
-                self.resolve_ast_type(&f.ty)
+                // Resolve the declared type with the struct's own type
+                // parameters in scope: for `struct Signal<T> { value: T }`
+                // the declared type is `T`, not `unknown type T`. The scope
+                // is pushed only around the resolution so it cannot leak
+                // into the value expression (rfd#56 phase 1).
+                self.push_type_params(info.type_params);
+                let ty = self.resolve_ast_type(&f.ty);
+                self.pop_type_params();
+                ty
             } else if embed_names.contains(field_name) {
                 Type::Struct { name: field_name }
             } else {
@@ -858,6 +891,19 @@ impl<'a> Checker<'a> {
             };
 
             let value_type = self.check_expr(value);
+            // Infer the struct's type arguments from the field values before
+            // checking assignability: `Signal { value: 0 }` pins `T` to
+            // `int`, and a value that is itself a type parameter (`Signal {
+            // value: initial }` inside `fn signal<T>(initial: T)`) pins `T`
+            // to that parameter.
+            if !declared_params.is_empty() {
+                infer_type_args(&expected_type, &value_type, &declared_params, &mut inferred);
+            }
+            let expected_type = if inferred.is_empty() {
+                expected_type
+            } else {
+                substitute_type(&expected_type, &inferred)
+            };
             if !self.is_assignable(&expected_type, &value_type) {
                 self.error_span(
                     *field_span,
@@ -908,6 +954,14 @@ impl<'a> Checker<'a> {
                 ),
             );
         }
+
+        // The literal's type arguments: solved parameters take their inferred
+        // type; parameters no field value could pin are unconstrained (`Var`,
+        // deka#468), not unresolved.
+        declared_params
+            .iter()
+            .map(|p| inferred.remove(p).unwrap_or(Type::Var))
+            .collect()
     }
 
     /// Search the embedded structs of `struct_name` for a field named `field`,
@@ -972,6 +1026,22 @@ impl<'a> Checker<'a> {
             .all(|e| self.is_empty_embed_struct(e.name))
     }
 
+    /// The rfd#56 phase-1 capability rule for an unbounded type parameter,
+    /// enforced explicitly rather than left to emerge from the checker (the
+    /// `Type::Infer` story, dsc#90): an unbounded `T` permits exactly
+    /// assignment, return, storage in a field, and passing to another
+    /// unbounded slot — and nothing else. Every other operation lands here.
+    pub(super) fn reject_param_operation(&mut self, name: &str, operation: &str, span: ast::Span) {
+        self.error_span(
+            span,
+            format!(
+                "cannot {operation} a value of unbounded type parameter `{name}`: \
+                 an unbounded type parameter may only be assigned, returned, stored \
+                 in a field, or passed to another unbounded slot (rfd#56)"
+            ),
+        );
+    }
+
     fn check_field_access(
         &mut self,
         object: &ast::Expr<'a>,
@@ -984,6 +1054,13 @@ impl<'a> Checker<'a> {
         }
 
         match &object_type {
+            Type::Param { name } => {
+                // rfd#56 phase 1: an unbounded type parameter has no fields.
+                // `s.value` where `s: T` is exactly the operation the rule
+                // forbids — rejected explicitly, not left to emerge.
+                self.reject_param_operation(name, &format!("access field `{field}` on"), span);
+                Type::Error
+            }
             Type::Infer | Type::Var => {
                 // An externally-provided or unresolved value (`Infer`) and an
                 // unconstrained one (`Var`) may both have any field. Cloning the
@@ -995,6 +1072,23 @@ impl<'a> Checker<'a> {
             Type::Struct { name } => {
                 let struct_name = *name;
                 match self.resolve_field_type(struct_name, field) {
+                    Some(ty) => ty,
+                    None => {
+                        self.error_span(
+                            span,
+                            format!("struct `{struct_name}` has no field `{field}`"),
+                        );
+                        Type::Error
+                    }
+                }
+            }
+            // `Signal<T>` value: the field type is the declared type with the
+            // struct's type parameters substituted by the value's arguments
+            // (rfd#56 phase 1). Field access here is legal — the value's type
+            // is a concrete struct shape, not a bare type parameter.
+            Type::Generic { base, args } if self.structs.contains_key(base) => {
+                let struct_name = *base;
+                match self.resolve_field_type_substituted(struct_name, field, args) {
                     Some(ty) => ty,
                     None => {
                         self.error_span(
@@ -1378,6 +1472,28 @@ impl<'a> Checker<'a> {
             }
         }
         None
+    }
+
+    /// `resolve_field_type` for a `Signal<T>` value: resolve the declared
+    /// field type with the struct's own type parameters in scope, then
+    /// substitute the value's type arguments (rfd#56 phase 1).
+    fn resolve_field_type_substituted(
+        &mut self,
+        struct_name: &'a str,
+        field: &'a str,
+        args: &[Type<'a>],
+    ) -> Option<Type<'a>> {
+        let info = self.structs.get(struct_name)?.clone();
+        let subst: HashMap<&'a str, Type<'a>> = info
+            .type_params
+            .iter()
+            .map(|p| p.name)
+            .zip(args.iter().cloned())
+            .collect();
+        self.push_type_params(&info.type_params);
+        let resolved = self.resolve_field_type(struct_name, field);
+        self.pop_type_params();
+        resolved.map(|ty| substitute_type(&ty, &subst))
     }
 
     fn check_enum_constructor(
@@ -2175,7 +2291,57 @@ impl<'a> Checker<'a> {
             self.check_expr(right)
         };
 
+        // rfd#56 phase 1: arithmetic and comparison on an unbounded type
+        // parameter are not on its operation list, so they are rejected with
+        // the normative diagnostic instead of falling into the per-operator
+        // errors (or, worse, silently succeeding). `Assign` deliberately
+        // stays legal: assigning a `T` to a `T` is the rule's first
+        // permitted operation.
         use ast::BinOp::*;
+        if matches!(
+            op,
+            Add | Sub
+                | Mul
+                | Div
+                | Mod
+                | AddAssign
+                | SubAssign
+                | MulAssign
+                | DivAssign
+                | ModAssign
+                | Eq
+                | Ne
+                | Lt
+                | Le
+                | Gt
+                | Ge
+        ) && !left_type.is_error()
+            && !right_type.is_error()
+        {
+            let symbol = match op {
+                Add | AddAssign => "+",
+                Sub | SubAssign => "-",
+                Mul | MulAssign => "*",
+                Div | DivAssign => "/",
+                Mod | ModAssign => "%",
+                Eq => "==",
+                Ne => "!=",
+                Lt => "<",
+                Le => "<=",
+                Gt => ">",
+                Ge => ">=",
+                _ => unreachable!(),
+            };
+            if let Type::Param { name } = &left_type {
+                self.reject_param_operation(name, &format!("apply `{symbol}` to"), span);
+                return Type::Error;
+            }
+            if let Type::Param { name } = &right_type {
+                self.reject_param_operation(name, &format!("apply `{symbol}` to"), span);
+                return Type::Error;
+            }
+        }
+
         match op {
             Add => {
                 if left_type.is_error() || right_type.is_error() {
@@ -2671,6 +2837,17 @@ impl<'a> Checker<'a> {
         _span: ast::Span,
     ) -> Type<'a> {
         let operand_type = self.check_expr(operand);
+        if let Type::Param { name } = &operand_type {
+            // rfd#56 phase 1: unary arithmetic/logic on an unbounded type
+            // parameter is not on its operation list.
+            let operation = match op {
+                ast::UnOp::Neg => "negate",
+                ast::UnOp::Plus => "apply unary `+` to",
+                ast::UnOp::Not => "apply `!` to",
+            };
+            self.reject_param_operation(name, operation, _span);
+            return Type::Error;
+        }
         match op {
             ast::UnOp::Neg | ast::UnOp::Plus => {
                 if let Type::Newtype {
@@ -2815,9 +2992,22 @@ impl<'a> Checker<'a> {
                 .into();
         }
 
-        let receiver_type = match &object_type {
-            Type::Struct { name } => *name,
-            Type::Newtype { name, .. } => *name,
+        // rfd#56 phase 1: an unbounded type parameter has no methods. This
+        // must be intercepted before the receiver-type dispatch below, which
+        // would fall through to a generic "cannot access field" error.
+        if let Type::Param { name } = &object_type {
+            self.reject_param_operation(name, &format!("call method `{method_name}` on"), span);
+            return Some(Type::Error);
+        }
+
+        let (receiver_type, receiver_args): (&'a str, Option<Vec<Type<'a>>>) = match &object_type {
+            Type::Struct { name } => (*name, None),
+            Type::Newtype { name, .. } => (*name, None),
+            // A `Signal<T>` value: dispatch on the struct and bind the
+            // method's type parameters from the value's type arguments.
+            Type::Generic { base, args } if self.structs.contains_key(base) => {
+                (*base, Some(args.clone()))
+            }
             Type::Array { .. } => {
                 if is_mutating_array_method(method_name) && !self.is_mutable_expr(object) {
                     self.error_at_expr(
@@ -2878,7 +3068,30 @@ impl<'a> Checker<'a> {
         };
 
         let mut embed_path = Vec::new();
-        let info = self.find_receiver_method(receiver_type, method_name, &mut embed_path)?;
+        let mut info = self.find_receiver_method(receiver_type, method_name, &mut embed_path)?;
+
+        // A generic receiver (`Signal<number>`) binds the method's type
+        // parameters positionally: `fn (s Signal) set<T>(next: T)` checked
+        // at `count.set(...)` where `count: Signal<number>` substitutes
+        // `T = number` into the parameter and return types (rfd#56 phase 1).
+        if let Some(type_args) = receiver_args {
+            let subst: HashMap<&'a str, Type<'a>> = info
+                .type_params
+                .iter()
+                .map(|p| p.name)
+                .zip(type_args.iter().cloned())
+                .collect();
+            if !subst.is_empty() {
+                info.param_types = info
+                    .param_types
+                    .iter()
+                    .map(|p| substitute_type(p, &subst))
+                    .collect();
+                info.resolved_return = info
+                    .resolved_return
+                    .map(|r| substitute_type(&r, &subst));
+            }
+        }
 
         if info.mutable && !self.is_mutable_expr(object) {
             self.error_at_expr(
@@ -3748,20 +3961,30 @@ impl<'a> Checker<'a> {
                     }
                 };
                 let arg = &args[0];
-                match arg {
+                let type_args = match arg {
                     ast::Expr::Object { fields, .. } => {
                         let mapped: Vec<(&'a str, &ast::Expr<'a>, ast::Span)> =
                             fields.iter().map(|f| (f.key, &f.value, f.span)).collect();
-                        self.check_struct_literal_fields(name, &info, &mapped, span);
+                        self.check_struct_literal_fields(name, &info, &mapped, span)
                     }
                     _ => {
                         self.error_at_expr(
                             arg,
                             format!("struct factory `{name}` expects an object literal argument"),
                         );
+                        Vec::new()
+                    }
+                };
+                // Same erasure story as the literal form: generic structs
+                // return their `Generic` type with inferred arguments.
+                if info.type_params.is_empty() {
+                    Type::Struct { name }
+                } else {
+                    Type::Generic {
+                        base: name,
+                        args: type_args,
                     }
                 }
-                Type::Struct { name }
             }
             other => {
                 self.error_span(span, format!("value of type `{other}` is not callable"));

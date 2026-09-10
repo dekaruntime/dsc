@@ -10,12 +10,6 @@ use crate::lexer::TokenKind;
 use super::Parser;
 use super::util::token_name;
 
-/// User code cannot declare type parameters (deka#561). Generics stay in the
-/// compiler, reserved for the builtin containers. The diagnostic teaches the
-/// two patterns that cover the need: structural typing for capability, and
-/// builtin containers for carrying a value's identity across a boundary.
-const USER_TYPE_PARAMS_BANNED: &str = "user code cannot declare type parameters — generics are reserved for the language's own types (Array<T>, Option<T>, Result<T, E>, Promise<T>). For capability, define an interface and take it as a parameter, e.g. `interface Named { name: string }` then `fn greet(x: Named)`. To carry a value's identity, use a builtin container.";
-
 impl<'a> Parser<'a> {
     pub(super) fn parse_program(&mut self) -> Option<Program<'a>> {
         self.skip_newlines();
@@ -255,11 +249,11 @@ impl<'a> Parser<'a> {
 
             let name = self.expect_identifier()?;
 
-            if self.at(TokenKind::Lt) {
-                self.error(USER_TYPE_PARAMS_BANNED);
-                return None;
-            }
-            let type_params: &[TypeParam] = &[];
+            let type_params = if self.at(TokenKind::Lt) {
+                self.parse_type_params()?
+            } else {
+                &[]
+            };
 
             self.expect(TokenKind::LParen)?;
             let params = self.parse_params()?;
@@ -290,11 +284,11 @@ impl<'a> Parser<'a> {
 
         // Regular function: `fn add<T>(...) Ret { ... }`
         let name = self.expect_identifier()?;
-        if self.at(TokenKind::Lt) {
-            self.error(USER_TYPE_PARAMS_BANNED);
-            return None;
-        }
-        let type_params: &[TypeParam] = &[];
+        let type_params = if self.at(TokenKind::Lt) {
+            self.parse_type_params()?
+        } else {
+            &[]
+        };
 
         self.expect(TokenKind::LParen)?;
         let params = self.parse_params()?;
@@ -443,11 +437,11 @@ impl<'a> Parser<'a> {
         self.advance(); // `struct`
 
         let name = self.expect_identifier()?;
-        if self.at(TokenKind::Lt) {
-            self.error(USER_TYPE_PARAMS_BANNED);
-            return None;
-        }
-        let type_params: &[TypeParam] = &[];
+        let type_params = if self.at(TokenKind::Lt) {
+            self.parse_type_params()?
+        } else {
+            &[]
+        };
 
         self.expect(TokenKind::LBrace)?;
         let mut fields = Vec::new();
@@ -545,11 +539,11 @@ impl<'a> Parser<'a> {
         self.advance(); // `enum`
 
         let name = self.expect_identifier()?;
-        if self.at(TokenKind::Lt) {
-            self.error(USER_TYPE_PARAMS_BANNED);
-            return None;
-        }
-        let type_params: &[TypeParam] = &[];
+        let type_params = if self.at(TokenKind::Lt) {
+            self.parse_type_params()?
+        } else {
+            &[]
+        };
 
         self.expect(TokenKind::LBrace)?;
         let mut cases = Vec::new();
@@ -619,11 +613,11 @@ impl<'a> Parser<'a> {
         self.advance(); // `interface`
 
         let name = self.expect_identifier()?;
-        if self.at(TokenKind::Lt) {
-            self.error(USER_TYPE_PARAMS_BANNED);
-            return None;
-        }
-        let type_params: &[TypeParam] = &[];
+        let type_params = if self.at(TokenKind::Lt) {
+            self.parse_type_params()?
+        } else {
+            &[]
+        };
 
         self.expect(TokenKind::LBrace)?;
         let mut members = Vec::new();
@@ -722,13 +716,22 @@ impl<'a> Parser<'a> {
 
         let name = self.expect_identifier()?;
 
-        if self.at(TokenKind::Lt) {
-            self.error(USER_TYPE_PARAMS_BANNED);
-            return None;
-        }
+        let type_params = if self.at(TokenKind::Lt) {
+            self.parse_type_params()?
+        } else {
+            &[]
+        };
 
         // Newtype: `type Name Repr` (no `=`).
         if keyword == TokenKind::Type && !self.at(TokenKind::Eq) {
+            if !type_params.is_empty() {
+                // A newtype boxes a primitive representation; there is no
+                // type-parameter slot for it to carry (rfd#56 phase 1).
+                self.error(
+                    "newtype declarations cannot declare type parameters — a newtype boxes a primitive representation (`number`, `string`, `bool`) and has no type parameters to declare",
+                );
+                return None;
+            }
             let repr = self.parse_newtype_repr()?;
             self.expect_statement_end(false)?;
             return Some(Stmt::Newtype {
@@ -748,12 +751,6 @@ impl<'a> Parser<'a> {
                 .with_help("replace `type` with `alias`"),
             );
         }
-
-        if self.at(TokenKind::Lt) {
-            self.error(USER_TYPE_PARAMS_BANNED);
-            return None;
-        }
-        let type_params: &[TypeParam] = &[];
 
         self.expect(TokenKind::Eq)?;
         let value = self.parse_type()?;
@@ -1084,6 +1081,27 @@ impl<'a> Parser<'a> {
         }
 
         self.skip_newlines();
+        Some(alloc_slice(self.arena, params))
+    }
+
+    /// `<T, U>` after a declaration name. Unbounded form only in rfd#56
+    /// phase 1 — a bound (`<T: Named>`) is phase 2 and does not parse yet.
+    pub(super) fn parse_type_params(&mut self) -> Option<&'a [TypeParam<'a>]> {
+        self.expect(TokenKind::Lt)?;
+        let mut params = Vec::new();
+
+        loop {
+            let name = self.expect_identifier()?;
+            let span = self.span_from(self.prev.span.start, self.prev.span.byte_start);
+            params.push(TypeParam { name, span });
+            if !self.eat(TokenKind::Comma) {
+                break;
+            }
+            self.skip_newlines();
+        }
+
+        self.skip_newlines();
+        self.expect(TokenKind::Gt)?;
         Some(alloc_slice(self.arena, params))
     }
 

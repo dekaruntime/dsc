@@ -1,8 +1,0 @@
-{
-  "title": "Component and JSX-style spacing is normalized",
-  "stage": "run",
-  "notes": "Formatter should canonicalize component declarations and deka.ui.jsxs calls.",
-  "hosts": [
-    "browser"
-  ]
-}

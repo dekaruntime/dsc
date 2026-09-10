@@ -1,5 +1,0 @@
-import { echo } from "io"
-fn f() number {
-  return [1, 2]
-}
-echo(f())

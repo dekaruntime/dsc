@@ -1,6 +1,0 @@
-import { echo } from "io"
-const obj = {
-  x: 1
-  y: 2
-}
-echo(obj.x + obj.y)

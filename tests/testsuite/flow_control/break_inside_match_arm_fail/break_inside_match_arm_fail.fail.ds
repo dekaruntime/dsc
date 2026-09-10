@@ -1,7 +1,0 @@
-for (let i = 0; i < 3; i = i + 1) {
-  i = i + 1
-  match (i) {
-    2 => { break },
-    _ => {}
-  }
-}

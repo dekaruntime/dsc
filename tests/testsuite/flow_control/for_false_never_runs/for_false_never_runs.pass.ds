@@ -1,7 +1,0 @@
-import { echo } from "io"
-let i = 0
-for (let j = 0; false; j = j + 1) {
-  echo("never")
-  i = i + 1
-}
-echo(string(i))

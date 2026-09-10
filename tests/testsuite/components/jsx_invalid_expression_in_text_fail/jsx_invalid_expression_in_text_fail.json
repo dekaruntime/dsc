@@ -1,5 +1,0 @@
-{
-  "title": "Invalid expression inside JSX text fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected expression, found ``}``"
-}

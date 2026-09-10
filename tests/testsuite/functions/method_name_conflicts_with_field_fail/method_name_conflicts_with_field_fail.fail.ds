@@ -1,9 +1,0 @@
-import { echo } from "io"
-struct Counter {
-  value: number;
-}
-fn (c Counter) value() number {
-  return c.value
-}
-const c = Counter { value: 5 }
-echo(string(c.value()))

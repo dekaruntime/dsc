@@ -1,5 +1,0 @@
-{
-  "title": "Function returning a boolean",
-  "stage": "run",
-  "notes": "Boolean return types are accepted and enforced."
-}

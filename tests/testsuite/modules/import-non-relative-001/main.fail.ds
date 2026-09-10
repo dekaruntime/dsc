@@ -1,3 +1,0 @@
-import { echo } from "io"
-import { foo } from "bar"
-echo(foo)

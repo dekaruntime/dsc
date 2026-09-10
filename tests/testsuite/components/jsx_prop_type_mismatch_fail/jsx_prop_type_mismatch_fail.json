@@ -1,6 +1,0 @@
-{
-  "title": "A prop of the wrong type is rejected",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expects type",
-  "notes": "deka#443: JSX attributes were never checked against the props interface."
-}

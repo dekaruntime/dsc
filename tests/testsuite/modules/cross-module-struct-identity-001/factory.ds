@@ -1,5 +1,0 @@
-import { Person } from "./types.ds"
-fn make_person(name: string) Person {
-  return Person { name: name }
-}
-export { make_person }

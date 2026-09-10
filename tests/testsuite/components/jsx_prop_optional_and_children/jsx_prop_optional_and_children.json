@@ -1,5 +1,0 @@
-{
-  "title": "Optional props may be omitted; nested children fill `children`",
-  "stage": "run",
-  "notes": "deka#443: the two legitimate ways a required-looking prop is satisfied without an attribute."
-}

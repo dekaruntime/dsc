@@ -1,6 +1,0 @@
-{
-  "title": "Argument type mismatch fails",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "expected argument type `string`, found type `number`"
-}

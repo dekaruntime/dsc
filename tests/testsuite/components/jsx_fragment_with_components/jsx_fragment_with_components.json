@@ -1,7 +1,0 @@
-{
-  "title": "Fragment renders function components",
-  "stage": "run",
-  "hosts": [
-    "browser"
-  ]
-}

@@ -1,6 +1,0 @@
-{
-  "title": "Unclosed JSX single-quoted attribute is rejected",
-  "stage": "parse",
-  "notes": "A JSX-style attribute value with a missing closing single quote is a parse error.",
-  "expectedDiagnosticContains": "unterminated string literal"
-}

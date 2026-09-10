@@ -1,6 +1,0 @@
-{
-  "title": "Struct method missing receiver type fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected identifier, found ``)``",
-  "notes": ""
-}

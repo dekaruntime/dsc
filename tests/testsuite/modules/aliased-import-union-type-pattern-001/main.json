@@ -1,6 +1,0 @@
-{
-  "title": "Union type-pattern matches through a renamed struct import",
-  "stage": "run",
-  "compiler": "v2",
-  "notes": "dsc#51: the type-pattern brand test must compare against the declared name (User), not the local alias (Person); receiver methods and factory identity flow through the import binding."
-}

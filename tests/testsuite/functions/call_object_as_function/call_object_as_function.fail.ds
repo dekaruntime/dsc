@@ -1,5 +1,0 @@
-import { echo } from "io"
-fn callObject(obj: object) number {
-  return obj()
-}
-echo(callObject({}))

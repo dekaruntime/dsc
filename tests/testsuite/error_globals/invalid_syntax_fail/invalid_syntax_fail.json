@@ -1,6 +1,0 @@
-{
-  "title": "Invalid syntax fails to parse",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "expected ``)``, found ``(``"
-}

@@ -1,8 +1,0 @@
-import { echo } from "io"
-fn (s string) shout() string {
-  return s.toUpperCase()
-}
-fn (s string) quote() string {
-  return "<" + s + ">"
-}
-echo("hi".shout().quote())

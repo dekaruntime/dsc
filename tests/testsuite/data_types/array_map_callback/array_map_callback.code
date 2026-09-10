@@ -1,4 +1,0 @@
-import { echo } from "io"
-const arr = [1, 2, 3]
-const d = arr.map(fn(x: number) number { return x * 2 })
-echo(d[1])

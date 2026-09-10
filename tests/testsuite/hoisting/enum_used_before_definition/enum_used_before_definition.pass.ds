@@ -1,6 +1,0 @@
-import { echo } from "io"
-echo(Color.Red.name)
-enum Color {
-  Red,
-  Green,
-}

@@ -1,6 +1,0 @@
-{
-  "title": "Calling a Math constant as a function fails",
-  "stage": "run",
-  "expectedDiagnosticContains": "is not a function",
-  "notes": "Math.PI is a number, not a function."
-}

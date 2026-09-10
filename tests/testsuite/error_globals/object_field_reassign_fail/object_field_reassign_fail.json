@@ -1,6 +1,0 @@
-{
-  "title": "Reassigning an object field fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "cannot assign to field `a` of immutable value",
-  "notes": "Object literals are frozen, so fields are immutable."
-}

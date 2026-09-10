@@ -1,3 +1,0 @@
-import { echo } from "io"
-import { add as plus } from "./math.ds"
-echo("" + plus(1, 2))

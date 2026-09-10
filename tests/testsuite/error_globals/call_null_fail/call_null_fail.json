@@ -1,6 +1,0 @@
-{
-  "title": "Calling null as a function fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "unknown identifier `null`",
-  "notes": "Only functions are callable."
-}

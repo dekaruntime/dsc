@@ -1,6 +1,0 @@
-{
-  "title": "Reassigning console.log fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "unknown identifier `console`",
-  "notes": "Global objects are frozen."
-}

@@ -1,6 +1,0 @@
-{
-  "title": "Unclosed block comment is rejected",
-  "stage": "parse",
-  "notes": "A block comment without a closing */ consumes the rest of the file and causes a parse error.",
-  "expectedDiagnosticContains": "unterminated block comment"
-}

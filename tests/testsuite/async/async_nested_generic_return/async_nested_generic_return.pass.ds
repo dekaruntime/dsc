@@ -1,7 +1,0 @@
-import { echo } from "io"
-async fn maybe(n: number) Promise<Option<number>> {
-  return Option.Some(n)
-}
-
-await maybe(1)
-echo("ok")

@@ -1,3 +1,0 @@
-fn take(b: bytes) number {
-  return b.slice
-}

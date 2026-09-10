@@ -1,6 +1,0 @@
-import { echo } from "io"
-import { read } from "tcp"
-echo(match (read(0, 0)) {
-  Ok(v) => "ok",
-  Err(e) => "err",
-})

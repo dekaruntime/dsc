@@ -1,5 +1,0 @@
-{
-  "title": "Divide two values of the same number newtype returns a number",
-  "stage": "run",
-  "notes": "Phase 3 of deka#346: newtype operator lowering."
-}

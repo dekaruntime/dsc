@@ -1,5 +1,0 @@
-{
-  "title": "const inside a function body respects source order.",
-  "stage": "run",
-  "notes": ""
-}

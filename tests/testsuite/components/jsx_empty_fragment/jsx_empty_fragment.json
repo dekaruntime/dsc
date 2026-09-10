@@ -1,7 +1,0 @@
-{
-  "title": "Empty fragment renders",
-  "stage": "run",
-  "hosts": [
-    "browser"
-  ]
-}

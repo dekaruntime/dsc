@@ -1,5 +1,0 @@
-{
-  "title": "Struct literal fields can be provided in any order",
-  "stage": "run",
-  "notes": "Named struct initialization does not require declaration order."
-}

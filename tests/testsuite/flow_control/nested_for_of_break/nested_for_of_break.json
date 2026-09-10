@@ -1,5 +1,0 @@
-{
-  "title": "Break only exits the innermost loop",
-  "stage": "run",
-  "notes": "A bare break inside nested loops terminates only the immediately enclosing loop."
-}

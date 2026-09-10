@@ -1,5 +1,0 @@
-{
-  "title": "Nested constructor patterns covering every case are accepted",
-  "stage": "run",
-  "notes": "deka#396 companion: the passing side of nested coverage."
-}

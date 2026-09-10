@@ -1,6 +1,0 @@
-{
-  "title": "Default parameter type mismatch fails",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "expected argument type `number`, found type `string`"
-}

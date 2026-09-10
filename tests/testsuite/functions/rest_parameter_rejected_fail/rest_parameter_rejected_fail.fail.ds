@@ -1,9 +1,0 @@
-import { echo } from "io"
-fn sum(...xs: number[]) number {
-  let total = 0
-  for (const x of xs) {
-    total = total + x
-  }
-  return total
-}
-echo(sum(1, 2, 3))

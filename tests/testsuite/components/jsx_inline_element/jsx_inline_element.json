@@ -1,6 +1,0 @@
-{
-  "title": "Empty expression in inline JSX attribute fails",
-  "stage": "parse",
-  "notes": "A JSX attribute expression with no content is a parse error.",
-  "expectedDiagnosticContains": "expected expression, found ``}``"
-}

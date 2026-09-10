@@ -1,5 +1,0 @@
-{
-  "title": "Type annotation on a const binding",
-  "stage": "run",
-  "notes": "Binding type annotations are supported: `const n: number = 42`. They were previously rejected because DekaScript const rode the PHP ClassConst node and let rode StaticVar, neither of which had a type position, so the parser demanded `=` straight after the name."
-}

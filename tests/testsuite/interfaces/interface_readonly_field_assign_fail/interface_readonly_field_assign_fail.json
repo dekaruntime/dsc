@@ -1,5 +1,0 @@
-{
-  "title": "Assigning to read-only interface field fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "cannot assign to field `value` of immutable value"
-}

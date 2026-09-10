@@ -1,3 +1,0 @@
-// `process` is not a DekaScript name. Reaching it in plain code is a
-// diagnostic, not a silent ambient (deka#378, RFD 21 / RFD 13 P10).
-const here = process.cwd()

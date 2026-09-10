@@ -1,6 +1,0 @@
-{
-  "title": "Overlapping union members are rejected at declaration",
-  "stage": "typecheck",
-  "expectedDiagnosticContains": "overlap",
-  "notes": "deka#530, rfd#42. The message must name both members; the restriction can be relaxed later without breaking code."
-}

@@ -1,6 +1,0 @@
-{
-  "title": "Unclosed string literal",
-  "stage": "parse",
-  "notes": "A string literal missing its closing quote is a parse error.",
-  "expectedDiagnosticContains": "unterminated string literal"
-}

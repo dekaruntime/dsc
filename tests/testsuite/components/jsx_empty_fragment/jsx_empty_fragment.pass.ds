@@ -1,5 +1,0 @@
-import { echo } from "io"
-import { jsx, Fragment } from "ui/jsx"
-import { renderToString } from "ui/server"
-const html = renderToString(jsx(Fragment, {children: []}))
-echo(html.html)

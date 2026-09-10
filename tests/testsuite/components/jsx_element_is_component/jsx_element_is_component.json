@@ -1,5 +1,0 @@
-{
-  "title": "A JSX element is a Component",
-  "stage": "run",
-  "notes": "deka#461: JSX expressions resolved to Type::Infer, which is universally assignable, so JSX values were silently unchecked."
-}

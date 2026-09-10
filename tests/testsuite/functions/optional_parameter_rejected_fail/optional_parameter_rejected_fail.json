@@ -1,6 +1,0 @@
-{
-  "title": "Optional parameters are rejected",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "expected ``)``, found ``?``"
-}

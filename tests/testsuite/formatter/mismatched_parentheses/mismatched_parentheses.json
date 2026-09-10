@@ -1,6 +1,0 @@
-{
-  "title": "Mismatched parentheses",
-  "stage": "parse",
-  "notes": "An opening parenthesis without a matching close is a parse error.",
-  "expectedDiagnosticContains": "expected `;` or newline, found ``)``"
-}

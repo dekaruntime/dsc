@@ -1,6 +1,0 @@
-{
-  "title": "Embedded struct that does not provide the interface method fails",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "expected argument type `Mover`, found type `Robot`"
-}

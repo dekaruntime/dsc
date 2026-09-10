@@ -1,5 +1,0 @@
-{
-  "title": "Nested generic Promise<Option<T>> return type parses",
-  "stage": "run",
-  "notes": "Used to fail with \"expected `>`, found `>>`\" until the type parser learned to split the lexer's Shr token (deka#465)."
-}

@@ -1,6 +1,0 @@
-{
-  "title": "Labeled break is rejected",
-  "stage": "parse",
-  "notes": "DekaScript break/continue only accept numeric level literals, not statement labels.",
-  "expectedDiagnosticContains": "expected `;` or newline, found ``:``"
-}

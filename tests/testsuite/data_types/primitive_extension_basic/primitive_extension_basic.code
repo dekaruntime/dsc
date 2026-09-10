@@ -1,6 +1,0 @@
-import { echo } from "io"
-fn (s string) slugify() string {
-  return s.toLowerCase().replaceAll(" ", "-")
-}
-const title = "Hello World"
-echo(title.slugify())

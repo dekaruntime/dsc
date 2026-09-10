@@ -1,3 +1,0 @@
-import { echo } from "io"
-import { answer } from "./answer.ds"
-echo("" + answer())

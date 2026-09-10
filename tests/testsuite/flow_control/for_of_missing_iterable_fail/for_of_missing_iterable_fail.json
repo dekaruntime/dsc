@@ -1,6 +1,0 @@
-{
-  "title": "For-of missing iterable expression fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected expression, found ``)``",
-  "notes": "A for-of loop requires an iterable expression after `of`."
-}

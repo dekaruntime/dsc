@@ -1,6 +1,0 @@
-{
-  "title": "Enum body without braces is rejected",
-  "stage": "parse",
-  "notes": "Enum declarations require a braced body; an inline list of variants is a parse error.",
-  "expectedDiagnosticContains": "expected ``{``, found `identifier`"
-}

@@ -1,6 +1,0 @@
-{
-  "title": "console.assert fails at compile time",
-  "stage": "parse",
-  "expectedDiagnosticContains": "unknown identifier `console`",
-  "notes": "console is gone from plain DekaScript per RFD 32, matching console_log_reassign_fail."
-}

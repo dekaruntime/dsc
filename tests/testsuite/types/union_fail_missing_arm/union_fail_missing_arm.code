@@ -1,6 +1,0 @@
-// deka#530, rfd#42: a match over a union must cover every member.
-fn render(v: string | number) string {
-  return match (v) {
-    string(s) => s,
-  }
-}

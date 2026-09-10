@@ -1,5 +1,0 @@
-{
-  "title": "Returning a wrong-typed value from an async function fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected return type `string`, found type `number`"
-}

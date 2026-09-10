@@ -1,3 +1,0 @@
-import { echo } from "io"
-import { subtract } from "./math.ds"
-echo(subtract(1, 2))

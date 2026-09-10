@@ -1,8 +1,0 @@
-{
-  "title": "Render a void HTML element",
-  "stage": "run",
-  "notes": "",
-  "hosts": [
-    "browser"
-  ]
-}

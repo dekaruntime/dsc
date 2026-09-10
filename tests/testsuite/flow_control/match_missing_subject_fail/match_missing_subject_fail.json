@@ -1,6 +1,0 @@
-{
-  "title": "Match missing subject expression fails",
-  "stage": "parse",
-  "notes": "A match expression requires a value to match against.",
-  "expectedDiagnosticContains": "expected object key, found `newline`"
-}

@@ -1,6 +1,0 @@
-{
-  "title": "Optional chaining is rejected",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "expected expression, found ``.``"
-}

@@ -1,6 +1,0 @@
-{
-  "title": "Ambiguous embedded method fails",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "Ambiguous method 'move' on struct 'Triathlete'; multiple embedded structs promote it"
-}

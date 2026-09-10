@@ -1,6 +1,0 @@
-{
-  "title": "Cannot add a number newtype and a raw number",
-  "stage": "typecheck",
-  "expectedDiagnosticContains": "cannot add",
-  "notes": "Phase 3 of deka#346: mixed newtype/scalar arithmetic is rejected for + and -."
-}

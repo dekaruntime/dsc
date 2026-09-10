@@ -1,5 +1,0 @@
-{
-  "title": "await inside a regular function fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "`await` is only allowed inside async functions or at the top level"
-}

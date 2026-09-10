@@ -1,7 +1,0 @@
-{
-  "title": "Element with multiple attributes",
-  "stage": "run",
-  "hosts": [
-    "browser"
-  ]
-}

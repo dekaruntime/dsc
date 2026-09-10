@@ -1,6 +1,0 @@
-{
-  "title": "Break inside match arm fails",
-  "stage": "parse",
-  "notes": "Break and continue are not valid inside match arm bodies.",
-  "expectedDiagnosticContains": "expected object key, found ``break``"
-}

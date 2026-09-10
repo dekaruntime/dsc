@@ -1,5 +1,0 @@
-{
-  "title": "class declaration is rejected",
-  "stage": "parse",
-  "expectedDiagnosticContains": "unknown identifier `class`"
-}

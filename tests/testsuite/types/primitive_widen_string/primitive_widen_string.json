@@ -1,5 +1,0 @@
-{
-  "title": "string() widens number and bool primitives",
-  "stage": "run",
-  "notes": "deka#364: string(x) accepts number/bool primitives, not just newtypes over string."
-}

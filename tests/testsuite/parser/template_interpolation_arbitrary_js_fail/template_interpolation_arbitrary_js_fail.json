@@ -1,6 +1,0 @@
-{
-  "title": "Arbitrary JavaScript inside ${} is rejected at check time",
-  "stage": "typecheck",
-  "expectedDiagnosticContains": "unknown identifier `globalThis`",
-  "notes": "dsc#89. `${...}` is a checked DekaScript expression; names the checker never saw are compile-time errors, not runtime JavaScript."
-}

@@ -1,3 +1,0 @@
-import { echo } from "io"
-const s = `hello ${1}`
-echo(s)

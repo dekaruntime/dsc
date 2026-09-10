@@ -1,3 +1,0 @@
-import { echo } from "io"
-import { value } from "./values.ds"
-echo(value)

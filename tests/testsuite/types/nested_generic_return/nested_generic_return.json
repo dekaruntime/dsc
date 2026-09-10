@@ -1,5 +1,0 @@
-{
-  "title": "Nested generic in parameter and return position parses",
-  "stage": "run",
-  "notes": "Nested generics must work in every type position, not just const annotations (deka#465)."
-}

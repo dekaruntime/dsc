@@ -1,5 +1,0 @@
-{
-  "title": "Component parameter missing type annotation fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "parameter `props` is missing a type annotation"
-}

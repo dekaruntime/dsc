@@ -1,3 +1,0 @@
-import { echo } from "io"
-const nested = { outer: { inner: 42 } inner: 1 }
-echo(nested.outer.inner)

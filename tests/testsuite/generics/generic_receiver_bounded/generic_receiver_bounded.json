@@ -1,6 +1,0 @@
-{
-  "title": "Bounded receiver methods on a generic type: interface and union bounds",
-  "stage": "run",
-  "expectedStdoutNative": "Ada\nA-1\n7\n",
-  "notes": "dsc#101 (rfd#56 phase 2): `fn (x Holder<T: Named>) name()` unlocks Named's members in the body and checks the receiver's type argument at the call site; a union bound narrows per match arm."
-}

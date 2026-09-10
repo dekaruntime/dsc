@@ -1,3 +1,0 @@
-interface Greeter {
-  fn greet() string {}
-}

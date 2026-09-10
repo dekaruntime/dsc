@@ -1,5 +1,0 @@
-{
-  "title": "Multiple root JSX elements fail",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected expression, found ``/``"
-}

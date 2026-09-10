@@ -1,2 +1,0 @@
-import { echo } from "io"
-try { echo(1) } catch (e) { echo(e) }

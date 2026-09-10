@@ -1,5 +1,0 @@
-{
-  "title": "unsafe block catches invalid URL constructor error",
-  "stage": "run",
-  "notes": ""
-}

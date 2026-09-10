@@ -1,3 +1,0 @@
-import { echo } from "io"
-echo(string("a".getType() == "b".getType()))
-echo(string("a".getType() == 1.getType()))

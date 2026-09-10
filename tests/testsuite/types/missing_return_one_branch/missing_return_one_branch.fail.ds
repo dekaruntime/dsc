@@ -1,7 +1,0 @@
-import { echo } from "io"
-fn maybe(x: number) string {
-  if (x > 0) {
-    return "y"
-  }
-}
-echo("ok")

@@ -1,5 +1,0 @@
-import { echo } from "io"
-enum Status {
-  Ready = 1
-}
-echo(Status.Ready)

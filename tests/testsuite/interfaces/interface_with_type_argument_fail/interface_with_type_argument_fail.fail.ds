@@ -1,7 +1,0 @@
-interface Box<T> {
-  value: T;
-}
-
-fn read(b: Box<number>) number {
-  return 0
-}

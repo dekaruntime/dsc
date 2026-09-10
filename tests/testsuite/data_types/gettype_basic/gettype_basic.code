@@ -1,4 +1,0 @@
-import { echo } from "io"
-echo("hello".getType().toString())
-echo(42.getType().toString())
-echo(true.getType().toString())

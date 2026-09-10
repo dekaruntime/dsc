@@ -1,5 +1,0 @@
-{
-  "title": "Match on Result with Ok and Err patterns",
-  "stage": "run",
-  "notes": "Bare Result enum variants are recognized as match patterns."
-}

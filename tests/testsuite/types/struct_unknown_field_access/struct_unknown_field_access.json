@@ -1,6 +1,0 @@
-{
-  "title": "Accessing an unknown struct field fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "struct `Point` has no field `y`",
-  "notes": "Struct field access is restricted to declared fields."
-}

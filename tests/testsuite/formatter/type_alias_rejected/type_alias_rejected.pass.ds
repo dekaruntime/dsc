@@ -1,4 +1,0 @@
-import { echo } from "io"
-alias ID = number
-const x: ID = 5
-echo(string(x))

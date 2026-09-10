@@ -1,5 +1,0 @@
-{
-  "title": "const initializer can reference preceding let",
-  "stage": "run",
-  "notes": "Regression for deka#184. const must not be hoisted above let."
-}

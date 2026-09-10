@@ -1,4 +1,0 @@
-import { echo } from "io"
-const arr = [1, 2]
-arr.reverse()
-echo(string(arr[0]))

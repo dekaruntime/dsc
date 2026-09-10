@@ -1,6 +1,0 @@
-{
-  "title": "let without an initializer is rejected",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected ``=``, found `newline`",
-  "notes": ""
-}

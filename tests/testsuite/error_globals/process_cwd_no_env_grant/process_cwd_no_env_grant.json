@@ -1,5 +1,0 @@
-{
-  "title": "Without an env grant, process is absent even inside unsafe",
-  "stage": "run",
-  "notes": "deka#378: the two gates are independent. unsafe alone is not enough."
-}

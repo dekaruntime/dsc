@@ -1,5 +1,0 @@
-{
-  "title": "Interface method implemented with mutable receiver can be called through interface",
-  "stage": "run",
-  "notes": ""
-}

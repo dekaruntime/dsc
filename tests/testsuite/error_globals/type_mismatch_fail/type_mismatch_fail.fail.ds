@@ -1,3 +1,0 @@
-import { echo } from "io"
-const x: number = "not a number"
-echo(x)

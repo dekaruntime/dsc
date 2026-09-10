@@ -1,5 +1,0 @@
-import { echo } from "io"
-
-type Cents number
-const a = Cents(5)
-echo(string(unboxNumber(-a)))

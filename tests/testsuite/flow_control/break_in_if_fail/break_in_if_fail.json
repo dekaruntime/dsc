@@ -1,5 +1,0 @@
-{
-  "title": "Break inside bare if block fails",
-  "stage": "parse",
-  "notes": "Break is only valid inside a loop."
-}

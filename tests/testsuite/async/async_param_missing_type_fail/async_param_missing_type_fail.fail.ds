@@ -1,5 +1,0 @@
-import { echo } from "io"
-async fn greet(name) Promise<void> {
-  echo(name)
-}
-await greet("hi")

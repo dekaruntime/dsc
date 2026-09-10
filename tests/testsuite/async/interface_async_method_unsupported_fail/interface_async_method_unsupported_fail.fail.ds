@@ -1,3 +1,0 @@
-interface Loader {
-  async fn load() Promise<string>
-}

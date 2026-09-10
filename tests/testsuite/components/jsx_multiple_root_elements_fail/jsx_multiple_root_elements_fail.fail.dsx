@@ -1,4 +1,0 @@
-import { echo } from "io"
-const ui = globalThis.deka.ui
-const html = ui.renderToString(<div>a</div><span>b</span>)
-echo(html.html)

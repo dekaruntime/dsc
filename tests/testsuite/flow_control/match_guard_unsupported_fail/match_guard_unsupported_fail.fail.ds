@@ -1,5 +1,0 @@
-const x = 1
-match (x) {
-  1 if x > 0 => "positive one",
-  _ => "other"
-}

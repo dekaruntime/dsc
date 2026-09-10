@@ -1,5 +1,0 @@
-{
-  "title": "Multiply a number newtype by a raw number",
-  "stage": "run",
-  "notes": "Phase 3 of deka#346: newtype operator lowering."
-}

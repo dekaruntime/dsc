@@ -1,5 +1,0 @@
-{
-  "title": "Nested constructor patterns Ok(Some(v)) and Ok(None)",
-  "stage": "run",
-  "notes": "deka#300 / RFD 6"
-}

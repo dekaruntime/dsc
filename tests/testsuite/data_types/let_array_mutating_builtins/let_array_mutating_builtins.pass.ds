@@ -1,8 +1,0 @@
-let items = [1, 2, 3]
-items.shift()
-items.unshift(0)
-items.splice(0, 1)
-items.sort()
-items.reverse()
-items.fill(4, 0)
-items.copyWithin(1, 0)

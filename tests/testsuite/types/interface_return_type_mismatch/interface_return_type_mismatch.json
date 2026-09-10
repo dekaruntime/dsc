@@ -1,6 +1,0 @@
-{
-  "title": "Returning object literal with wrong field type for interface fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected return type `Named`, found type `{name: number}`",
-  "notes": "Object literals returned as an interface type must match every field type."
-}

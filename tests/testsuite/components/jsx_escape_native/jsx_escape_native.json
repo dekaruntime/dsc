@@ -1,5 +1,0 @@
-{
-  "title": "Native renderToString HTML-escapes text children",
-  "stage": "run",
-  "hosts": ["native"]
-}

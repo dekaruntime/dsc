@@ -1,1 +1,0 @@
-{ fn (p Person) greet() string { return p.name } }

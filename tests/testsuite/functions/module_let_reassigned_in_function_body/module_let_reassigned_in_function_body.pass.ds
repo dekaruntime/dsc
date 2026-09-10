@@ -1,9 +1,0 @@
-import { echo } from "io"
-let counter = 0
-fn bump() number {
-  counter = counter + 1
-  return counter
-}
-bump()
-bump()
-echo(string(counter))

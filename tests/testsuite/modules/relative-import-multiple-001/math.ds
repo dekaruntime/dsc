@@ -1,7 +1,0 @@
-export fn add(a: number, b: number) number {
-  return a + b
-}
-
-export fn subtract(a: number, b: number) number {
-  return a - b
-}

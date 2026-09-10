@@ -1,8 +1,0 @@
-import { signal } from "ui/reactive"
-
-fn Counter() Component {
-  const count = signal(0)
-  return <button>{count()}</button>
-}
-
-const page = <Counter />

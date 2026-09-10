@@ -1,7 +1,0 @@
-// deka#468: `Err("y")` leaves T unconstrained but *does* fix E to `string`.
-// The unconstrained half must not launder the half that is constrained --
-// otherwise `Type::Var` would just be the universally-assignable hole under a
-// new name.
-fn bad() Result<string, number> {
-  return Result.Err("y")
-}

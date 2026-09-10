@@ -1,6 +1,0 @@
-{
-  "title": "Rest parameters are rejected",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "expected identifier, found ``...``"
-}

@@ -1,5 +1,0 @@
-{
-  "title": "Struct initializer missing comma between fields",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected `;` or newline between struct fields"
-}

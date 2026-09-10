@@ -1,5 +1,0 @@
-import { echo } from "io"
-fn (s string) getType() string {
-  return "user:" + s
-}
-echo("hi".getType())

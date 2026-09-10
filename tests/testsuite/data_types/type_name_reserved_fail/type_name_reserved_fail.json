@@ -1,6 +1,0 @@
-{
-  "title": "Declaring a type named Type fails",
-  "stage": "typecheck",
-  "expectedDiagnosticContains": "`Type` is a builtin type",
-  "notes": "deka#529: `Type` is reserved for the first-class runtime type descriptor; restriction-first, relaxable later."
-}

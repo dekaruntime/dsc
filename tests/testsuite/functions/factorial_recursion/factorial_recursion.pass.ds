@@ -1,8 +1,0 @@
-import { echo } from "io"
-fn factorial(n: number) number {
-  if (n <= 1) {
-    return 1
-  }
-  return n * factorial(n - 1)
-}
-echo(string(factorial(5)))

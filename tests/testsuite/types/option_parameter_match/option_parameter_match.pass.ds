@@ -1,9 +1,0 @@
-import { echo } from "io"
-fn greet(name: Option<string>) string {
-  return match (name) {
-    Some(n) => "Hello " + n,
-    None => "Hello stranger",
-  }
-}
-echo(greet(Option.Some("Deka")))
-echo(greet(Option.None))

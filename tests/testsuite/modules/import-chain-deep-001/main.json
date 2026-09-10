@@ -1,4 +1,0 @@
-{
-  "title": "deep import chain resolves through local re-exports",
-  "stage": "run"
-}

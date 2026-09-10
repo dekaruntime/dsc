@@ -1,6 +1,0 @@
-import { echo } from "io"
-import { get } from "http"
-echo(match (get("http://127.0.0.1:1/")) {
-  Ok(v) => "ok",
-  Err(e) => "err",
-})

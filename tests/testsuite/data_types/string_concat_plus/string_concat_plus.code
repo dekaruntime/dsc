@@ -1,4 +1,0 @@
-import { echo } from "io"
-const a = "hello"
-const b = "world"
-echo(a + " " + b)

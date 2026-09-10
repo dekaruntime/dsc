@@ -1,4 +1,0 @@
-import "./card_a.css"
-export fn CardA() {
-    return <div class="card">A</div>
-}

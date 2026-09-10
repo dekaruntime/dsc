@@ -1,7 +1,0 @@
-import { echo } from "io"
-struct Point {
-  x: number;
-}
-if (true) {
-  echo(string(Point({x: 5}).x))
-}

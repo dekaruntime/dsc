@@ -1,9 +1,0 @@
-import { echo } from "io"
-fn f(r: Result<Option<number>, string>) number {
-  return match (r) {
-    Err(_) => 0,
-    Ok(None) => 1,
-    Ok(Some(v)) => v,
-  }
-}
-echo(string(f(Result.Ok(Option.Some(7)))))

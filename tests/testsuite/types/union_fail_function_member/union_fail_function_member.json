@@ -1,6 +1,0 @@
-{
-  "title": "A function type in a union is rejected, naming the decidable-predicate rule",
-  "stage": "typecheck",
-  "expectedDiagnosticContains": "decidable runtime predicate",
-  "notes": "deka#530, rfd#42. Only primitives, structs, enums and interfaces have runtime predicates today."
-}

@@ -1,5 +1,0 @@
-{
-  "title": "Leading-zero octal-style integer fails",
-  "stage": "parse",
-  "notes": ""
-}

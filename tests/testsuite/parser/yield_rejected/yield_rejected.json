@@ -1,6 +1,0 @@
-{
-  "title": "yield expression is rejected",
-  "stage": "parse",
-  "notes": "Native CLI currently accepts yield expressions silently, producing a divergence.",
-  "expectedDiagnosticContains": "unknown identifier `yield`"
-}

@@ -1,6 +1,0 @@
-{
-  "title": "Break level zero fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected `;` or newline, found `number`",
-  "notes": "A numeric break level must be a positive integer literal."
-}

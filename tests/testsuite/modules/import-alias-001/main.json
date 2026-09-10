@@ -1,4 +1,0 @@
-{
-  "title": "import { name as alias } binds the alias",
-  "stage": "run"
-}

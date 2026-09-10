@@ -1,6 +1,0 @@
-import { echo } from "io"
-fn f(x: number) number {
-  return x
-}
-const g = f
-echo(string(g(42)))

@@ -1,8 +1,0 @@
-import { echo } from "io"
-interface Named {
-  name: string;
-}
-fn show(n: Named) {
-  echo(n.name)
-}
-show({name: "Deka"})

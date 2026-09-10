@@ -1,5 +1,0 @@
-// rfd#56 phase 1: comparison is not among the operations an unbounded T
-// supports — equality is a capability, and phase 1 grants none.
-fn bad<T>(a: T, b: T) boolean {
-  return a == b
-}

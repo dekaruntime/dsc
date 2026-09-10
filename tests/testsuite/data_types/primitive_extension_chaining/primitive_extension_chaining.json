@@ -1,5 +1,0 @@
-{
-  "title": "Chained primitive extension calls",
-  "stage": "run",
-  "notes": "deka#527: `x.a().b()` rewrites to `b$string(a$string(x))`."
-}

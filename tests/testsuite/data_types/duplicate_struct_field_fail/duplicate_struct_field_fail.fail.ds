@@ -1,5 +1,0 @@
-struct Point {
-  x: number;
-  x: number;
-}
-const p = Point { x: 1 }

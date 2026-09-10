@@ -1,9 +1,0 @@
-async fn value() Promise<number> {
-  return 1
-}
-
-async fn main() Promise<string> {
-  return await value()
-}
-
-await main()

@@ -1,6 +1,0 @@
-{
-  "title": "Nested receiver method is rejected",
-  "stage": "parse",
-  "expectedDiagnosticContains": "function declarations are only allowed at the top level in DekaScript",
-  "notes": "Receiver methods must be top-level so they are collected and registered after struct factories."
-}

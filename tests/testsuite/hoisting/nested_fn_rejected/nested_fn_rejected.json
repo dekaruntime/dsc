@@ -1,6 +1,0 @@
-{
-  "title": "Nested function declaration is rejected",
-  "stage": "parse",
-  "expectedDiagnosticContains": "function declarations are only allowed at the top level in DekaScript",
-  "notes": "DekaScript declarations that the emitter hoists must not appear inside blocks."
-}

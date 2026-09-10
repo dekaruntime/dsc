@@ -1,5 +1,0 @@
-{
-  "title": "Exhaustive match on enum returns correct value",
-  "stage": "run",
-  "notes": "All enum cases covered in order produce the expected arm."
-}

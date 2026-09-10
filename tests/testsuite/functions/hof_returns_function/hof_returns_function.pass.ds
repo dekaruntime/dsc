@@ -1,6 +1,0 @@
-import { echo } from "io"
-fn makeAdder(n: number) fn(number) number {
-  return fn(x: number) number { return x + n }
-}
-const add10 = makeAdder(10)
-echo(string(add10(5)))

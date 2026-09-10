@@ -1,5 +1,0 @@
-import { echo } from "io"
-const arr = [1, 2, 3]
-echo(string(arr.includes(2, 2)))
-echo(string(arr.includes(3, 2)))
-echo(string(arr.includes(1, 1)))

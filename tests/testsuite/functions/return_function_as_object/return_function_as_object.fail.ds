@@ -1,7 +1,0 @@
-import { echo } from "io"
-fn makeAdder(base: number) object {
-  const adder = fn(x: number) number { return x + base }
-  return adder
-}
-const f = makeAdder(5)
-echo(f(3))

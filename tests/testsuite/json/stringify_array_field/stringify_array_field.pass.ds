@@ -1,3 +1,0 @@
-import { echo } from "io"
-struct Payload { xs: Array<number> }
-echo((Payload { xs: [1, 2] }).toJSON())

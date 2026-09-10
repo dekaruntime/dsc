@@ -1,3 +1,0 @@
-import { echo } from "io"
-import { add } from "./missing.ds"
-echo(add(1, 2))

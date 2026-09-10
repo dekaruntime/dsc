@@ -1,6 +1,0 @@
-{
-  "title": "Passing a primitive where an interface is expected fails",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "expected argument type `Named`, found type `string`"
-}

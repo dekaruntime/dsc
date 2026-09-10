@@ -1,5 +1,0 @@
-{
-  "title": "Optional struct field can be provided explicitly",
-  "stage": "run",
-  "notes": "An optional field accepts a concrete value when present."
-}

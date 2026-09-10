@@ -1,9 +1,0 @@
-import { echo } from "io"
-struct Inner {
-  value: number;
-}
-struct Outer {
-  Inner;
-}
-const o = Outer {  }
-echo(o)

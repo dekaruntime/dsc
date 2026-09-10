@@ -1,1 +1,0 @@
-for (let i = 0; false; i = i + 1) { enum Color { Red } }

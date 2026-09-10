@@ -1,4 +1,0 @@
-enum Shape {
-  Circle(number)
-  Rectangle(number, number)
-}

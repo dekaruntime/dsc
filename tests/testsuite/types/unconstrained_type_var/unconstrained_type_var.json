@@ -1,5 +1,0 @@
-{
-  "title": "Unconstrained type parameters unify with the declared type",
-  "stage": "run",
-  "notes": "deka#468: Ok/Err/None and [] yield Type::Var, which asserts nothing and therefore unifies. Distinct from Type::Infer, which means the checker could not resolve a type."
-}

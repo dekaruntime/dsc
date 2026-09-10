@@ -1,7 +1,0 @@
-{
-  "title": "Self-closing div renders",
-  "stage": "run",
-  "hosts": [
-    "browser"
-  ]
-}

@@ -1,5 +1,0 @@
-{
-  "title": "Unawaited Promise coerces to string in concatenation",
-  "stage": "run",
-  "notes": "Current runtime stringifies the Promise object during concatenation."
-}

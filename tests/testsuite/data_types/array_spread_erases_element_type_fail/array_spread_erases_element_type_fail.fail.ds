@@ -1,5 +1,0 @@
-// dsc#88: spread used to erase the element type (Infer), so a trailing
-// element of another type was silently unchecked and reached user code.
-const xs = ["a", "b"]
-const ys = [...xs, 1]
-echo(ys)

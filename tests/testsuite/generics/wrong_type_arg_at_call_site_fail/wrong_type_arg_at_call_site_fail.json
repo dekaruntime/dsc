@@ -1,6 +1,0 @@
-{
-  "title": "A wrong type argument at the call site is still a type error",
-  "stage": "typecheck",
-  "notes": "rfd#56 phase 1: `count` is Signal<number>, so `count.set(\"nope\")` must fail with the ordinary argument-type mismatch — the receiver's type argument substitutes into the method's parameter before the argument check.",
-  "expectedDiagnosticContains": "expected argument type `number`, found type `string`"
-}

@@ -1,5 +1,0 @@
-{
-  "title": "For loop with false condition never runs",
-  "stage": "run",
-  "notes": "The body of for(false) should not execute."
-}

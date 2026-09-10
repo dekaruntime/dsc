@@ -1,8 +1,0 @@
-import { echo } from "io"
-interface Named {
-  name: string;
-}
-fn getName() Named {
-  return {name: 42}
-}
-echo(getName().name)

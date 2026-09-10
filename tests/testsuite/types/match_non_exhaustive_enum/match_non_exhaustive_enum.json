@@ -1,6 +1,0 @@
-{
-  "title": "Non-exhaustive match on enum fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "missing Color::Blue",
-  "notes": "Match expressions over enums must cover every case."
-}

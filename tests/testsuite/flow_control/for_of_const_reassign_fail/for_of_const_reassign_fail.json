@@ -1,5 +1,0 @@
-{
-  "title": "Reassigning for-of loop variable fails",
-  "stage": "parse",
-  "notes": "A const loop variable cannot be reassigned."
-}

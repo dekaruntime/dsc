@@ -1,5 +1,0 @@
-{
-  "title": "Template literals with interpolation work",
-  "stage": "run",
-  "notes": "Template literals are valid DekaScript syntax."
-}

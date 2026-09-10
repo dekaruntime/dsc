@@ -1,6 +1,0 @@
-import { echo } from "io"
-const factor = 3
-fn scale(x: number) number {
-  return x * factor
-}
-echo(string(scale(4)))

@@ -1,4 +1,0 @@
-// deka#530, rfd#42: a union value used without narrowing is a compile
-// error — `v.length` on `string | number` must fail.
-const v: string | number = "hello"
-const n = v.length

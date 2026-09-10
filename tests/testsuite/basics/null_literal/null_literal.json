@@ -1,7 +1,0 @@
-{
-  "title": "Null literal is rejected",
-  "stage": "parse",
-  "notes": "DekaScript uses Option<T> instead of null.",
-  "status": "fail",
-  "expectedDiagnosticContains": "unknown identifier `null`"
-}

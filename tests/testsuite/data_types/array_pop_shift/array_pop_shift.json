@@ -1,5 +1,0 @@
-{
-  "title": "pop()/shift() return a real Option and mutate the array",
-  "stage": "run",
-  "notes": "deka#566: the emitter rewrites pop()/shift() to an Option-producing expression ((v) => v.length > 0 ? Some(v.pop()) : None)(recv), matching first()/last(). Covers the mutation, empty arrays, unwrap-or, and match. Receivers must be mutable \u2014 the const case is error_globals/array_pop_frozen_fail."
-}

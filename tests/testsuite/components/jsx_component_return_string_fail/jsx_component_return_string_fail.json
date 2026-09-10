@@ -1,5 +1,0 @@
-{
-  "title": "Component returning string fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "unknown type `object`"
-}

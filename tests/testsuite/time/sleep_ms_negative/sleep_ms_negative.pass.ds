@@ -1,6 +1,0 @@
-import { echo } from "io"
-import { sleep_ms } from "time"
-echo(match (sleep_ms(-5)) {
-  Ok(v) => "ok",
-  Err(e) => "err",
-})

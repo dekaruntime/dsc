@@ -1,6 +1,0 @@
-import { echo } from "io"
-fn wrap(x: Option<Option<number>>) Option<Option<number>> {
-  return x
-}
-const v = wrap(None)
-echo("ok")

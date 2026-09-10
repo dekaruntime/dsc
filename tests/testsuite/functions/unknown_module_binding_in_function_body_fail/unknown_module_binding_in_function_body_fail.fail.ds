@@ -1,5 +1,0 @@
-import { echo } from "io"
-fn read() number {
-  return missing
-}
-echo(string(read()))

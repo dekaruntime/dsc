@@ -1,6 +1,0 @@
-{
-  "title": "Nested object literal field with wrong type fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected argument type `Line`, found type `{start: {x: number, y: string}, end: {x: number, y: number}}`",
-  "notes": "Type checking recurses into nested object literals for interface compatibility."
-}

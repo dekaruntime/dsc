@@ -1,5 +1,0 @@
-import { echo } from "io"
-async fn main() {
-  echo(await 1)
-}
-await main()

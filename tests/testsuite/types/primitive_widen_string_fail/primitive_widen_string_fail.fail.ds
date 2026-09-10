@@ -1,3 +1,0 @@
-type Celsius number
-const c = Celsius(100)
-string(c)

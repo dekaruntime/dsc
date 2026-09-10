@@ -1,5 +1,0 @@
-{
-  "title": "A trailing line comment in an unsafe block does not break the wrapper",
-  "stage": "run",
-  "notes": "deka#423: the body is spliced into a wrapper as text. With the closing brace on the same line, a trailing // swallowed it and the module failed to parse with Unexpected end of input."
-}

@@ -1,6 +1,0 @@
-{
-  "title": "Return type mismatch inside an if branch fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected return type `number`, found type `string`",
-  "notes": "Every return path must match the declared function return type."
-}

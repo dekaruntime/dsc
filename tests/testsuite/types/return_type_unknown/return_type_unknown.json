@@ -1,6 +1,0 @@
-{
-  "title": "Unknown type name in function return annotation fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "unknown type `NotAType`",
-  "notes": "Return type annotations must refer to defined types."
-}

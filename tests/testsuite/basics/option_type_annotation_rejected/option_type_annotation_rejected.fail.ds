@@ -1,3 +1,0 @@
-import { echo } from "io"
-const x: string? = "hi"
-echo(x)

@@ -1,6 +1,0 @@
-import { echo } from "io"
-alias Numbers = Array<number>
-echo(match ("[10,20]".parseJSON<Numbers>()) {
-  Ok(v) => string(v[0]),
-  Err(e) => "-1",
-})

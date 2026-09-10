@@ -1,6 +1,0 @@
-import { echo } from "io"
-const items = [10, 20, 30]
-const len: number = items.length
-const second: number = items[1]
-echo(string(len))
-echo(string(second))

@@ -1,6 +1,0 @@
-{
-  "title": "Unknown type name in struct field fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "unknown type `NotAType`",
-  "notes": "Struct field types must refer to defined types."
-}

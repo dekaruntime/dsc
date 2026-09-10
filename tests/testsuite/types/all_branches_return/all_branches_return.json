@@ -1,5 +1,0 @@
-{
-  "title": "All branches return the declared type",
-  "stage": "run",
-  "notes": "if/else where every branch returns a number is accepted."
-}

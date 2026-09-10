@@ -1,6 +1,0 @@
-{
-  "title": "Comparing two values of unbounded type parameter T is rejected",
-  "stage": "typecheck",
-  "notes": "rfd#56 phase 1 capability rule: `==` is not among the four permitted operations on an unbounded T. Equality/comparison arrives with bounds in phase 2.",
-  "expectedDiagnosticContains": "cannot apply `==` to a value of unbounded type parameter `T`"
-}

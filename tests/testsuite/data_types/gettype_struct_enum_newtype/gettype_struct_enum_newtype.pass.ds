@@ -1,8 +1,0 @@
-import { echo } from "io"
-struct Point { x: number; y: number }
-enum Color { Red, Green }
-type Cents number
-const p: Point = Point { x: 1, y: 2 }
-echo(p.getType().toString())
-echo(Cents(5).getType().toString())
-echo(Color.Red.getType().toString())

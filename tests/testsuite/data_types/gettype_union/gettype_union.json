@@ -1,5 +1,0 @@
-{
-  "title": "getType() discriminates a union receiver at runtime",
-  "stage": "run",
-  "notes": "deka#529, rfd#41: the headline case — a `number | string` value reports its runtime type, not the declared union."
-}

@@ -1,5 +1,0 @@
-{
-  "title": "await in a C-style for loop initializer works",
-  "stage": "run",
-  "notes": "Top-level await is allowed in for-loop initializers."
-}

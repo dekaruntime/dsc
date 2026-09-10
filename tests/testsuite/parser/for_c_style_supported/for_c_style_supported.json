@@ -1,5 +1,0 @@
-{
-  "title": "C-style for loop is supported",
-  "stage": "run",
-  "notes": "DekaScript supports C-style for loops with optional init, condition, and step."
-}

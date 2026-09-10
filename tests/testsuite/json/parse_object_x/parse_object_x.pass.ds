@@ -1,7 +1,0 @@
-import { echo } from "io"
-struct X { x: number }
-const text = X { x: 2 }.toJSON()
-echo(match (text.parseJSON<X>()) {
-  Ok(o) => string(o.x),
-  Err(e) => "-1",
-})

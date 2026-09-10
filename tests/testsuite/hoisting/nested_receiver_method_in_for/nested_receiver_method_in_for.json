@@ -1,6 +1,0 @@
-{
-  "title": "Nested receiver method inside for is rejected.",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "function declarations are only allowed at the top level in DekaScript"
-}

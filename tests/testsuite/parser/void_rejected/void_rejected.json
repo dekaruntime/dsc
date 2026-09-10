@@ -1,5 +1,0 @@
-{
-  "title": "void operator is rejected",
-  "stage": "parse",
-  "expectedDiagnosticContains": "unknown identifier `void`"
-}

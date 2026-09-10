@@ -1,5 +1,0 @@
-{
-  "title": "Static JSON serialization uses the ordinary enum mapping",
-  "stage": "run",
-  "notes": "rfd#43: enums, including Option, are tagged and payload-free cases omit values."
-}

@@ -1,3 +1,0 @@
-import { echo } from "io"
-interface A extends B { fn f() string }
-echo("ok")

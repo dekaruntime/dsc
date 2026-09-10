@@ -1,5 +1,0 @@
-import { echo } from "io"
-fn answer() number {
-  return "forty-two"
-}
-echo(answer())

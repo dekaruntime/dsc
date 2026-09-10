@@ -1,9 +1,0 @@
-{
-  "title": "Undefined JSX tag variable fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "unknown identifier `MissingTag`",
-  "notes": "v2 catches the undefined tag variable at compile time rather than at runtime.",
-  "hosts": [
-    "browser"
-  ]
-}

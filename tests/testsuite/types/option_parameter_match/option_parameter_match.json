@@ -1,5 +1,0 @@
-{
-  "title": "Option parameter matched with Some and None",
-  "stage": "run",
-  "notes": "Option<string> can be passed and matched exhaustively."
-}

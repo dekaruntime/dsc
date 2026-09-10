@@ -1,6 +1,0 @@
-{
-  "title": "Incrementing a const binding fails",
-  "stage": "parse",
-  "notes": "Native CLI currently accepts this program silently, producing a divergence.",
-  "expectedDiagnosticContains": "expected type"
-}

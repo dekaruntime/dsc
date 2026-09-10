@@ -1,6 +1,0 @@
-{
-  "title": "Assigning to the undefined global fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "unknown identifier `undefined`",
-  "notes": ""
-}

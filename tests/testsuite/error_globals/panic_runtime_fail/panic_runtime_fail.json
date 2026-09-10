@@ -1,5 +1,0 @@
-{
-  "title": "panic fails at runtime",
-  "stage": "run",
-  "notes": "panic is a lang item that throws. It typechecks as never."
-}

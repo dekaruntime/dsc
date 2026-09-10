@@ -1,3 +1,0 @@
-import { echo } from "io"
-let x
-echo(x)

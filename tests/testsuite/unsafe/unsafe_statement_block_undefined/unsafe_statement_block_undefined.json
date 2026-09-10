@@ -1,5 +1,0 @@
-{
-  "title": "unsafe statement block returns Ok(undefined) when no value is returned",
-  "stage": "run",
-  "notes": ""
-}

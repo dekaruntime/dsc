@@ -1,5 +1,0 @@
-{
-  "title": "Template string with interpolation is valid DS",
-  "stage": "run",
-  "notes": "Formatter accepts template literals with embedded expressions."
-}

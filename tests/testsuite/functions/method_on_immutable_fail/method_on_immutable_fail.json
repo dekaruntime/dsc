@@ -1,6 +1,0 @@
-{
-  "title": "Calling a mutable method on an immutable value fails",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "cannot call mutable method `increment` on an immutable receiver"
-}

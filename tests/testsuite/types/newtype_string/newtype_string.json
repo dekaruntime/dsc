@@ -1,5 +1,0 @@
-{
-  "title": "Newtype over string works",
-  "stage": "run",
-  "notes": "Phase 2 of deka#346: newtypes are not limited to numbers."
-}

@@ -1,5 +1,0 @@
-{
-  "title": "Typed function parameters and return type",
-  "stage": "run",
-  "notes": "Basic number annotations are enforced and compile."
-}

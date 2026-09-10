@@ -1,6 +1,0 @@
-{
-  "title": "A missing required prop is rejected",
-  "stage": "parse",
-  "expectedDiagnosticContains": "missing required prop",
-  "notes": "deka#443: JSX attributes were never checked against the props interface."
-}

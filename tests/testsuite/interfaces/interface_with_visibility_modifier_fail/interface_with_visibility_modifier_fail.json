@@ -1,6 +1,0 @@
-{
-  "title": "Visibility modifiers on interface fields are not allowed",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "expected identifier, found ``pub``"
-}

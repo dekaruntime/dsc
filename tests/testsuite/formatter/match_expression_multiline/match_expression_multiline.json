@@ -1,5 +1,0 @@
-{
-  "title": "Match Expression Multiline",
-  "stage": "run",
-  "notes": "Formatter should canonicalize match expression multiline."
-}

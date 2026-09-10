@@ -1,5 +1,0 @@
-import { echo } from "io"
-import { jsx } from "ui/jsx"
-import { renderToString } from "ui/server"
-const html = renderToString(jsx("input", {type: "text"}))
-echo(html.html)

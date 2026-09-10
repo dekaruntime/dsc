@@ -1,5 +1,0 @@
-import { echo } from "io"
-fn (s string) length() number {
-  return 0
-}
-echo(string("abc".length))

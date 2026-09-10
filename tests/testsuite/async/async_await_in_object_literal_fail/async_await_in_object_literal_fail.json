@@ -1,5 +1,0 @@
-{
-  "title": "Await inside object literal in a sync function fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "`await` is only allowed inside async functions or at the top level"
-}

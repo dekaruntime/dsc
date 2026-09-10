@@ -1,6 +1,0 @@
-{
-  "title": "Duplicate struct field fails",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "Duplicate field 'x' in struct 'Point'."
-}

@@ -1,9 +1,0 @@
-import { echo } from "io"
-
-// `process` is not part of the DekaScript surface, so it is reachable only
-// from inside `unsafe { }`, and only when the `env` capability is granted.
-let cwd = unsafe<string> { process.cwd() }
-match (cwd) {
-  Ok(v) => echo("has-cwd"),
-  Err(e) => echo("no-cwd"),
-}

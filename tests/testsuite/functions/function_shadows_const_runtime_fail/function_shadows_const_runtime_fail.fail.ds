@@ -1,6 +1,0 @@
-import { echo } from "io"
-const add = 1
-fn add(x: number, y: number) number {
-  return x + y
-}
-echo(add(1, 2))

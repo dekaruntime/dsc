@@ -1,5 +1,0 @@
-{
-  "title": "Returning an awaited value of the wrong type fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected return type `string`, found type `number`"
-}

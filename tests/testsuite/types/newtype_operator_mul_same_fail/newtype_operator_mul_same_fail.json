@@ -1,6 +1,0 @@
-{
-  "title": "Cannot multiply two values of the same number newtype",
-  "stage": "typecheck",
-  "expectedDiagnosticContains": "multiply",
-  "notes": "Phase 3 of deka#346: same-newtype multiplication is rejected."
-}

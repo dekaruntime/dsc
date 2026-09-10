@@ -1,5 +1,0 @@
-{
-  "title": "Form from ui/form is a plain HTML form",
-  "stage": "run",
-  "hosts": ["native"]
-}

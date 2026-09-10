@@ -1,5 +1,0 @@
-import { echo } from "io"
-fn log(x: number) void {
-  echo(string(x))
-}
-log(5)

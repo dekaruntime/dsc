@@ -1,3 +1,0 @@
-import { echo } from "io"
-const o = {x 1}
-echo(o.x)

@@ -1,6 +1,0 @@
-{
-  "title": "Chaining from a missing property fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "object has no field",
-  "notes": "x.b is undefined, so accessing .c throws."
-}

@@ -1,5 +1,0 @@
-import { echo } from "io"
-const ui = globalThis.deka.ui
-fn Box(props: object) object { return ui.jsxs("div", props) }
-const node = ui.jsxs(Box, { className: 'box })
-echo(ui.renderToString(node).html)

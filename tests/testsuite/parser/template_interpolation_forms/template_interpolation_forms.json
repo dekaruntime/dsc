@@ -1,5 +1,0 @@
-{
-  "title": "Nested and escaped template interpolation forms",
-  "stage": "run",
-  "notes": "dsc#89. `${`inner ${x}`}` interpolates, `\\${` renders a literal `${`, and a brace inside a string in `${}` does not close the interpolation."
-}

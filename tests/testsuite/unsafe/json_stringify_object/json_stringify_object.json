@@ -1,5 +1,0 @@
-{
-  "title": "unsafe JSON.stringify encodes an object literal",
-  "stage": "run",
-  "notes": ""
-}

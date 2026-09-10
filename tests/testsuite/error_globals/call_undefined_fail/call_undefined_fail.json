@@ -1,6 +1,0 @@
-{
-  "title": "Calling undefined as a function fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "unknown identifier `undefined`",
-  "notes": ""
-}

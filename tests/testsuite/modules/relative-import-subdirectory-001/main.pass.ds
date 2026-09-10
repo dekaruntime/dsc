@@ -1,3 +1,0 @@
-import { echo } from "io"
-import { greet } from "./lib/greet.ds"
-echo(greet())

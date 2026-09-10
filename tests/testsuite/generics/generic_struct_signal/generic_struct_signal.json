@@ -1,6 +1,0 @@
-{
-  "title": "User-declared generic struct: Signal<T> with constructor and receiver methods",
-  "stage": "run",
-  "expectedStdoutNative": "0\n41\n42\nactive\n",
-  "notes": "rfd#56 phase 1 (dekaruntime/dsc#93): struct Signal<T>, fn signal<T>(initial: T) Signal<T>, and receiver methods whose <T> binds to the receiver's type argument at the call site. One struct, two instantiations in a single program — types erase, both are plain struct values at runtime."
-}

@@ -1,8 +1,0 @@
-import { echo } from "io"
-const x = Option.Some(1)
-const y = match (x) {
-  Some(v) => v,
-  None => 0,
-  _ => -1,
-}
-echo(string(y))

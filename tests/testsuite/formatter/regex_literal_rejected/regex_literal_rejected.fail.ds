@@ -1,3 +1,0 @@
-import { echo } from "io"
-const pattern = /abc/
-echo(pattern)

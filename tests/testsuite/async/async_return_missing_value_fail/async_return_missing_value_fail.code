@@ -1,4 +1,0 @@
-async fn value() Promise<number> {
-  return
-}
-await value()

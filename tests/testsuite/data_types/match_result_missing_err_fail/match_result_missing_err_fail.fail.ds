@@ -1,8 +1,0 @@
-fn read() Result<number, string> {
-  return Result.Ok(1)
-}
-fn value() number {
-  return match (read()) {
-    Ok(v) => v,
-  }
-}

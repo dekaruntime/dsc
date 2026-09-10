@@ -1,5 +1,0 @@
-{
-  "title": "Bare None literal is Option.None",
-  "stage": "run",
-  "notes": "deka#394: `None` emitted JS null while match tested __case, so matching a returned None threw TypeError."
-}

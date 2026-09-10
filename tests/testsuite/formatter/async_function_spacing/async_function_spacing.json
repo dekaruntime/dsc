@@ -1,5 +1,0 @@
-{
-  "title": "Async function spacing is normalized",
-  "stage": "run",
-  "notes": "Formatter should collapse extra spaces around async fn declaration and await expression."
-}

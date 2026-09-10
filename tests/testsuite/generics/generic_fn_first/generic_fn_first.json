@@ -1,6 +1,0 @@
-{
-  "title": "User-declared generic function: first<T> infers T at call sites",
-  "stage": "run",
-  "expectedStdoutNative": "7\na\n-1\n",
-  "notes": "rfd#56 phase 1 (dekaruntime/dsc#93): fn first<T>(items: Array<T>) Option<T> — the shape deka#561 predicted would need a user-written generic. T is inferred per call site (number, string), proving call-site inference works for user functions, not only builtins."
-}

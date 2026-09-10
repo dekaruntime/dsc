@@ -1,5 +1,0 @@
-{
-  "title": "Async method declaration inside an interface is not supported",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected identifier, found ``async``"
-}

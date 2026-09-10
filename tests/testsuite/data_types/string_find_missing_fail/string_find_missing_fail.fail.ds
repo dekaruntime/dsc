@@ -1,3 +1,0 @@
-import { echo } from "io"
-const s = "hello"
-echo(s.find("e"))

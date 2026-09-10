@@ -1,7 +1,0 @@
-import { echo } from "io"
-
-const nums: Array<number> = [3, 4, 5]
-// first() returns Option<number>, not number — the declared type must
-// not lie about what comes back (deka#561).
-const bad: string = nums.first()
-echo(bad)

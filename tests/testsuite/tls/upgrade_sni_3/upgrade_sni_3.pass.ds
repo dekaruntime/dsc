@@ -1,6 +1,0 @@
-import { echo } from "io"
-import { upgrade } from "tls"
-echo(match (upgrade(0, "a.b.c")) {
-  Ok(h) => "ok",
-  Err(e) => "err",
-})

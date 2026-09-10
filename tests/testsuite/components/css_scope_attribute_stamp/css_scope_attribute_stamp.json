@@ -1,8 +1,0 @@
-{
-  "title": "Component CSS stamps host elements with a scope attribute",
-  "stage": "run",
-  "notes": "RFD 24 §10.6: a module that authors CSS (side-effect .css import) emits data-deka-cid-<hash> on its host elements, Astro's data-astro-cid model. The hash is a content hash of this file, so the .stdout pins it.",
-  "hosts": [
-    "native"
-  ]
-}

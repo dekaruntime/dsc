@@ -1,6 +1,0 @@
-{
-  "title": "Match arm with statement block fails",
-  "stage": "parse",
-  "notes": "Match arm bodies must be expressions; statement blocks are rejected.",
-  "expectedDiagnosticContains": "expected object key, found `newline`"
-}

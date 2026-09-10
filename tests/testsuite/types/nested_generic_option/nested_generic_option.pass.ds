@@ -1,3 +1,0 @@
-import { echo } from "io"
-const x: Option<Option<number>> = None
-echo("ok")

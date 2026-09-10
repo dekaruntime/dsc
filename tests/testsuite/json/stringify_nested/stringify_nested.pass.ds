@@ -1,4 +1,0 @@
-import { echo } from "io"
-struct Inner { b: number }
-struct Outer { a: Inner }
-echo((Outer { a: Inner { b: 1 } }).toJSON())

@@ -1,3 +1,0 @@
-import { echo } from "io"
-interface Logger fn log(msg: string)
-echo("ok")

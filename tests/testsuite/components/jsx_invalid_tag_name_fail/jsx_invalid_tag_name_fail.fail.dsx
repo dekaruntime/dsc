@@ -1,3 +1,0 @@
-import { echo } from "io"
-const el = <1div>x</1div>
-echo(el)

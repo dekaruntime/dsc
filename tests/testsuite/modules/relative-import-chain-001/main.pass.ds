@@ -1,3 +1,0 @@
-import { echo } from "io"
-import { calc } from "./level1.ds"
-echo("" + calc(10))

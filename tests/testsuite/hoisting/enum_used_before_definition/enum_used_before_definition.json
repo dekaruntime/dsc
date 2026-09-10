@@ -1,5 +1,0 @@
-{
-  "title": "enum objects are hoisted and usable before source position.",
-  "stage": "run",
-  "notes": "Public discriminator is `.name`. `__case` is the compiler's match tag, not a user field."
-}

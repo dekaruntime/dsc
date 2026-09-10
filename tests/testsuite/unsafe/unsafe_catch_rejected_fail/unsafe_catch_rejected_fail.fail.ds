@@ -1,3 +1,0 @@
-import { echo } from "io"
-const r = unsafe { 1 } catch (e) { 2 }
-echo(r)

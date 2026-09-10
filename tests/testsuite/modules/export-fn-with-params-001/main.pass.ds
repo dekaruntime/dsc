@@ -1,3 +1,0 @@
-import { echo } from "io"
-import { multiply } from "./math.ds"
-echo("" + multiply(6, 7))

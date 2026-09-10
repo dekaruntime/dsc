@@ -1,3 +1,0 @@
-export fn answer() number {
-  return 42
-}

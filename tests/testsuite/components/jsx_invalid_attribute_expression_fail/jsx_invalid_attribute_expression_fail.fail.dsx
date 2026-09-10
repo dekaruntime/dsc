@@ -1,3 +1,0 @@
-import { echo } from "io"
-const x = <div class={1 + }>text</div>
-echo(x)

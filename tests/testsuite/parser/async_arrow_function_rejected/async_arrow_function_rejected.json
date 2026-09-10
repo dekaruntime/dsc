@@ -1,5 +1,0 @@
-{
-  "title": "Async arrow function is rejected",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected `fn` after `async`"
-}

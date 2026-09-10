@@ -1,6 +1,0 @@
-{
-  "title": "Bare crypto is not reachable from DekaScript",
-  "stage": "parse",
-  "expectedDiagnosticContains": "unknown identifier `crypto`",
-  "notes": "Previously this reached the ambient crypto global and failed at runtime with `is not a function`. crypto was removed from the ambient globals (deka#378), so it now fails at check time instead \u2014 earlier, and for the reason RFD 21 gives."
-}

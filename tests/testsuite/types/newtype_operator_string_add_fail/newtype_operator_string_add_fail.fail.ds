@@ -1,6 +1,0 @@
-import { echo } from "io"
-
-type Name string
-const a = Name("a")
-const b = Name("b")
-const c = a + b

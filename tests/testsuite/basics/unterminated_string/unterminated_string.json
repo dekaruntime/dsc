@@ -1,6 +1,0 @@
-{
-  "title": "Unterminated string literal is rejected",
-  "stage": "parse",
-  "expectedDiagnosticContains": "unterminated string literal",
-  "notes": ""
-}

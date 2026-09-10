@@ -1,5 +1,0 @@
-import { echo } from "io"
-fn greet(name?: string) void {
-  echo(name)
-}
-greet()

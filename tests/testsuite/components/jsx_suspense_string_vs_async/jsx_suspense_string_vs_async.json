@@ -1,5 +1,0 @@
-{
-  "title": "renderToString shows Suspense fallback; renderToStringAsync awaits",
-  "stage": "run",
-  "hosts": ["native"]
-}

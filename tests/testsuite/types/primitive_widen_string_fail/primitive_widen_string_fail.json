@@ -1,6 +1,0 @@
-{
-  "title": "string() does not accept a newtype over number",
-  "stage": "typecheck",
-  "expectedDiagnosticContains": "cannot convert",
-  "notes": "deka#364: string() widens bare primitives only; a newtype must be unwrapped first (string(unboxNumber(c)))."
-}

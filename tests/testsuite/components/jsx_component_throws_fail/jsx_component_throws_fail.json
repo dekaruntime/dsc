@@ -1,8 +1,0 @@
-{
-  "title": "Component that panics fails at runtime",
-  "stage": "run",
-  "notes": "",
-  "hosts": [
-    "browser"
-  ]
-}

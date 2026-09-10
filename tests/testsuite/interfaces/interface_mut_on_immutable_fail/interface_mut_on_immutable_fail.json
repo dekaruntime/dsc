@@ -1,6 +1,0 @@
-{
-  "title": "Passing an immutable value as an interface with mutable fields fails",
-  "stage": "parse",
-  "notes": "A mut interface field grants mutation through the parameter. With the const-literal Object.freeze removed (deka#590 step 2), the call site is the guard: the checker rejects passing an immutable receiver to an interface with mut fields.",
-  "expectedDiagnosticContains": "cannot pass an immutable value as interface `MutableNamed` with mutable fields"
-}

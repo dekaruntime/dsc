@@ -1,6 +1,0 @@
-import { echo } from "io"
-import { from_string, concat, to_string } from "bytes"
-
-const a = from_string("hel")
-const b = from_string("lo")
-echo(to_string(concat(a, b)))

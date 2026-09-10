@@ -1,5 +1,0 @@
-{
-  "title": "Missing closing brace is rejected",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected ``}``, found `end of file`"
-}

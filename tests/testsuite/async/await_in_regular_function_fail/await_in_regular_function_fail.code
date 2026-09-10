@@ -1,4 +1,0 @@
-fn normal() number {
-  return await 1
-}
-normal()

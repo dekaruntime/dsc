@@ -1,6 +1,0 @@
-{
-  "title": "Accessing a field on a value of unbounded type parameter T is rejected",
-  "stage": "typecheck",
-  "notes": "rfd#56 phase 1 capability rule: field access is not among the four permitted operations on an unbounded T.",
-  "expectedDiagnosticContains": "cannot access field `value` on a value of unbounded type parameter `T`"
-}

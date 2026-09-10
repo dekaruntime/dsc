@@ -1,5 +1,0 @@
-{
-  "title": "Function reference assigned without type annotation",
-  "stage": "run",
-  "notes": "Function values can be assigned to const bindings without an explicit type."
-}

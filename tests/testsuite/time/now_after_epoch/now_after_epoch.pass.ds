@@ -1,3 +1,0 @@
-import { echo } from "io"
-import { now } from "time"
-echo(string(now() > 1577836800000))

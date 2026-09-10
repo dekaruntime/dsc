@@ -1,5 +1,0 @@
-{
-  "title": "parseNumber() replaces parseInt and reports failure",
-  "stage": "run",
-  "notes": "deka#378: parseInt left the ambient globals; parseNumber() yields Option<number>."
-}

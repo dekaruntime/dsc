@@ -1429,6 +1429,20 @@ struct Checker<'a> {
     pending_module_bindings: HashSet<&'a str>,
     /// Type parameter scopes. Each generic binding introduces a new scope.
     type_scopes: Vec<HashMap<&'a str, Type<'a>>>,
+    /// Declared bounds of the type parameters in scope, parallel to
+    /// `type_scopes` (rfd#56 phase 2). A param with no bound has no entry.
+    /// Empty scopes are pushed for parameterless declarations too, so this
+    /// stays index-parallel with `type_scopes`.
+    param_bounds: Vec<HashMap<&'a str, Type<'a>>>,
+    /// Resolved type-parameter bounds, cached per bound AST node so the
+    /// several passes that push the same declaration report an unresolvable
+    /// bound exactly once. `Error` results from the silent inference pass
+    /// are deliberately not cached (they would mask the real diagnostic).
+    bound_cache: HashMap<*const ast::Type<'a>, Type<'a>>,
+    /// Declared bounds of top-level generic functions, keyed by function
+    /// name, for the call-site check that runs after inference solves the
+    /// type arguments (rfd#56 phase 2).
+    fn_param_bounds: HashMap<&'a str, Vec<(&'a str, Type<'a>)>>,
     /// Are we currently inside a function body?
     in_function: bool,
     /// Are we currently inside an async function body?
@@ -1480,6 +1494,9 @@ impl<'a> Checker<'a> {
             mutables: vec![HashSet::new()],
             pending_module_bindings: HashSet::new(),
             type_scopes: Vec::new(),
+            param_bounds: Vec::new(),
+            bound_cache: HashMap::new(),
+            fn_param_bounds: HashMap::new(),
             in_function: false,
             in_async_function: false,
             return_type: None,

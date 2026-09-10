@@ -363,19 +363,66 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Push a type-parameter scope, resolving any declared bounds (rfd#56
+    /// phase 2). Even a parameterless declaration pushes (empty) scopes:
+    /// `pop_type_params` always pops, and the early return this replaced
+    /// silently dropped an unrelated outer scope at every empty push/pop
+    /// pair — e.g. a `match` on a non-generic enum inside a generic
+    /// function popped the function's `<T>` scope mid-body.
     pub(super) fn push_type_params(&mut self, type_params: &'a [ast::TypeParam<'a>]) {
-        if type_params.is_empty() {
-            return;
-        }
         let mut scope = HashMap::new();
+        let mut bounds = HashMap::new();
         for param in type_params {
             scope.insert(param.name, Type::Param { name: param.name });
+            if let Some(bound) = &param.bound {
+                let resolved = self.resolve_bound(bound);
+                bounds.insert(param.name, resolved);
+            }
         }
         self.type_scopes.push(scope);
+        self.param_bounds.push(bounds);
+    }
+
+    /// Resolve a type-parameter bound, caching the result per AST node.
+    /// The silent inference pass resolves first; caching successful results
+    /// keeps the real pass from re-reporting, while an unresolvable bound
+    /// stays uncached there so its error surfaces exactly once, later.
+    pub(super) fn resolve_bound(&mut self, bound: &'a ast::Type<'a>) -> Type<'a> {
+        let key = bound as *const ast::Type<'a>;
+        if let Some(resolved) = self.bound_cache.get(&key) {
+            return resolved.clone();
+        }
+        let resolved = self.resolve_ast_type(bound);
+        if !resolved.is_error() || !self.infer_only {
+            self.bound_cache.insert(key, resolved.clone());
+        }
+        resolved
     }
 
     pub(super) fn pop_type_params(&mut self) {
         self.type_scopes.pop();
+        self.param_bounds.pop();
+    }
+
+    /// The declared bound of a type parameter, innermost scope first
+    /// (rfd#56 phase 2). `None` means the parameter is unbounded.
+    pub(super) fn lookup_param_bound(&self, name: &str) -> Option<Type<'a>> {
+        for scope in self.param_bounds.iter().rev() {
+            if let Some(bound) = scope.get(name) {
+                return Some(bound.clone());
+            }
+        }
+        None
+    }
+
+    /// The type operations on a value should dispatch against: for a
+    /// bounded type parameter, its bound — the bound is what unlocks
+    /// operations (rfd#56 phase 2). Anything else dispatches on itself.
+    pub(super) fn bounded_param_type(&self, ty: &Type<'a>) -> Type<'a> {
+        match ty {
+            Type::Param { name } => self.lookup_param_bound(name).unwrap_or_else(|| ty.clone()),
+            _ => ty.clone(),
+        }
     }
 
     fn collect_receiver_methods(&mut self) {
@@ -853,13 +900,36 @@ impl<'a> Checker<'a> {
                 ..
             } => {
                 let iterable_type = self.check_expr(iterable);
-                if let Type::Param { name: param } = &iterable_type {
-                    // rfd#56 phase 1: iteration is not on the unbounded-T
-                    // operation list. Without this, collection_element
-                    // would silently return `Infer` for the element type.
-                    self.reject_param_operation(param, "iterate over", iterable.span());
-                }
-                let element_type = iterable_type.collection_element();
+                let element_type = if let Type::Param { name: param } = &iterable_type {
+                    match self.lookup_param_bound(param) {
+                        // rfd#56 phase 2: an Array bound unlocks iteration,
+                        // the element type coming from the bound — the same
+                        // rule as indexing (expr.rs).
+                        Some(bound @ (Type::Array { .. } | Type::Named { name: "string" })) => {
+                            bound.collection_element()
+                        }
+                        Some(bound) => {
+                            self.error_span(
+                                iterable.span(),
+                                format!(
+                                    "cannot iterate over a value of type parameter `{param}` \
+                                     bounded by `{bound}` (rfd#56)"
+                                ),
+                            );
+                            Type::Error
+                        }
+                        None => {
+                            // rfd#56 phase 1: iteration is not on the
+                            // unbounded-T operation list. Without this,
+                            // collection_element would silently return
+                            // `Infer` for the element type.
+                            self.reject_param_operation(param, "iterate over", iterable.span());
+                            Type::Error
+                        }
+                    }
+                } else {
+                    iterable_type.collection_element()
+                };
                 self.scopes.push(HashMap::new());
                 self.mutables.push(HashSet::new());
                 self.declare_var(name, element_type);

@@ -490,11 +490,32 @@ impl<'a> Checker<'a> {
                 let object_type = self.check_expr(object);
                 self.check_expr(index);
                 if let Type::Param { name } = &object_type {
-                    // rfd#56 phase 1: indexing is not on the unbounded-T
-                    // operation list. Without this arm, collection_element
-                    // would silently return `Infer` (the dsc#90 shape).
-                    self.reject_param_operation(name, "index into", *span);
-                    return Type::Error;
+                    match self.lookup_param_bound(name) {
+                        // rfd#56 phase 2: an indexable bound (`<T:
+                        // Array<E>>`, `<T: string>`) unlocks indexing, the
+                        // element type coming from the bound.
+                        Some(bound @ (Type::Array { .. } | Type::Named { name: "string" })) => {
+                            return bound.collection_element();
+                        }
+                        Some(bound) => {
+                            self.error_span(
+                                *span,
+                                format!(
+                                    "cannot index into a value of type parameter `{name}` \
+                                     bounded by `{bound}` (rfd#56)"
+                                ),
+                            );
+                            return Type::Error;
+                        }
+                        None => {
+                            // rfd#56 phase 1: indexing is not on the
+                            // unbounded-T operation list. Without this arm,
+                            // collection_element would silently return
+                            // `Infer` (the dsc#90 shape).
+                            self.reject_param_operation(name, "index into", *span);
+                            return Type::Error;
+                        }
+                    }
                 }
                 object_type.collection_element()
             }
@@ -1053,14 +1074,25 @@ impl<'a> Checker<'a> {
             return Type::Error;
         }
 
-        match &object_type {
-            Type::Param { name } => {
-                // rfd#56 phase 1: an unbounded type parameter has no fields.
-                // `s.value` where `s: T` is exactly the operation the rule
-                // forbids — rejected explicitly, not left to emerge.
-                self.reject_param_operation(name, &format!("access field `{field}` on"), span);
-                Type::Error
+        // rfd#56 phase 2: a bounded type parameter exposes exactly the
+        // operations its bound declares. `s.value` where `s: T` bounded by
+        // `Named` resolves `value` against `Named`; an unbounded `T` keeps
+        // the phase-1 rejection below.
+        let object_type = if let Type::Param { name } = &object_type {
+            match self.lookup_param_bound(name) {
+                Some(bound) => bound,
+                None => {
+                    // rfd#56 phase 1: an unbounded type parameter has no
+                    // fields — rejected explicitly, not left to emerge.
+                    self.reject_param_operation(name, &format!("access field `{field}` on"), span);
+                    return Type::Error;
+                }
             }
+        } else {
+            object_type
+        };
+
+        match &object_type {
             Type::Infer | Type::Var => {
                 // An externally-provided or unresolved value (`Infer`) and an
                 // unconstrained one (`Var`) may both have any field. Cloning the
@@ -2290,6 +2322,21 @@ impl<'a> Checker<'a> {
         } else {
             self.check_expr(right)
         };
+        // rfd#56 phase 2: a bounded operand is checked as its bound — `<T:
+        // number>` arithmetic is number arithmetic. Unbounded parameters
+        // pass through unchanged and hit the phase-1 rejection below.
+        // Plain `Assign` is excluded: assigning a `T` to a `T` slot is a
+        // phase-1 permitted operation and must stay param-to-param, not
+        // bound-to-bound (the slot may hold any member the bound allows,
+        // not every value the bound names).
+        let (left_type, right_type) = if op == ast::BinOp::Assign {
+            (left_type, right_type)
+        } else {
+            (
+                self.bounded_param_type(&left_type),
+                self.bounded_param_type(&right_type),
+            )
+        };
 
         // rfd#56 phase 1: arithmetic and comparison on an unbounded type
         // parameter are not on its operation list, so they are rejected with
@@ -2837,6 +2884,8 @@ impl<'a> Checker<'a> {
         _span: ast::Span,
     ) -> Type<'a> {
         let operand_type = self.check_expr(operand);
+        // rfd#56 phase 2: a bounded operand is checked as its bound.
+        let operand_type = self.bounded_param_type(&operand_type);
         if let Type::Param { name } = &operand_type {
             // rfd#56 phase 1: unary arithmetic/logic on an unbounded type
             // parameter is not on its operation list.
@@ -2901,6 +2950,25 @@ impl<'a> Checker<'a> {
         }
 
         let object_type = self.check_expr(object);
+
+        // rfd#56 phase 2: runtime type interrogation on a type parameter is
+        // not a bound-guaranteed operation — a bound unlocks exactly the
+        // members it declares, and for an unbounded `T` no operations exist
+        // at all. Left alone, the builtin paths below would typecheck
+        // `x.getType()` on any `T` and emit a runtime descriptor lookup,
+        // the introspection seam rfd#56 defers.
+        if let Type::Param { name } = &object_type {
+            if matches!(method_name, "getType" | "signature") {
+                self.reject_param_operation(name, &format!("call `{method_name}` on"), span);
+                return Some(Type::Error);
+            }
+        }
+
+        // rfd#56 phase 2: a bounded type parameter exposes exactly the
+        // members its bound declares, so method dispatch runs against the
+        // bound type. An unbounded parameter stays `Type::Param` and is
+        // rejected by the phase-1 check further below.
+        let object_type = self.bounded_param_type(&object_type);
 
         // Builtin `.getType()` (rfd#41, deka#529): returns a first-class
         // `Type` value. User code named `getType` (interface member,

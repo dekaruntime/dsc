@@ -1,0 +1,6 @@
+{
+  "title": "bytes member catalog is closed: unknown member is a check error",
+  "stage": "typecheck",
+  "notes": "dsc#92: only `.length` exists on `bytes` today; the rest of RFD 15 (slice, concat, hex/base64, conversions) lands with deka#756.",
+  "expectedDiagnosticContains": "`bytes` has no field `slice` (available: `length`)"
+}

@@ -1,0 +1,9 @@
+import { echo } from "io"
+const r = unsafe<bytes> { new Uint8Array([65, 66, 67]) }
+// dsc#92: `bytes` has a member catalog now, starting at `.length`
+// (RFD 15's `len`). `${v.length}` is checked DekaScript since dsc#89 and
+// typechecks here; indexing (dsc#88) is unchanged.
+echo(match (r) {
+  Ok(v) => `${v.length}:${v[0]}:${v[2]}`,
+  Err(e) => `err: ${e.message}`,
+})

@@ -38,6 +38,40 @@ fn file_writes_adjacent_js() {
 }
 
 #[test]
+fn bytes_length_transpiles_verbatim() {
+    // dsc#92: `bytes` is a Uint8Array at runtime, so `bytes.length` is a
+    // plain property read -- emission must be the transparent field access
+    // with no wrapper or runtime helper.
+    let temp = tempfile::tempdir().expect("tempdir");
+    let source = temp.path().join("bytes_length.ds");
+    write(
+        &source,
+        "export fn size(b: bytes) number {\n  return b.length\n}\n",
+    );
+
+    let output = Command::new(cli_bin())
+        .arg("transpile")
+        .arg(&source)
+        .output()
+        .expect("run transpile");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let emitted = fs::read_to_string(source.with_extension("js")).expect("emitted JavaScript");
+    assert!(
+        emitted.contains("b.length"),
+        "bytes.length must emit as a plain property read: {emitted}"
+    );
+    assert!(
+        !emitted.contains("__deka"),
+        "bytes.length must not route through a runtime helper: {emitted}"
+    );
+}
+
+#[test]
 fn preserve_mirrors_tree_and_rewrites_relative_ds_imports() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path().join("src");

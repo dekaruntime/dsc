@@ -4340,6 +4340,20 @@ mod tests {
         assert!(errors.is_empty(), "{:?}", errors);
     }
 
+    #[test]
+    fn bare_unsafe_err_side_is_string() {
+        // dsc#103: the bare form's Err payload is the thrown value's string
+        // representation (dsc#60), so the Err side types as `string`. Member
+        // access on it is a check-time error with a span instead of a runtime
+        // `undefined`. The Ok side stays `Infer` until deka#252/#460.
+        let errors = typeck("const r = match (unsafe { JSON.parse(1) }) { Ok(v) => v, Err(e) => e.message };");
+        assert!(
+            errors.iter().any(|e| e.message.contains("`string` has no field `message`")),
+            "{:?}",
+            errors
+        );
+    }
+
     // Union types (rfd#42, deka#530). The positive cases pass trivially if
     // unions degrade to Infer, which is assignable to everything — every
     // negative here is what proves the checker keeps unions real.

@@ -257,10 +257,36 @@ impl<'a> Parser<'a> {
                 })
             }
             TokenKind::BacktickString => {
-                let value = self.bump_str(self.current_text());
+                // First text run of the template. The lexer splits the
+                // literal into `BacktickString` text chunks around
+                // `${` ... `}` interpolations (dsc#89): each interpolation
+                // is parsed here as an ordinary DekaScript expression, so it
+                // is typechecked and emitted from the AST instead of passing
+                // through as raw JavaScript.
+                let mut parts: Vec<crate::ast::TemplatePart<'a>> =
+                    vec![crate::ast::TemplatePart::Text(self.bump_str(self.current_text()))];
                 self.advance();
+                while self.at(TokenKind::TemplateExprStart) {
+                    self.advance();
+                    let expr = self.parse_expression()?;
+                    self.expect(TokenKind::TemplateExprEnd)?;
+                    parts.push(crate::ast::TemplatePart::Expr(alloc(self.arena, expr)));
+                    // The lexer always emits the text run after an
+                    // interpolation (possibly empty) before the next `${` or
+                    // the closing backtick.
+                    let chunk = self.current_text();
+                    if self.current_kind() != TokenKind::BacktickString {
+                        self.error(format!(
+                            "expected `}}` to close the template literal, found `{}`",
+                            token_name(self.current_kind())
+                        ));
+                        return None;
+                    }
+                    parts.push(crate::ast::TemplatePart::Text(self.bump_str(chunk)));
+                    self.advance();
+                }
                 Some(Expr::TemplateLiteral {
-                    parts: alloc_slice(self.arena, vec![crate::ast::TemplatePart::Text(value)]),
+                    parts: alloc_slice(self.arena, parts),
                     span: self.span_from(start, start_byte),
                 })
             }

@@ -189,6 +189,29 @@ mod tests {
     }
 
     #[test]
+    fn emit_template_interpolation_is_emitted_expression() {
+        // dsc#89: `${...}` must be emitted as an evaluated JavaScript
+        // interpolation compiled from the AST, not a text passthrough. The
+        // expression is written with irregular spacing: only an AST round-trip
+        // normalises it to `1 + 2`, so a verbatim passthrough would fail this.
+        let out = parse_and_emit("const s = `sum: ${ 1 + 2 }`;");
+        assert!(out.contains("${1 + 2}"), "got: {}", out);
+    }
+
+    #[test]
+    fn emit_template_nested_and_escaped() {
+        // Nested template: the inner literal must be emitted inside the
+        // outer interpolation so the emitted JS parses as nested templates.
+        let out = parse_and_emit("const s = `${`inner ${1}`}`;");
+        assert!(out.contains("${`inner ${1}`}"), "got: {}", out);
+
+        // Escaped `\${` stays text and must keep its backslash so the JS
+        // template renders a literal `${` at run time.
+        let out = parse_and_emit(r"const s = `\${literal}`;");
+        assert!(out.contains("\\${literal}"), "got: {}", out);
+    }
+
+    #[test]
     fn emit_union_type_pattern_boolean_and_bytes_predicates() {
         let out = parse_check_and_emit(
             "fn f(v: boolean | bytes) number { return match (v) { boolean(b) => 1, bytes(raw) => 2 }; }",

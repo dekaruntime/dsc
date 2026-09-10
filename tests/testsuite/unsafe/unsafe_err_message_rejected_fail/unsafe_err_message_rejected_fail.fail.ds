@@ -1,0 +1,9 @@
+// dsc#103: bare `unsafe { }` types as `Result<Infer, string>` — the Err
+// payload is the thrown value's diagnostic text (dsc#60), so `.message` is a
+// check-time error here, not a runtime `undefined`. `.message` access
+// requires the annotated form `unsafe<T> { }` (Result<T, JsError>, deka#460).
+const r = unsafe { JSON.parse("{}") }
+const out = match (r) {
+  Ok(v) => v,
+  Err(e) => e.message,
+}

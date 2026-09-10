@@ -730,19 +730,20 @@ impl<'a> Checker<'a> {
                         }
                     }
                     None => {
-                        // Legacy bare `unsafe { }`. This is the load-bearing
-                        // source of `Infer` in the language (deka#252): every
-                        // value flowing out of it is universally assignable
-                        // and silently stops being checked.
-                        //
-                        // No diagnostic yet: the published stdlib on the
-                        // registry still contains bare `unsafe`, so this
-                        // cannot become an error until those packages are
-                        // republished. That is deka#460 phase 4.
+                        // Legacy bare `unsafe { }` (dsc#103). The emitter
+                        // normalizes the Err payload to the thrown value's
+                        // string representation (dsc#60), so the Err side is
+                        // `string` — the checker agreeing with the runtime is
+                        // what makes `Err(e) => e.message` a check-time error
+                        // instead of a runtime `undefined`. The Ok side stays
+                        // `Infer` until the mandatory-annotation migration
+                        // (deka#252/#460) lands; no diagnostic yet because the
+                        // published stdlib on the registry still contains bare
+                        // `unsafe`. That is deka#460 phase 4.
                         let _ = span;
                         Type::Generic {
                             base: "Result",
-                            args: vec![Type::Infer, Type::Infer],
+                            args: vec![Type::Infer, Type::Named { name: "string" }],
                         }
                     }
                 }

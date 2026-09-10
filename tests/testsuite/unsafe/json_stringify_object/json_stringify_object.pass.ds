@@ -2,5 +2,5 @@ import { echo } from "io"
 const r = unsafe { JSON.stringify({ value: 7 }) }
 echo(match (r) {
   Ok(v) => v,
-  Err(e) => `err: ${e.message}`,
+  Err(e) => `err: ${e}`,
 })

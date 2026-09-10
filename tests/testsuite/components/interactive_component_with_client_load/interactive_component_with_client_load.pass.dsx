@@ -10,6 +10,6 @@ const tree = <Counter client:load />
 const result = unsafe { deka.ui.renderToString(tree) }
 match (result) {
   Ok(rendered) => echo(rendered.html),
-  Err(error) => echo(error.message),
+  Err(error) => echo(error),
   _ => echo("nomatch"),
 }

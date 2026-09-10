@@ -1175,32 +1175,71 @@ mod tests {
     }
 
     #[test]
-    fn parse_generic_function_banned() {
-        // User code cannot declare type parameters (deka#561): every
-        // declaration form is rejected with the diagnostic that teaches
-        // the two replacement patterns.
-        for source in [
-            "fn id<T>(x: T) T { return x; }",
-            "fn (p Point) distance<T>(x: T) T { return x; }",
-            "struct Box<T> { value: T }",
-            "enum Maybe<T> { Some(T), None }",
-            "alias Pair<A, B> = Array<number>",
-            "type Pair<T> number",
-            "interface Container<T> { fn get() T }",
-        ] {
+    fn parse_generic_type_params() {
+        // rfd#56 phase 1: user code may declare type parameters, unbounded
+        // form. All six declaration kinds that carry the AST field parse
+        // `<T>` and keep it in `type_params`.
+        let cases: &[(&str, &str)] = &[
+            ("fn id<T>(x: T) T { return x; }", "id"),
+            ("fn (p Point) distance<T>(x: T) T { return x; }", "distance"),
+            ("struct Box<T> { value: T }", "Box"),
+            ("enum Maybe<T> { Some(T), Nothing }", "Maybe"),
+            ("alias Pair<A, B> = Array<number>", "Pair"),
+            ("interface Container<T> { fn get() T }", "Container"),
+        ];
+        for (source, decl) in cases {
             let arena = Bump::new();
             let result = parse(source, &arena);
             assert!(
-                result.errors.iter().any(|e| e
-                    .message
-                    .contains("user code cannot declare type parameters")),
-                "{source:?} must be rejected, got: {:?}",
+                result.errors.is_empty(),
+                "{source:?} must parse, got: {:?}",
                 result.errors
             );
+            let program = result.program.unwrap();
+            let params = match &program.statements[0] {
+                Stmt::Function { name, type_params, .. } => {
+                    assert_eq!(name, decl);
+                    *type_params
+                }
+                Stmt::ReceiverMethod { name, type_params, .. } => {
+                    assert_eq!(name, decl);
+                    *type_params
+                }
+                Stmt::Struct { name, type_params, .. } => {
+                    assert_eq!(name, decl);
+                    *type_params
+                }
+                Stmt::Enum { name, type_params, .. } => {
+                    assert_eq!(name, decl);
+                    *type_params
+                }
+                Stmt::TypeAlias { name, type_params, .. } => {
+                    assert_eq!(name, decl);
+                    *type_params
+                }
+                Stmt::Interface { name, type_params, .. } => {
+                    assert_eq!(name, decl);
+                    *type_params
+                }
+                other => panic!("expected a declaration, got {other:?}"),
+            };
+            assert!(!params.is_empty(), "{source:?} keeps its type params");
         }
 
-        // The type_params AST field remains (always empty) for builtin and
-        // PR B use.
+        // Newtypes have no type-parameter slot (the AST carries none): the
+        // rejection stays, with a newtype-specific message.
+        let arena = Bump::new();
+        let result = parse("type Pair<T> number", &arena);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.message.contains("newtype declarations cannot declare type parameters")),
+            "newtype generics stay rejected, got: {:?}",
+            result.errors
+        );
+
+        // Non-generic declarations keep an empty type_params field.
         let arena = Bump::new();
         let result = parse("fn id(x: number) number { return x; }", &arena);
         assert!(result.errors.is_empty(), "{:?}", result.errors);

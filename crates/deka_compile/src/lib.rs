@@ -1192,6 +1192,39 @@ fn load() string {
     }
 
     #[test]
+    fn compile_generic_type_parameters_erase() {
+        // rfd#56: types erase. `Signal<T>` with its constructor and a
+        // receiver method must emit exactly what the non-generic `Signal`
+        // spelling emits — the type parameter never reaches output.
+        let concrete = compile_to_js(
+            "struct Signal { value: number }\n\
+             fn signal(initial: number) Signal { return Signal { value: initial } }\n\
+             fn (s mut Signal) set(next: number) { s.value = next; }\n\
+             let count = signal(0)\n\
+             count.set(1)\n\
+             const v: number = count.value",
+            "test.ds",
+        )
+        .expect("concrete compile should succeed");
+        let generic = compile_to_js(
+            "struct Signal<T> { value: T }\n\
+             fn signal<T>(initial: T) Signal<T> { return Signal { value: initial } }\n\
+             fn (s mut Signal) set<T>(next: T) { s.value = next; }\n\
+             let count = signal(0)\n\
+             count.set(1)\n\
+             const v: number = count.value",
+            "test.ds",
+        )
+        .expect("generic compile should succeed");
+        assert_eq!(concrete.js, generic.js);
+        assert!(
+            !generic.js.contains("<"),
+            "a type parameter leaked into output:\n{}",
+            generic.js
+        );
+    }
+
+    #[test]
     fn compile_import_and_use() {
         let result = compile_to_js(
             "import { add } from \"./math.ds\"; const r: number = add(1, 2);",

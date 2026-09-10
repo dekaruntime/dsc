@@ -735,6 +735,108 @@ mod tests {
     }
 
     #[test]
+    fn emit_does_not_duplicate_live_import_when_user_imports_live() {
+        // deka#744 F3: `live` is a public export of ui/reactive, so importing
+        // it explicitly is legitimate. The compiler's injected `live` import
+        // must be skipped — a second binding is a SyntaxError at module load,
+        // not a warning.
+        let out = parse_and_emit(
+            "import { signal, live } from \"ui/reactive\";\n\
+             export fn Page() {\n\
+               const s = signal(7);\n\
+               return <p id=\"sig\">{live(fn() { return s[0](); })}</p>;\n\
+             }",
+        );
+        assert_eq!(
+            out.matches("\"ui/reactive\"").count(),
+            1,
+            "the user import and the injected import must collapse into one: {out}"
+        );
+        assert!(
+            out.contains("import { signal, live } from \"ui/reactive\""),
+            "the user's own import must be emitted intact: {out}"
+        );
+    }
+
+    #[test]
+    fn emit_does_not_duplicate_jsx_helper_import_when_user_imports_it() {
+        // deka#744 F3: same hazard as `live` for every auto-injected jsx
+        // runtime name. Each must be respected individually — importing one
+        // explicitly must not bind it twice.
+        for name in ["jsx", "jsxs", "Fragment"] {
+            let out = parse_and_emit(&format!(
+                "import {{ {name} }} from \"ui/jsx\";\n\
+                 export fn Page() {{\n\
+                   return <p>hi</p>;\n\
+                 }}\n\
+                 export fn Raw() {{\n\
+                   return {name}(\"span\", {{}}, \"x\");\n\
+                 }}",
+            ));
+            assert!(
+                out.contains(&format!("import {{ {name} }} from \"ui/jsx\"")),
+                "{name}: the user's own import must be emitted intact: {out}"
+            );
+            assert!(
+                !out.contains(&format!("import {{ jsx, jsxs, Fragment }} from \"ui/jsx\"")),
+                "{name}: the full helper import must not be injected over the user's binding: {out}"
+            );
+            assert!(
+                !out.contains(&format!("import {{ {name},"))
+                    && !out.contains(&format!(", {name} }} from \"ui/jsx\""))
+                    && !out.contains(&format!(", {name},")),
+                "{name}: the injected line must not re-bind the user's name: {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn emit_injects_missing_jsx_helpers_alongside_user_import() {
+        // Importing only `jsx` must suppress just `jsx`: emitted JSX still
+        // references jsxs/Fragment, so those injections must remain.
+        let out = parse_and_emit(
+            "import { jsx } from \"ui/jsx\";\n\
+             export fn Page() {\n\
+               return <p>hi</p>;\n\
+             }\n\
+             export fn Raw() {\n\
+               return jsx(\"span\", {}, \"x\");\n\
+             }",
+        );
+        assert!(
+            out.contains("import { jsx } from \"ui/jsx\""),
+            "the user's own import must be emitted intact: {out}"
+        );
+        assert!(
+            out.contains("import { jsxs, Fragment } from \"ui/jsx\""),
+            "only the bound name may be skipped; jsxs and Fragment must still be injected: {out}"
+        );
+    }
+
+    #[test]
+    fn emit_binds_live_once_when_user_imports_live_without_using_it() {
+        // Single-file emit keeps every import specifier, so the user's line
+        // binds `live` and the injection is skipped — the module must declare
+        // `live` exactly once either way (deka#744 F3).
+        let out = parse_and_emit(
+            "import { signal, live } from \"ui/reactive\";\n\
+             export fn Page() {\n\
+               const s = signal(7);\n\
+               return <p id=\"sig\">{s[0]()}</p>;\n\
+             }",
+        );
+        assert_eq!(
+            out.matches("\"ui/reactive\"").count(),
+            1,
+            "exactly one ui/reactive import may exist: {out}"
+        );
+        assert!(
+            out.contains("import { signal, live } from \"ui/reactive\""),
+            "the user's own import must be emitted intact: {out}"
+        );
+    }
+
+    #[test]
     fn emit_skips_css_imports() {
         let out = parse_and_emit("import \"./card.css\";\nconst x = 1;");
         assert!(

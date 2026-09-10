@@ -1476,17 +1476,33 @@ impl<'a> Emitter<'a> {
             self.out.push_str(&self.resolve_module_source(source));
             self.out.push_str("\";");
         }
+        // Names the module's own (emitted) imports already bind. Injecting
+        // `live`, `jsx`, `jsxs`, or `Fragment` over one of these is a second
+        // top-level binding for the same identifier — a SyntaxError at module
+        // load (`Identifier 'live' has already been declared`), not a warning
+        // (deka#744 F3). The predicate mirrors the hoisted import emission
+        // above and `emit_stmt`'s Import arm exactly, so a name counts as
+        // bound only when its import actually survives into the output.
+        let bound = self.user_import_bound_names();
         if self.needs_jsx_helper() {
-            if !first {
-                self.out.push('\n');
+            let helpers: Vec<&str> = ["jsx", "jsxs", "Fragment"]
+                .into_iter()
+                .filter(|name| !bound.contains(*name))
+                .collect();
+            if !helpers.is_empty() {
+                if !first {
+                    self.out.push('\n');
+                }
+                first = false;
+                let spec = self.resolve_module_source("ui/jsx");
+                self.out.push_str("import { ");
+                self.out.push_str(&helpers.join(", "));
+                self.out.push_str(" } from \"");
+                self.out.push_str(&spec);
+                self.out.push_str("\";");
             }
-            first = false;
-            let spec = self.resolve_module_source("ui/jsx");
-            self.out.push_str("import { jsx, jsxs, Fragment } from \"");
-            self.out.push_str(&spec);
-            self.out.push_str("\";");
         }
-        if self.needs_live {
+        if self.needs_live && !bound.contains("live") {
             if !first {
                 self.out.push('\n');
             }
@@ -2422,6 +2438,32 @@ impl<'a> Emitter<'a> {
             });
             found
         })
+    }
+
+    /// Local names the module's own imports bind in the emitted JS. Only
+    /// imports that survive hoisting (`should_emit_runtime_import`) and whose
+    /// specifier survives `emit_stmt`'s liveness filter count — an import
+    /// that shaking dropped binds nothing, so injecting the name is still
+    /// required (and legal).
+    fn user_import_bound_names(&self) -> HashSet<&'a str> {
+        let mut names = HashSet::new();
+        for stmt in self.program.statements.iter() {
+            let Stmt::Import { specifiers, .. } = stmt else {
+                continue;
+            };
+            if specifiers.is_empty() {
+                continue;
+            }
+            if !self.should_emit_stmt(stmt) || !self.should_emit_runtime_import(stmt) {
+                continue;
+            }
+            for spec in specifiers.iter() {
+                if self.is_live(spec.local) || self.is_build_factory_import(spec) {
+                    names.insert(spec.local);
+                }
+            }
+        }
+        names
     }
 
     fn scan_needs_live(&self) -> bool {

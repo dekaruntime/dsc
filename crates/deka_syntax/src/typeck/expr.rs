@@ -191,6 +191,14 @@ pub(super) fn primitive_member<'a>(
         // this slice; the rest of the descriptor API is deferred.
         ("Type", "toString") => PrimitiveMember::BuiltinMethod(fn0(string_ty)),
         ("string", "length") => PrimitiveMember::Property(number_ty),
+        // `bytes` is a Uint8Array view (dsc#88): integer indexing reads a
+        // byte, and `.length` is the octet count (dsc#92). RFD 15 lists
+        // `len` among the bytes operations; it is surfaced as the `.length`
+        // property to match `string`/`array`, not as a `len` member no other
+        // primitive has. The rest of the RFD 15 operations (slice, concat,
+        // hex/base64, conversions) stay out of the catalog until deka#756
+        // implements the RFD.
+        ("bytes", "length") => PrimitiveMember::Property(number_ty),
         ("string", "toUpperCase" | "toLowerCase" | "trim") => {
             PrimitiveMember::BuiltinMethod(fn0(string_ty))
         }
@@ -1316,6 +1324,16 @@ impl<'a> Checker<'a> {
             }
             "string" | "number" | "boolean" => {
                 self.error_span(span, format!("`{type_name}` has no field `{field}`"));
+                Type::Error
+            }
+            // The bytes catalog is deliberately closed at `length` (dsc#92):
+            // everything else in RFD 15 (slice, concat, hex/base64,
+            // conversions) lands with deka#756, so name what exists today.
+            "bytes" => {
+                self.error_span(
+                    span,
+                    format!("`bytes` has no field `{field}` (available: `length`)"),
+                );
                 Type::Error
             }
             _ => {

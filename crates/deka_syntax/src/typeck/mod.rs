@@ -3383,6 +3383,49 @@ mod tests {
     }
 
     #[test]
+    fn bytes_length_is_a_number_property() {
+        // dsc#92: `bytes` gets a member catalog starting at `.length`
+        // (RFD 15's `len` operation, surfaced with the same spelling
+        // `string`/`array` use). Indexing (dsc#88) is unaffected.
+        assert!(typeck(
+            "fn f(b: bytes) number { return b.length }\nfn g(b: bytes) number { return b[0] }"
+        )
+        .is_empty());
+
+        // The property is `number`: flowing it elsewhere fails.
+        let errors = typeck("fn f(b: bytes) string { return b.length }");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("number"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn bytes_catalog_is_closed() {
+        // A member that does not exist on `bytes` is a check-time error with
+        // a span, and the diagnostic names the one member that does exist.
+        let errors = typeck("fn f(b: bytes) number {\n  return b.slice\n}");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let error = &errors[0];
+        assert!(
+            error
+                .message
+                .contains("`bytes` has no field `slice` (available: `length`)"),
+            "{}",
+            error.message
+        );
+        // The diagnostic points at the field access itself (plain
+        // `error_span` underlines a single character, as with the other
+        // "has no field" diagnostics).
+        assert_eq!(
+            (error.line, error.column, error.underline_length),
+            (2, 10, 1)
+        );
+    }
+
+    #[test]
     fn number_math_records_calls_with_total_and_partial_kinds() {
         let arena = Bump::new();
         let source = "const f: number = (3.7).floor();\nconst m: number = (1).max(2);\nconst s: Option<number> = (4).sqrt();\nconst p: Option<number> = (2).pow(10);";

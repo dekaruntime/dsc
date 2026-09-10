@@ -85,20 +85,23 @@ pub fn compile_source_js(
 }
 
 /// Root that build slot ids are relativized against (dsc#61). The deka host
-/// runs dsc with cwd = project root and `DEKA_MODULE_ROOT` set; when the env
-/// var is absent, fall back to `deka.json`/`deka.lock` detection and then the
-/// input's directory. `compile_dev_plan` and `compile_graph_modules` share
-/// this so plan ids and graph-emitted `deka:dev/<id>` imports agree.
-pub fn slot_id_root(cwd: &Path, input: &Path) -> PathBuf {
-    slot_id_root_from(std::env::var_os("DEKA_MODULE_ROOT").map(PathBuf::from), cwd, input)
+/// runs dsc with cwd = project root and `DEKA_MODULE_ROOT` set; otherwise use
+/// `deka.json`/`deka.lock` detection. When neither identifies a project, keep
+/// the compiler's historical absolute-path identity by returning no root.
+/// `compile_dev_plan` and `compile_graph_modules` share this so plan ids and
+/// graph-emitted `deka:dev/<id>` imports agree.
+pub fn slot_id_root(cwd: &Path, input: &Path) -> Option<PathBuf> {
+    slot_id_root_from(
+        std::env::var_os("DEKA_MODULE_ROOT").map(PathBuf::from),
+        cwd,
+        input,
+    )
 }
 
-fn slot_id_root_from(env_root: Option<PathBuf>, cwd: &Path, input: &Path) -> PathBuf {
+fn slot_id_root_from(env_root: Option<PathBuf>, cwd: &Path, input: &Path) -> Option<PathBuf> {
     env_root
         .filter(|root| !root.as_os_str().is_empty())
         .or_else(|| find_project_root(cwd, input))
-        .or_else(|| input.parent().map(Path::to_path_buf))
-        .unwrap_or_else(|| cwd.to_path_buf())
 }
 
 /// Compile an entry and return only the build-time materialization contract.
@@ -116,7 +119,7 @@ pub fn compile_dev_plan(input: &Path, cwd: &Path) -> Result<deka_compile::DevPla
             &source,
             input_name,
             deka_compile::CompileOptions {
-                module_root: Some(module_root),
+                module_root: module_root.clone(),
                 ..Default::default()
             },
         )
@@ -135,7 +138,7 @@ pub fn compile_dev_plan(input: &Path, cwd: &Path) -> Result<deka_compile::DevPla
         input,
         &loader,
         GraphCompileOptions {
-            module_root: Some(module_root),
+            module_root,
             ..Default::default()
         },
     )
@@ -164,7 +167,7 @@ pub fn compile_graph_modules(
             &source,
             input_name,
             deka_compile::CompileOptions {
-                module_root: Some(slot_id_root(cwd, input)),
+                module_root: slot_id_root(cwd, input),
                 ..Default::default()
             },
         )
@@ -185,7 +188,7 @@ pub fn compile_graph_modules(
         &loader,
         GraphCompileOptions {
             client,
-            module_root: Some(slot_id_root(cwd, input)),
+            module_root: slot_id_root(cwd, input),
             ..Default::default()
         },
     )
@@ -608,7 +611,7 @@ mod tests {
         let cwd = Path::new("/repo");
         let input = Path::new("/repo/app/page.ds");
         let root = slot_id_root_from(Some(PathBuf::from("/env/root")), cwd, input);
-        assert_eq!(root, PathBuf::from("/env/root"));
+        assert_eq!(root, Some(PathBuf::from("/env/root")));
     }
 
     #[test]
@@ -616,16 +619,16 @@ mod tests {
         let cwd = Path::new("/repo");
         let input = Path::new("/repo/app/page.ds");
         let root = slot_id_root_from(Some(PathBuf::new()), cwd, input);
-        assert_eq!(root, cwd.join("app"));
+        assert_eq!(root, None);
     }
 
     #[test]
-    fn slot_id_root_falls_back_to_input_parent_without_markers() {
+    fn slot_id_root_keeps_no_root_without_markers() {
         // No deka.json/deka.lock exists under /no-such-project on the test
-        // machine, so detection fails and the input's directory wins.
+        // machine, so callers retain the compiler's absolute-path identity.
         let cwd = Path::new("/no-such-project");
         let input = Path::new("/no-such-project/app/page.ds");
         let root = slot_id_root_from(None, cwd, input);
-        assert_eq!(root, PathBuf::from("/no-such-project/app"));
+        assert_eq!(root, None);
     }
 }

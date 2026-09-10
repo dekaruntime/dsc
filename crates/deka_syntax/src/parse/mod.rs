@@ -1251,6 +1251,70 @@ mod tests {
     }
 
     #[test]
+    fn parse_type_param_bounds() {
+        // rfd#56 phase 2: `<T: Bound>` where Bound is any type expression
+        // already writable — an interface, a union, or a concrete type. One
+        // rule, not two mechanisms.
+        let arena = Bump::new();
+        let result = parse(
+            "fn greet<T: Named>(x: T) T { return x; }",
+            &arena,
+        );
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[0] {
+            Stmt::Function { type_params, .. } => {
+                assert_eq!(type_params.len(), 1);
+                assert_eq!(type_params[0].name, "T");
+                match type_params[0].bound.as_ref() {
+                    Some(Type::Named { name, .. }) => assert_eq!(name, &"Named"),
+                    other => panic!("expected interface bound, got {other:?}"),
+                }
+            }
+            _ => panic!("expected function"),
+        }
+
+        // Union bound: `A | B | C` parses as one bound expression.
+        let arena = Bump::new();
+        let result = parse(
+            "fn render<T: Product | Bundle | GiftCard>(item: T) T { return item; }",
+            &arena,
+        );
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[0] {
+            Stmt::Function { type_params, .. } => match type_params[0].bound.as_ref() {
+                Some(Type::Union { members, .. }) => {
+                    let names: Vec<_> = members
+                        .iter()
+                        .map(|m| match m {
+                            Type::Named { name, .. } => *name,
+                            other => panic!("expected named member, got {other:?}"),
+                        })
+                        .collect();
+                    assert_eq!(names, ["Product", "Bundle", "GiftCard"]);
+                }
+                other => panic!("expected union bound, got {other:?}"),
+            },
+            _ => panic!("expected function"),
+        }
+
+        // A bound does not make the parameter mandatory: mixed lists, and the
+        // unbounded form, keep `bound: None`.
+        let arena = Bump::new();
+        let result = parse("fn pair<T: Named, U>(a: T, b: U) U { return b; }", &arena);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[0] {
+            Stmt::Function { type_params, .. } => {
+                assert!(type_params[0].bound.is_some());
+                assert!(type_params[1].bound.is_none());
+            }
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
     fn parse_import_named() {
         let arena = Bump::new();
         let result = parse("import { add } from \"./math.ds\";", &arena);

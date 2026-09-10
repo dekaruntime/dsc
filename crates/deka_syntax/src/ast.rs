@@ -240,6 +240,10 @@ pub struct Param<'a> {
 #[derive(Clone, Debug, Serialize)]
 pub struct TypeParam<'a> {
     pub name: &'a str,
+    /// Optional bound (`<T: Named>`, rfd#56 phase 2): any type expression
+    /// already writable — an interface, a union, or a concrete type. A bound
+    /// does not restrict the parameter; it unlocks operations on it.
+    pub bound: Option<Type<'a>>,
     pub span: Span,
 }
 

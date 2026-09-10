@@ -245,6 +245,15 @@ impl<'a> Parser<'a> {
             let receiver_name = self.expect_identifier()?;
             let receiver_mutable = self.eat(TokenKind::Mut);
             let receiver_type = self.expect_identifier()?;
+            // Type parameters bound by the receiver: `fn (s Signal<T>) get() T`
+            // (rfd#56, dsc#101). Parsed with the declaration type-param
+            // grammar so each parameter may carry a bound:
+            // `fn (x Holder<T: Named>) name() string`.
+            let receiver_type_args = if self.at(TokenKind::Lt) {
+                self.parse_type_params()?
+            } else {
+                &[]
+            };
             self.expect(TokenKind::RParen)?;
 
             let name = self.expect_identifier()?;
@@ -270,6 +279,7 @@ impl<'a> Parser<'a> {
 
             return Some(Stmt::ReceiverMethod {
                 receiver_type,
+                receiver_type_args,
                 receiver_name,
                 receiver_mutable,
                 name,

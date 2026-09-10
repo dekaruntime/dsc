@@ -106,6 +106,14 @@ impl<'a> Type<'a> {
 pub fn substitute_type<'a>(ty: &Type<'a>, subst: &std::collections::HashMap<&'a str, Type<'a>>) -> Type<'a> {
     match ty {
         Type::Param { name } => subst.get(name).cloned().unwrap_or_else(|| Type::Param { name }),
+        // A parameter resolved through the module-export path arrives as
+        // `Named` (the exporter's tables do not know the declaring scope's
+        // type parameters), so it must substitute exactly as `Param` does —
+        // otherwise a receiver method's `T` would survive a cross-module
+        // call as an opaque named type (dsc#101).
+        Type::Named { name } if subst.contains_key(name) => {
+            subst.get(name).cloned().unwrap_or_else(|| Type::Named { name })
+        }
         Type::Option { inner } => Type::Option {
             inner: Box::new(substitute_type(inner, subst)),
         },

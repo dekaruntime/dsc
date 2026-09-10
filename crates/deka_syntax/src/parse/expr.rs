@@ -206,6 +206,24 @@ impl<'a> Parser<'a> {
                 break;
             }
 
+            // Explicit type arguments at a construction site — `Signal<T> {
+            // value: x }` — would otherwise misparse `<`/`>` as comparison
+            // operators. The design infers type arguments at construction
+            // (rfd#56), so reject the spelling with a diagnostic that says so
+            // instead of the misleading comparison/identifier errors (dsc#101).
+            if next_kind == TokenKind::Lt {
+                if let Expr::Identifier { name, .. } = &left {
+                    if self.next_lt_closes_before_struct_literal() {
+                        self.error(format!(
+                            "explicit type arguments are not supported at construction sites; \
+                             `{name}` infers its type arguments from the field values — \
+                             write `{name} {{ ... }}` (rfd#56)"
+                        ));
+                        return None;
+                    }
+                }
+            }
+
             // Commit to the binary operator: skip any newlines before it, then
             // the operator itself, then any newlines after it, then the RHS.
             self.skip_newlines();
@@ -682,6 +700,44 @@ impl<'a> Parser<'a> {
                 None
             }
         }
+    }
+
+    /// Peek at the `<` at the current position and decide whether it closes
+    /// (`>`) immediately before a struct-literal-shaped `{`: the spelling
+    /// `Signal<T> { value: x }` puts explicit type arguments at a
+    /// construction site, which the design infers instead (rfd#56). The
+    /// caller reports a dedicated diagnostic rather than letting `<` parse
+    /// as a comparison operator.
+    fn next_lt_closes_before_struct_literal(&self) -> bool {
+        if !self.at(TokenKind::Lt) {
+            return false;
+        }
+        let mut depth = 1usize;
+        let mut i = self.pos + 1;
+        while i < self.tokens.len() {
+            match self.tokens[i].kind {
+                TokenKind::Lt => depth += 1,
+                TokenKind::Gt => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        if self.tokens.get(i + 1).map(|t| t.kind) != Some(TokenKind::LBrace) {
+                            return false;
+                        }
+                        return match self.tokens.get(i + 2).map(|t| t.kind) {
+                            Some(TokenKind::RBrace) => true,
+                            Some(TokenKind::Identifier) => {
+                                self.tokens.get(i + 3).map(|t| t.kind)
+                                    == Some(TokenKind::Colon)
+                            }
+                            _ => false,
+                        };
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        false
     }
 
     /// Peek at the `<` at the current position and decide whether it opens an

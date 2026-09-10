@@ -1,0 +1,36 @@
+import { echo } from "io"
+
+// dsc#101 / rfd#56 phase 2: a receiver whose parameter carries an interface
+// bound. The bound unlocks the interface's members inside the method body,
+// and the call site verifies the receiver value's type argument against it.
+interface Named {
+  name: string;
+}
+
+struct Holder<T> { value: T }
+
+fn (x Holder<T: Named>) name() string {
+  return x.value.name
+}
+
+struct User { name: string }
+
+let h = Holder { value: User { name: "Ada" } }
+echo(h.name())
+
+// A union bound narrows to the concrete member inside each match arm, the
+// same as on a function parameter.
+struct Product { sku: string }
+struct Bundle { id: number }
+
+fn (x Holder<T: Product | Bundle>) describe() string {
+  return match x.value {
+    Product(p) => p.sku
+    Bundle(b) => string(b.id)
+  }
+}
+
+let p = Holder { value: Product { sku: "A-1" } }
+echo(p.describe())
+let b = Holder { value: Bundle { id: 7 } }
+echo(b.describe())

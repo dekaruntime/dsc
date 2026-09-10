@@ -8,7 +8,47 @@ use crate::ast;
 use super::Checker;
 use super::types::Type;
 
+/// Receiver type parameters — `(name, declared bound)` — with the struct's
+/// declared bounds inherited at positions the receiver leaves unbounded:
+/// with `struct Holder<T: Named> { value: T }`, `fn (x Holder<T>) ...` still
+/// sees `T: Named` in the body — the bound is a property of the parameter,
+/// not of one spelling of it (rfd#56 phase 2). Bound references keep the
+/// `'a` lifetime so they can be resolved through `resolve_bound`.
+fn effective_receiver_params<'a>(
+    struct_params: &'a [ast::TypeParam<'a>],
+    receiver_args: &'a [ast::TypeParam<'a>],
+) -> Vec<(&'a str, Option<&'a ast::Type<'a>>)> {
+    receiver_args
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let inherited = struct_params.get(i).and_then(|s| s.bound.as_ref());
+            (p.name, p.bound.as_ref().or(inherited))
+        })
+        .collect()
+}
+
 impl<'a> Checker<'a> {
+    /// Push a type-parameter scope from `(name, bound)` pairs — the shape
+    /// produced by [`effective_receiver_params`], where the bound may be
+    /// inherited from the struct declaration rather than a `TypeParam` node.
+    pub(super) fn push_receiver_params(
+        &mut self,
+        params: &[(&'a str, Option<&'a ast::Type<'a>>)],
+    ) {
+        let mut scope = HashMap::new();
+        let mut bounds = HashMap::new();
+        for &(name, bound) in params {
+            scope.insert(name, Type::Param { name });
+            if let Some(bound) = bound {
+                let resolved = self.resolve_bound(bound);
+                bounds.insert(name, resolved);
+            }
+        }
+        self.type_scopes.push(scope);
+        self.param_bounds.push(bounds);
+    }
+
     /// Build a descriptor fragment for every describable declared factory.
     /// See [`super::build_module_build_fragments`] for the contract.
     pub(super) fn build_declared_build_fragments(
@@ -88,6 +128,7 @@ impl<'a> Checker<'a> {
                 ),
                 ast::Stmt::ReceiverMethod {
                     receiver_type,
+                    receiver_type_args,
                     receiver_name,
                     receiver_mutable,
                     name,
@@ -100,6 +141,7 @@ impl<'a> Checker<'a> {
                     ..
                 } => self.check_receiver_method(
                     receiver_type,
+                    receiver_type_args,
                     receiver_name,
                     *receiver_mutable,
                     name,
@@ -429,6 +471,7 @@ impl<'a> Checker<'a> {
         for stmt in self.program.statements {
             if let ast::Stmt::ReceiverMethod {
                 receiver_type,
+                receiver_type_args,
                 receiver_mutable,
                 name,
                 type_params,
@@ -444,6 +487,52 @@ impl<'a> Checker<'a> {
                 {
                     self.error_span(*span, format!("unknown receiver type `{receiver_type}`"));
                     continue;
+                }
+                // rfd#56 / dsc#101: a receiver method on a generic type binds
+                // its type parameters in the receiver position. The receiver
+                // must actually be generic, the arity must match the struct's
+                // declaration, and the parameters may not also be declared on
+                // the method — `fn (s Signal) get<T>()` would read as if the
+                // method could pick a `T` unrelated to the receiver's.
+                let struct_params: &[ast::TypeParam<'a>] = self
+                    .structs
+                    .get(receiver_type)
+                    .map_or(&[], |info| info.type_params);
+                if !receiver_type_args.is_empty() {
+                    if struct_params.is_empty() {
+                        self.error_span(
+                            *span,
+                            format!(
+                                "receiver type `{receiver_type}` has no type parameters to bind"
+                            ),
+                        );
+                        continue;
+                    }
+                    if struct_params.len() != receiver_type_args.len() {
+                        self.error_span(
+                            *span,
+                            format!(
+                                "receiver type `{receiver_type}` declares {} type parameter{}, \
+                                 found {}",
+                                struct_params.len(),
+                                if struct_params.len() == 1 { "" } else { "s" },
+                                receiver_type_args.len()
+                            ),
+                        );
+                        continue;
+                    }
+                    if !type_params.is_empty() {
+                        self.error_span(
+                            *span,
+                            format!(
+                                "type parameters on receiver method `{name}` are bound by the \
+                                 receiver, not the method — declare them on the receiver \
+                                 (`fn (s {receiver_type}<T>) {name}(...)`) and remove `<...>` \
+                                 from the method name (rfd#56)"
+                            ),
+                        );
+                        continue;
+                    }
                 }
                 // A builtin property keeps its meaning for property-shaped
                 // access, so an extension of the same name would give one name
@@ -466,10 +555,14 @@ impl<'a> Checker<'a> {
                 }
                 let key = (*receiver_type, *name);
                 // Resolve annotations once, here, so body checking and call
-                // sites reuse them instead of re-reporting (deka#494). The
-                // method's own type parameters are in scope, so
-                // `fn (s Signal) set<T>(next: T)` resolves `next` to `T`
-                // (rfd#56 phase 1).
+                // sites reuse them instead of re-reporting (deka#494).
+                // Receiver-bound parameters (`fn (s Signal<T>)`) are in scope
+                // so `T` in the signature resolves to the receiver's type
+                // parameter (rfd#56, dsc#101); the phase-1 spelling
+                // (`fn (s Signal) set<T>(...)`) resolves through the method's
+                // own parameters, as before.
+                let effective = effective_receiver_params(struct_params, receiver_type_args);
+                self.push_receiver_params(&effective);
                 self.push_type_params(type_params);
                 let param_types: Vec<Type<'a>> = params
                     .iter()
@@ -486,12 +579,14 @@ impl<'a> Checker<'a> {
                     .collect();
                 let resolved_return = return_type.as_ref().map(|t| self.resolve_ast_type(t));
                 self.pop_type_params();
+                self.pop_type_params();
                 if self
                     .receiver_methods
                     .insert(
                         key,
                         super::MethodInfo {
                             params,
+                            receiver_type_args,
                             type_params,
                             return_type: return_type.clone(),
                             mutable: *receiver_mutable,
@@ -1552,6 +1647,7 @@ impl<'a> Checker<'a> {
     pub(super) fn check_receiver_method(
         &mut self,
         receiver_type: &'a str,
+        receiver_type_args: &'a [ast::TypeParam<'a>],
         receiver_name: &'a str,
         receiver_mutable: bool,
         name: &'a str,
@@ -1588,8 +1684,16 @@ impl<'a> Checker<'a> {
         // so unknown types are reported exactly once.
         let param_types = info.param_types.clone();
 
-        // The method's own type parameters are in scope for the body, the
-        // same as a plain generic function's (rfd#56 phase 1).
+        // The receiver-bound parameters (`fn (s Signal<T>)`, rfd#56 dsc#101)
+        // and then the method's own type parameters (`fn (s Signal) set<T>(…)`,
+        // rfd#56 phase 1) are in scope for the body, the same as a plain
+        // generic function's. Declaring both is rejected during collection.
+        let struct_params: &[ast::TypeParam<'a>] = self
+            .structs
+            .get(receiver_type)
+            .map_or(&[], |info| info.type_params);
+        let effective = effective_receiver_params(struct_params, receiver_type_args);
+        self.push_receiver_params(&effective);
         self.push_type_params(type_params);
 
         let explicit_ret = info.resolved_return.clone();
@@ -1601,8 +1705,9 @@ impl<'a> Checker<'a> {
 
         // Bind the receiver name to the receiver type inside the method body.
         // A method on a generic struct sees the receiver as the struct
-        // instantiated at its own type parameters: `fn (s Signal) set<T>(…)`
-        // binds `s` to `Signal<T>`, so `s.value` has type `T` and obeys the
+        // instantiated at its own type parameters: `fn (s Signal<T>) get(…)`
+        // and the phase-1 `fn (s Signal) set<T>(…)` both bind `s` to
+        // `Signal<T>`, so `s.value` has type `T` and obeys the
         // unbounded-parameter capability rule like any other `T`. A method
         // that declares no parameters still sees the struct's declared
         // parameters, as fresh opaque parameters.
@@ -1621,10 +1726,12 @@ impl<'a> Checker<'a> {
                     name: receiver_type,
                 }
             } else {
-                let names: Vec<&'a str> = if type_params.is_empty() {
-                    struct_info.type_params.iter().map(|p| p.name).collect()
-                } else {
+                let names: Vec<&'a str> = if !receiver_type_args.is_empty() {
+                    receiver_type_args.iter().map(|p| p.name).collect()
+                } else if !type_params.is_empty() {
                     type_params.iter().map(|p| p.name).collect()
+                } else {
+                    struct_info.type_params.iter().map(|p| p.name).collect()
                 };
                 Type::Generic {
                     base: receiver_type,
@@ -1667,6 +1774,7 @@ impl<'a> Checker<'a> {
         self.mutables.pop();
 
         self.pop_type_params();
+        self.pop_type_params();
 
         // Update the stored signature, preserving the annotation resolutions
         // made during collection (deka#494).
@@ -1674,6 +1782,7 @@ impl<'a> Checker<'a> {
             (receiver_type, name),
             super::MethodInfo {
                 params,
+                receiver_type_args,
                 type_params,
                 return_type: _return_type.map(|t| t.clone()),
                 mutable: receiver_mutable,

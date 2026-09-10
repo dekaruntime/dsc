@@ -1251,6 +1251,116 @@ mod tests {
     }
 
     #[test]
+    fn parse_generic_receiver_method() {
+        // dsc#101: the receiver binds the type parameter —
+        // `fn (s Signal<T>) get() T` — instead of the method declaring it.
+        let arena = Bump::new();
+        let result = parse(
+            "struct Signal<T> { value: T } fn (s Signal<T>) get() T { return s.value }",
+            &arena,
+        );
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[1] {
+            Stmt::ReceiverMethod {
+                receiver_type,
+                receiver_type_args,
+                name,
+                type_params,
+                ..
+            } => {
+                assert_eq!(receiver_type.to_string(), "Signal");
+                assert_eq!(receiver_type_args.len(), 1);
+                assert_eq!(receiver_type_args[0].name, "T");
+                assert!(receiver_type_args[0].bound.is_none());
+                assert!(type_params.is_empty());
+                assert_eq!(name.to_string(), "get");
+            }
+            _ => panic!("expected receiver method"),
+        }
+
+        // A receiver parameter may carry a bound (rfd#56 phase 2), parsed
+        // with the declaration type-param grammar.
+        let arena = Bump::new();
+        let result = parse(
+            "interface Named { name: string }\n\
+             struct Holder<T> { value: T }\n\
+             fn (x Holder<T: Named>) name() string { return x.value.name }",
+            &arena,
+        );
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[2] {
+            Stmt::ReceiverMethod {
+                receiver_type_args, ..
+            } => {
+                assert_eq!(receiver_type_args.len(), 1);
+                assert_eq!(receiver_type_args[0].name, "T");
+                assert!(receiver_type_args[0].bound.is_some());
+            }
+            _ => panic!("expected receiver method"),
+        }
+
+        // A mutating receiver binds the same way.
+        let arena = Bump::new();
+        let result = parse(
+            "struct Signal<T> { value: T } fn (s mut Signal<T>) set(next: T) { s.value = next }",
+            &arena,
+        );
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[1] {
+            Stmt::ReceiverMethod {
+                receiver_type_args,
+                receiver_mutable,
+                ..
+            } => {
+                assert_eq!(receiver_type_args.len(), 1);
+                assert!(*receiver_mutable);
+            }
+            _ => panic!("expected receiver method"),
+        }
+
+        // A receiver without type arguments keeps an empty field.
+        let arena = Bump::new();
+        let result = parse(
+            "struct Point { x: number } fn (p Point) dist() number { return p.x }",
+            &arena,
+        );
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[1] {
+            Stmt::ReceiverMethod {
+                receiver_type_args, ..
+            } => assert!(receiver_type_args.is_empty()),
+            _ => panic!("expected receiver method"),
+        }
+    }
+
+    #[test]
+    fn parse_struct_literal_type_args_rejected() {
+        // dsc#101: `Signal<T> { ... }` puts explicit type arguments at a
+        // construction site, which the design infers (rfd#56). The old
+        // behavior parsed `<`/`>` as comparisons and reported `unknown
+        // identifier T`; now the parse rejects the spelling directly.
+        for source in [
+            "struct Signal<T> { value: T }\nconst s = Signal<T> { value: 1 }",
+            "struct Signal<T> { value: T }\nconst s = Signal<number> { value: 1 }",
+        ] {
+            let arena = Bump::new();
+            let result = parse(source, &arena);
+            assert!(
+                result
+                    .errors
+                    .iter()
+                    .any(|e| e.message.contains("infers its type arguments from the field values")),
+                "{source:?} got: {:?}",
+                result.errors
+            );
+        }
+    }
+
+    #[test]
     fn parse_type_param_bounds() {
         // rfd#56 phase 2: `<T: Bound>` where Bound is any type expression
         // already writable — an interface, a union, or a concrete type. One

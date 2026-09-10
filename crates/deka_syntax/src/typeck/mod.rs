@@ -805,6 +805,7 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
             }
             ast::Stmt::ReceiverMethod {
                 receiver_type,
+                receiver_type_args,
                 name,
                 type_params,
                 params,
@@ -815,6 +816,7 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
                     (*receiver_type, *name),
                     MethodInfo {
                         params: *params,
+                        receiver_type_args: *receiver_type_args,
                         type_params: *type_params,
                         return_type: return_type.clone(),
                         mutable: false,
@@ -1299,9 +1301,16 @@ pub(super) fn is_primitive_receiver_name(name: &str) -> bool {
 #[derive(Clone, Debug)]
 pub struct MethodInfo<'a> {
     pub params: &'a [ast::Param<'a>],
+    /// Type parameters bound by the receiver type, e.g. `T` in
+    /// `fn (s Signal<T>) get() T` (rfd#56, dsc#101). Introduced by the
+    /// receiver and bound from the receiver value's type arguments at each
+    /// call site. Empty when the receiver is not generic.
+    pub receiver_type_args: &'a [ast::TypeParam<'a>],
     /// Declared type parameters, e.g. `T` in `fn (s Signal) set<T>(next: T)`.
     /// On a generic struct receiver the parameters bind positionally to the
     /// receiver value's type arguments at each call site (rfd#56 phase 1).
+    /// Superseded by `receiver_type_args`: declaring both is an error, since
+    /// the parameter is bound by the receiver, not the method.
     pub type_params: &'a [ast::TypeParam<'a>],
     pub return_type: Option<ast::Type<'a>>,
     pub mutable: bool,
@@ -2255,6 +2264,263 @@ mod tests {
             errors[0].message.contains("unknown type `Nope`"),
             "{}",
             errors[0].message
+        );
+    }
+
+    #[test]
+    fn generic_receiver_method_binds_type_param() {
+        // dsc#101: `T` is bound by the receiver (`fn (s Signal<T>) get() T`),
+        // so the body and signature resolve it at each call site.
+        assert!(typeck(
+            "struct Signal<T> { value: T }\n\
+             fn signal<T>(initial: T) Signal<T> { return Signal { value: initial } }\n\
+             fn (s Signal<T>) get() T { return s.value }\n\
+             fn (s mut Signal<T>) set(next: T) void { s.value = next }\n\
+             let count = signal(0)\n\
+             const a = count.get()\n\
+             count.set(41)\n\
+             const b = count.get()\n\
+             let label = signal(\"active\")\n\
+             const c = label.get()"
+        )
+        .is_empty());
+
+        // The call site solves T from the receiver's type argument:
+        // `signal(42).get()` yields number ...
+        let errors = typeck(
+            "struct Signal<T> { value: T }\n\
+             fn signal<T>(initial: T) Signal<T> { return Signal { value: initial } }\n\
+             fn (s Signal<T>) get() T { return s.value }\n\
+             const s: string = signal(42).get()",
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0]
+                .message
+                .contains("expected type `string`, found type `number`"),
+            "{}",
+            errors[0].message
+        );
+
+        // ... and `signal("x").get()` yields string.
+        let errors = typeck(
+            "struct Signal<T> { value: T }\n\
+             fn signal<T>(initial: T) Signal<T> { return Signal { value: initial } }\n\
+             fn (s Signal<T>) get() T { return s.value }\n\
+             const n: number = signal(\"x\").get()",
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0]
+                .message
+                .contains("expected type `number`, found type `string`"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn generic_receiver_method_wrong_argument_type_fails() {
+        // `signal(0).set("nope")`: T solves to number from the receiver, so
+        // the string argument is a check-time error with a span.
+        let errors = typeck(
+            "struct Signal<T> { value: T }\n\
+             fn signal<T>(initial: T) Signal<T> { return Signal { value: initial } }\n\
+             fn (s mut Signal<T>) set(next: T) void { s.value = next }\n\
+             let count = signal(0)\n\
+             count.set(\"nope\")",
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0]
+                .message
+                .contains("expected argument type `number`, found type `string`"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn generic_receiver_method_unbounded_member_call_fails() {
+        // rfd#56 phase 1 capability rule, inside a receiver method: an
+        // unbounded `T` permits no member calls, and no bound is declared
+        // here that could permit one.
+        let errors = typeck(
+            "struct Signal<T> { value: T }\n\
+             fn (s Signal<T>) bad() void { s.value.whatever() }",
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains(
+                "cannot call method `whatever` on a value of unbounded type parameter `T`"
+            ),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn generic_receiver_method_bounded_receiver() {
+        // rfd#56 phase 2: a receiver whose parameter carries an interface
+        // bound unlocks the bound's members in the body, and the call site
+        // verifies the receiver's type argument against the bound.
+        assert!(typeck(
+            "interface Named { name: string }\n\
+             struct Holder<T> { value: T }\n\
+             fn (x Holder<T: Named>) name() string { return x.value.name }\n\
+             struct User { name: string }\n\
+             let h = Holder { value: User { name: \"Ada\" } }\n\
+             const n = h.name()"
+        )
+        .is_empty());
+
+        // A receiver value whose type argument is outside the bound fails at
+        // the call site — construction of the struct itself is unbounded.
+        let errors = typeck(
+            "interface Named { name: string }\n\
+             struct Holder<T> { value: T }\n\
+             fn (x Holder<T: Named>) name() string { return x.value.name }\n\
+             struct NoName { age: number }\n\
+             let bad = Holder { value: NoName { age: 1 } }\n\
+             const n = bad.name()",
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0]
+                .message
+                .contains("does not satisfy the bound `Named`"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn generic_receiver_method_union_bound_narrows_in_body() {
+        // A union-bound receiver parameter narrows to the concrete member
+        // inside each match arm, the same as a union-bound function
+        // parameter (rfd#56 phase 2).
+        assert!(typeck(
+            "struct Product { sku: string }\n\
+             struct Bundle { id: number }\n\
+             struct Holder<T> { value: T }\n\
+             fn (x Holder<T: Product | Bundle>) describe() string {\n\
+             \x20 return match x.value {\n\
+             \x20   Product(p) => p.sku\n\
+             \x20   Bundle(b) => string(b.id)\n\
+             \x20 }\n\
+             }\n\
+             let h = Holder { value: Product { sku: \"A-1\" } }\n\
+             const d = h.describe()"
+        )
+        .is_empty());
+
+        // Non-exhaustive match over a union-bound receiver parameter fails.
+        let errors = typeck(
+            "struct Product { sku: string }\n\
+             struct Bundle { id: number }\n\
+             struct Holder<T> { value: T }\n\
+             fn (x Holder<T: Product | Bundle>) describe() string {\n\
+             \x20 return match x.value {\n\
+             \x20   Product(p) => p.sku\n\
+             \x20 }\n\
+             }",
+        );
+        assert!(!errors.is_empty(), "non-exhaustive match must fail");
+        assert!(
+            errors.iter().all(|e| e.message.contains("match")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn generic_receiver_method_declaration_errors() {
+        // Type parameters are bound by the receiver, not declared on the
+        // method: declaring both is an error (rfd#56, dsc#101).
+        let errors = typeck(
+            "struct Signal<T> { value: T }\n\
+             fn (s Signal<T>) get<U>() T { return s.value }",
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("bound by the receiver")),
+            "{errors:?}"
+        );
+
+        // The receiver's parameter arity must match the struct declaration.
+        let errors = typeck(
+            "struct Signal<T> { value: T }\n\
+             fn (s Signal<T, U>) get() T { return s.value }",
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("declares 1 type parameter")),
+            "{errors:?}"
+        );
+
+        // A receiver with no type parameters binds none.
+        let errors = typeck(
+            "struct Point { x: number }\n\
+             fn (p Point<T>) dist() number { return p.x }",
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("has no type parameters to bind")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn generic_receiver_method_struct_bound_is_inherited() {
+        // A bound declared on the struct's parameter applies inside a
+        // receiver method that leaves the parameter unbounded: the bound is
+        // a property of the parameter, not of one spelling of it.
+        assert!(typeck(
+            "interface Named { name: string }\n\
+             struct Holder<T: Named> { value: T }\n\
+             fn (x Holder<T>) name() string { return x.value.name }\n\
+             struct User { name: string }\n\
+             let h = Holder { value: User { name: \"Ada\" } }\n\
+             const n = h.name()"
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn struct_literal_type_args_rejected_at_parse() {
+        // dsc#101: `Signal<T> { ... }` puts explicit type arguments at a
+        // construction site; the design infers them. The parse rejects the
+        // spelling with a dedicated diagnostic instead of the old
+        // comparison-operator misparse (`unknown identifier T`).
+        let arena = Bump::new();
+        let result = crate::parse::parse(
+            "struct Signal<T> { value: T }\nconst s = Signal<T> { value: 1 }",
+            &arena,
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.message.contains("infers its type arguments from the field values")),
+            "{:?}",
+            result.errors
+        );
+
+        // Concrete type arguments get the same diagnostic.
+        let arena = Bump::new();
+        let result = crate::parse::parse(
+            "struct Signal<T> { value: T }\nconst s = Signal<number> { value: 1 }",
+            &arena,
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.message.contains("infers its type arguments from the field values")),
+            "{:?}",
+            result.errors
         );
     }
 

@@ -95,9 +95,15 @@ pub enum Stmt<'a> {
         is_async: bool,
         span: Span,
     },
-    /// Receiver method: `fn StructName.method<T>(args): Ret { body }`
+    /// Receiver method: `fn (s StructName) name<T>(args) Ret { body }`
+    ///
+    /// `receiver_type_args`: type parameters bound by the receiver type,
+    /// e.g. `T` in `fn (s Signal<T>) get() T` (rfd#56, dsc#101). `T` is
+    /// introduced by the receiver and resolves to the receiver value's type
+    /// argument; it is not declared on the method.
     ReceiverMethod {
         receiver_type: &'a str,
+        receiver_type_args: &'a [TypeParam<'a>],
         receiver_name: &'a str,
         receiver_mutable: bool,
         name: &'a str,

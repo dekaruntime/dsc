@@ -88,6 +88,33 @@ fn bundle_produces_valid_js() {
 }
 
 #[test]
+fn bundle_rejects_malformed_module() {
+    let tmp = make_tmp_dir("malformed_module");
+    let entry = tmp.join("entry.js");
+    let source = "export const = ;\n";
+    std::fs::write(&entry, source).expect("write entry");
+    let provider = Arc::new(SimpleVirtualSource {
+        entry: entry.clone(),
+        code: source.to_string(),
+    });
+
+    let err = bundle_virtual_entry(
+        &entry,
+        BundleOptions {
+            project_root: tmp.clone(),
+            minify: false,
+            iife: false,
+            client: false,
+        },
+        provider,
+    )
+    .expect_err("malformed modules must fail the bundle");
+
+    assert!(!err.trim().is_empty(), "bundle returned an empty error");
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
 fn bundle_allows_parent_relative_ds_import_from_subdirectory() {
     let tmp = make_tmp_dir("parent_relative_ds_bundle");
     let api_dir = tmp.join("api");

@@ -340,37 +340,13 @@ fn collect_expr_idents(expr: &Expr<'_>, out: &mut HashSet<String>) {
         // keeping a name that turns out to be unused costs bytes, dropping one
         // that is used produces a ReferenceError at runtime. So this takes every
         // identifier-shaped token, including ones inside strings and comments.
+        // The scanner is shared with the dev-entry liveness in deka_emit, which
+        // has the same requirement for build-only entries (dsc#59).
         Expr::Unsafe { source, .. } => {
-            collect_js_identifier_tokens(source, out);
+            deka_emit::collect_js_identifier_tokens(source, out);
         }
         _ => {}
     }
-}
-
-/// Every identifier-shaped token in a chunk of raw JavaScript.
-///
-/// Deliberately not a lexer: this feeds dead-code elimination, where a false
-/// positive keeps a binding alive and a false negative breaks the program.
-fn collect_js_identifier_tokens(source: &str, out: &mut HashSet<String>) {
-    let mut current = String::new();
-    for ch in source.chars() {
-        if ch.is_alphanumeric() || ch == '_' || ch == '$' {
-            current.push(ch);
-        } else if !current.is_empty() {
-            push_identifier(std::mem::take(&mut current), out);
-        }
-    }
-    if !current.is_empty() {
-        push_identifier(current, out);
-    }
-}
-
-fn push_identifier(token: String, out: &mut HashSet<String>) {
-    // A leading digit means it was a number, not a name.
-    if token.starts_with(|ch: char| ch.is_ascii_digit()) {
-        return;
-    }
-    out.insert(token);
 }
 
 fn walk_stmt(stmt: &Stmt<'_>, visit: &mut dyn FnMut(&Expr<'_>)) {

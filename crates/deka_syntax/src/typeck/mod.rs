@@ -4490,6 +4490,41 @@ mod tests {
     }
 
     #[test]
+    fn union_enum_case_pattern_binds_payload_and_covers_every_case() {
+        let errors = typeck(
+            "enum Shape { Empty, Rect(number) }\n\
+             fn describe(s: Shape | number) string {\n\
+               return match (s) {\n\
+                 Shape.Empty => \"empty\",\n\
+                 Shape.Rect(n) => \"rect \" + string(n),\n\
+                 number(n) => string(n),\n\
+               }\n\
+             }",
+        );
+        assert!(errors.is_empty(), "{:?}", errors);
+    }
+
+    #[test]
+    fn union_enum_case_pattern_does_not_cover_other_enum_cases() {
+        let errors = typeck(
+            "enum Shape { Empty, Rect(number) }\n\
+             fn describe(s: Shape | number) string {\n\
+               return match (s) {\n\
+                 Shape.Rect(n) => \"rect \" + string(n),\n\
+                 number(n) => string(n),\n\
+               }\n\
+             }",
+        );
+        assert_eq!(errors.len(), 1, "{:?}", errors);
+        assert!(
+            errors[0].message.contains("non-exhaustive")
+                && errors[0].message.contains("Shape::Empty"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
     fn union_match_with_catch_all_passes() {
         let errors = typeck(
             "fn f(v: string | number) string { return match (v) { string(s) => s, _ => \"other\" }; }",

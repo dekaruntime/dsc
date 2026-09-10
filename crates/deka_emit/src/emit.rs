@@ -4337,6 +4337,16 @@ impl<'a> Emitter<'a> {
                     .get(&(pattern as *const Pattern<'a>))
                     .copied()
                 {
+                    if let deka_syntax::typeck::UnionMemberTest::EnumCase(enum_name) = test {
+                        return format!(
+                            "{} && {}.__case === \"{}\"",
+                            self.union_member_condition(&deka_syntax::typeck::UnionMemberTest::Enum(
+                                enum_name
+                            ), scrutinee_var),
+                            scrutinee_var,
+                            name
+                        );
+                    }
                     return self.union_member_condition(&test, scrutinee_var);
                 }
                 let mut conditions = vec![format!("{}.__case === \"{}\"", scrutinee_var, name)];
@@ -4436,6 +4446,9 @@ impl<'a> Emitter<'a> {
             deka_syntax::typeck::UnionMemberTest::Enum(name) => {
                 format!("{}.__enum === \"{}\"", scrutinee_var, name)
             }
+            deka_syntax::typeck::UnionMemberTest::EnumCase(name) => {
+                format!("{}.__enum === \"{}\"", scrutinee_var, name)
+            }
         }
     }
 
@@ -4466,7 +4479,8 @@ impl<'a> Emitter<'a> {
                 // (rfd#42, deka#530).
                 if self
                     .union_type_patterns
-                    .contains_key(&(pattern as *const Pattern<'a>))
+                    .get(&(pattern as *const Pattern<'a>))
+                    .is_some_and(|test| !matches!(test, deka_syntax::typeck::UnionMemberTest::EnumCase(_)))
                 {
                     if let Some(payload) = payload {
                         self.emit_pattern_bindings(payload, scrutinee_var, indent)?;

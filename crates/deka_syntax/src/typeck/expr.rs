@@ -75,6 +75,15 @@ impl<'a> Coverage<'a> {
         Coverage::Cases(cases)
     }
 
+    /// Put constructor coverage below the enum member that owns it in a
+    /// union. `Shape.Rect(_)` over `Shape | number` is coverage for one
+    /// `Shape` case, not coverage for every `Shape` value.
+    fn union_member(name: &'a str, coverage: Coverage<'a>) -> Self {
+        let mut cases = HashMap::new();
+        cases.insert(name, coverage);
+        Coverage::Cases(cases)
+    }
+
     pub(super) fn of_pattern(
         pattern: &ast::Pattern<'a>,
         cases: &HashMap<*const ast::Pattern<'a>, &'a str>,
@@ -1884,14 +1893,18 @@ impl<'a> Checker<'a> {
                 },
             ) = (scrutinee_ident, &arm.pattern)
             {
-                if self
+                if let Some(test) = self
                     .union_type_patterns
-                    .contains_key(&(&arm.pattern as *const ast::Pattern<'a>))
+                    .get(&(&arm.pattern as *const ast::Pattern<'a>))
                 {
+                    let member_name = match test {
+                        super::types::UnionMemberTest::EnumCase(enum_name) => enum_name,
+                        _ => pattern_name,
+                    };
                     if let Type::Union { members } = &effective_scrutinee {
                         if let Some(member) = members
                             .iter()
-                            .find(|m| Self::union_member_name(m) == Some(pattern_name))
+                            .find(|m| Self::union_member_name(m) == Some(member_name))
                         {
                             // The narrowing is scope-shadowing like any
                             // match arm binding: after the arm, the name
@@ -1905,7 +1918,17 @@ impl<'a> Checker<'a> {
             {
                 has_catch_all = true;
             }
-            coverage = coverage.merge(Coverage::of_pattern(&arm.pattern, &self.enum_case_patterns));
+            let arm_coverage = Coverage::of_pattern(&arm.pattern, &self.enum_case_patterns);
+            let arm_coverage = match self
+                .union_type_patterns
+                .get(&(&arm.pattern as *const ast::Pattern<'a>))
+            {
+                Some(super::types::UnionMemberTest::EnumCase(enum_name)) => {
+                    Coverage::union_member(enum_name, arm_coverage)
+                }
+                _ => arm_coverage,
+            };
+            coverage = coverage.merge(arm_coverage);
             let arm_type = self.check_expr(&arm.body);
             self.scopes.pop();
             self.mutables.pop();
@@ -2062,21 +2085,25 @@ impl<'a> Checker<'a> {
         let Coverage::Cases(covered) = coverage else {
             return;
         };
-        // A union is exhaustive only when every member is named by a
-        // type-pattern (or a catch-all made coverage `All` above) — v1
-        // requires one type-pattern per member rather than recursing into
-        // enum case coverage (rfd#42, deka#530).
+        // A union is exhaustive only when every member is covered. For enum
+        // members, that means recursively covering all of the enum's cases:
+        // `Shape.Rect(_)` does not cover `Shape.Empty` in `Shape | number`.
         if let Type::Union { members } = ty {
             for member in members {
                 let Some(label) = Self::union_member_name(member) else {
                     continue;
                 };
-                if !covered.contains_key(label) {
-                    out.push(if path.is_empty() {
-                        label.to_string()
-                    } else {
-                        format!("{path}({label})")
-                    });
+                match covered.get(label) {
+                    Some(member_coverage) => {
+                        self.collect_missing(member, member_coverage, path, out);
+                    }
+                    None => {
+                        out.push(if path.is_empty() {
+                            label.to_string()
+                        } else {
+                            format!("{path}({label})")
+                        });
+                    }
                 }
             }
             return;
@@ -2168,6 +2195,19 @@ impl<'a> Checker<'a> {
                 payload,
                 span,
             } => {
+                // `Shape.Rect(value)` is an enum constructor, even when
+                // `Shape` is one member of a union. Resolve that case before
+                // generic union type-patterns, which use the *type* name
+                // (`Shape(value)`) rather than a case name (`Rect(value)`).
+                if self.check_union_enum_case_pattern(
+                    pattern,
+                    name,
+                    payload.as_deref(),
+                    *span,
+                    scrutinee_type,
+                ) {
+                    return;
+                }
                 // Union member type-patterns (`string(s)` on a `string | number`
                 // scrutinee) take priority over the user-enum constructor lookup
                 // so a primitive name is not reported as an unknown constructor
@@ -2218,6 +2258,38 @@ impl<'a> Checker<'a> {
                 self.check_tuple_pattern(elements, *span, scrutinee_type);
             }
         }
+    }
+
+    /// Resolve an enum constructor when its enum is a member of the union
+    /// being matched. The lowered marker lets emission retain both the enum
+    /// brand and the case tag, while coverage remains nested under the enum.
+    fn check_union_enum_case_pattern(
+        &mut self,
+        pattern: &ast::Pattern<'a>,
+        name: &'a str,
+        payload: Option<&ast::Pattern<'a>>,
+        span: ast::Span,
+        scrutinee_type: &Type<'a>,
+    ) -> bool {
+        let Type::Union { members } = scrutinee_type else {
+            return false;
+        };
+        let Some(enum_name) = self.case_to_enum.get(name).copied() else {
+            return false;
+        };
+        let Some(member) = members
+            .iter()
+            .find(|member| Self::union_member_name(member) == Some(enum_name))
+        else {
+            return false;
+        };
+
+        self.union_type_patterns.insert(
+            pattern as *const ast::Pattern<'a>,
+            super::types::UnionMemberTest::EnumCase(enum_name),
+        );
+        self.check_constructor_pattern(name, payload, span, member);
+        true
     }
 
     /// Check `Name { field: pattern }`. Struct patterns are nominal at the

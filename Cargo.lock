@@ -203,8 +203,6 @@ dependencies = [
  "deka_ui",
  "lightningcss",
  "mime_guess",
- "num_cpus",
- "parking_lot",
  "serde",
  "serde_json",
  "sha1",
@@ -218,10 +216,7 @@ dependencies = [
  "swc_ecma_minifier",
  "swc_ecma_parser 31.0.0",
  "swc_ecma_transforms_base 34.0.0",
- "swc_ecma_transforms_react",
  "swc_ecma_transforms_typescript",
- "swc_ecma_visit",
- "tokio",
 ]
 
 [[package]]

@@ -528,7 +528,7 @@ mod tests {
     }
 
     #[test]
-    fn project_with_module_base_resolves_stdlib_imports() {
+    fn project_with_module_base_resolves_documented_virtual_stdlib_imports() {
         let mut project = ProjectState::new();
         project.set_module_base("https://hats.dump.invalid/modules");
         project.write(

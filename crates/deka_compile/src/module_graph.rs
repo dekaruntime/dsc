@@ -540,13 +540,13 @@ pub fn compile_module_graph_with_options(
         let module = modules.get(path).expect("module in graph");
         let inferred = crate::infer_stdlib_imports_for_source(&module.source, &arena);
         let mut combined: HashMap<&str, &deka_syntax::ModuleExports> = HashMap::new();
+        for (spec, dep_exports) in &inferred {
+            combined.insert(*spec, dep_exports);
+        }
         for (spec, dep) in module.dependencies.iter() {
             if let Some(dep_exports) = exports.get(dep) {
                 combined.insert(spec.as_str(), dep_exports);
             }
-        }
-        for (spec, dep_exports) in &inferred {
-            combined.insert(*spec, dep_exports);
         }
         let fragments = deka_syntax::build_module_build_fragments(program, &combined);
         if fragments.is_empty() {
@@ -1417,7 +1417,7 @@ mod tests {
     }
 
     #[test]
-    fn graph_with_module_base_leaves_stdlib_imports_virtual() {
+    fn graph_with_module_base_leaves_documented_stdlib_imports_virtual() {
         let root = PathBuf::from("/project");
         let math = root.join("math.ds");
         let main = root.join("main.ds");
@@ -1459,18 +1459,14 @@ mod tests {
                 module_root: None,
             },
         )
-        .expect("compile graph with module base");
+        .expect("virtual stdlib imports remain available pending dsc#129");
         let main_js = &result.modules[&main];
         assert!(
             main_js.contains("import { echo } from \"https://hats.dump.invalid/modules/io.mjs\";"),
             "got: {}",
             main_js
         );
-        assert!(
-            main_js.contains("import { add } from \"./math.ds\";"),
-            "got: {}",
-            main_js
-        );
+        assert!(main_js.contains("import { add } from \"./math.ds\";"), "got: {}", main_js);
     }
 
     #[test]
@@ -2580,7 +2576,7 @@ mod tests {
     }
 
     #[test]
-    fn graph_treats_ui_runtime_as_external() {
+    fn graph_treats_ui_runtime_as_documented_virtual_stdlib() {
         let main = PathBuf::from("/project/page.dsx");
         let mut files = HashMap::new();
         files.insert(
@@ -2592,8 +2588,8 @@ mod tests {
             files,
             aliases: HashMap::new(),
         };
-        let result =
-            compile_module_graph(&main, &loader).expect("ui/form should not need a .ds module");
+        let result = compile_module_graph(&main, &loader)
+            .expect("ui/form should remain virtual pending dsc#129");
         let js = &result.modules[&main];
         assert!(js.contains("ui/form"), "got: {js}");
         assert!(js.contains("Form"), "got: {js}");

@@ -824,12 +824,10 @@ mod tests {
 
     #[test]
     fn live_import_unused_by_user_is_dropped_but_injection_still_binds_it() {
-        // End to end through graph shaking (deka#744 F3): the user imports
-        // `live` without referencing it, so shaking drops it from the user's
-        // import line — it binds nothing, and the compiler's injected
-        // `import { live }` must still appear. The reverse hazard (user binds
-        // the name and the injection duplicates it) is pinned in
-        // deka_emit's tests; this pins the hazard in the other direction.
+        // End to end through graph shaking (deka#744 F3): the documented
+        // virtual-stdlib bypass (dsc#111/#129) keeps ui/reactive available.
+        // Shaking drops the user's unused `live` binding, so the compiler's
+        // injected import must still appear.
         let source = "import { signal, live } from \"ui/reactive\";\n\
                       export fn Page() {\n\
                         const s = signal(7);\n\
@@ -863,7 +861,7 @@ mod tests {
         );
         assert!(
             !result.js.contains("import { signal, live }"),
-            "`live` may be bound only once across both imports: {}",
+            "the unused user `live` binding should have been shaken: {}",
             result.js
         );
     }

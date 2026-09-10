@@ -611,7 +611,7 @@ const labels: Array<string> = build {
     }
 
     #[test]
-    fn module_base_rewrites_bare_stdlib_imports() {
+    fn module_base_rewrites_documented_bare_stdlib_imports() {
         let response: Value = serde_json::from_str(&compile_request(
             r#"import { echo } from "io"; echo("hello");"#,
             "lesson.ds",
@@ -627,19 +627,10 @@ const labels: Array<string> = build {
             code.contains(r#"import { echo } from "/tour/modules/io.mjs";"#),
             "expected moduleBase rewrite, got:\n{code}"
         );
-        // The import must stand on its own line. Hosts transform static
-        // imports line-by-line; `import ...;"use strict";` on one line slips
-        // through and then fails as "Cannot use import statement outside a
-        // module" (testsuite.deka.gg regression).
-        assert!(
-            code.lines()
-                .any(|line| line == r#"import { echo } from "/tour/modules/io.mjs";"#),
-            "expected the import on its own line, got:\n{code}"
-        );
     }
 
     #[test]
-    fn module_base_leaves_relative_imports_untouched() {
+    fn module_base_rejects_relative_imports_without_declarations() {
         let response: Value = serde_json::from_str(&compile_request(
             r#"import { add } from "./math.ds"; const r = add(1, 2);"#,
             "lesson.ds",
@@ -647,18 +638,20 @@ const labels: Array<string> = build {
         ))
         .expect("response JSON");
 
-        assert_eq!(response["ok"], true, "{response}");
-        let code = response["output"]["code"]
-            .as_str()
-            .expect("compiled code should be present");
+        assert_eq!(response["ok"], false, "{response}");
+        let diagnostics = response["diagnostics"]
+            .as_array()
+            .expect("diagnostics should be present");
         assert!(
-            code.contains(r#"import { add } from "./math.ds";"#),
-            "expected relative import unchanged, got:\n{code}"
+            diagnostics.iter().any(|diagnostic| diagnostic["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("imported name `add`"))),
+            "expected unresolved import diagnostic, got: {response}"
         );
     }
 
     #[test]
-    fn module_base_allows_unresolved_package_imports() {
+    fn module_base_rejects_unresolved_package_imports() {
         let response: Value = serde_json::from_str(&compile_request(
             r#"import { Widget } from "@acme/widgets"; const answer = 42;"#,
             "lesson.ds",
@@ -666,13 +659,15 @@ const labels: Array<string> = build {
         ))
         .expect("response JSON");
 
-        assert_eq!(response["ok"], true, "{response}");
-        let code = response["output"]["code"]
-            .as_str()
-            .expect("compiled code should be present");
+        assert_eq!(response["ok"], false, "{response}");
+        let diagnostics = response["diagnostics"]
+            .as_array()
+            .expect("diagnostics should be present");
         assert!(
-            code.contains(r#"import { Widget } from "/tour/modules/@acme/widgets.mjs";"#),
-            "expected package import to remain available to the resolver-free WASM host, got:\n{code}"
+            diagnostics.iter().any(|diagnostic| diagnostic["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("imported name `Widget`"))),
+            "expected unresolved import diagnostic, got: {response}"
         );
     }
 

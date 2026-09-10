@@ -15,9 +15,6 @@ use deka_syntax::{
 };
 use serde::Serialize;
 
-/// Bare specifiers that are treated as stdlib modules in the single-file WASM
-/// compiler path. Imports from these modules are accepted with `Type::Infer`
-/// so that tour and testsuite fixtures can compile without a full package graph.
 fn file_allows_jsx(file_path: &str) -> bool {
     file_path.to_ascii_lowercase().ends_with(".dsx")
 }
@@ -198,18 +195,15 @@ pub(crate) fn is_stdlib_module_spec(spec: &str) -> bool {
         || bare.starts_with("ui/")
 }
 
-/// Names that the single-file compiler can otherwise reinterpret as language
-/// prelude bindings when an import signature is unavailable.
-fn is_prelude_binding_name(name: &str) -> bool {
-    matches!(name, "Option" | "Result" | "Some" | "None" | "Ok" | "Err")
-}
-
-/// Build a map of imported module signatures for known stdlib bare specifiers.
+/// Build synthetic signatures for recognized virtual stdlib modules.
 ///
-/// Every imported name is typed as `Type::Infer` so the single-file compiler can
-/// compile tour and testsuite fixtures that import stdlib functions. This is a
-/// pragmatic bridge: the browser sandbox / native runtime supplies the actual
-/// implementations, and the full module graph path collects real signatures.
+/// dsc#111 makes every *ordinary* unresolved import a hard error bound to the
+/// `Error` recovery sentinel. The recognized families below are the narrow,
+/// explicit exception: their runtime implementations exist, but this compiler
+/// has no real `ModuleExports` declarations for them yet. Keep this bypass
+/// visible until dsc#129 can replace it with declarations; that work is blocked
+/// while framework work is paused. Each imported value is consequently
+/// unchecked (`Infer`) only for these recognized specifiers.
 pub fn infer_stdlib_imports_for_source<'a>(
     source: &'a str,
     arena: &'a Bump,
@@ -555,7 +549,7 @@ pub fn compile_to_js_with_options(
     let arena = Bump::new();
     let stdlib_exports = infer_stdlib_imports_for_source(source, &arena);
     let imports: HashMap<&str, &ModuleExports> =
-        stdlib_exports.iter().map(|(k, v)| (*k, v)).collect();
+        stdlib_exports.iter().map(|(spec, exports)| (*spec, exports)).collect();
     compile_to_js_with_imports_and_options(source, file_path, &arena, &imports, options)
 }
 
@@ -604,101 +598,10 @@ pub fn compile_to_js_with_imports_and_options<'a>(
         return Err(vec![diagnostic]);
     }
 
-    // When a module base is configured (browser/WASM single-file mode), bare
-    // stdlib imports are left virtual and rewritten to `<base>/<spec>.mjs`.
-    // Any other bare specifier has no resolver, so fail early with the same
-    // shape as the native module validator instead of emitting a bad import
-    // that only fails at runtime (deka#497).
-    if options.module_base.is_some() {
-        let mut unknown = Vec::new();
-        for stmt in program.statements.iter() {
-            let deka_syntax::Stmt::Import {
-                specifiers,
-                source: import_source,
-                ..
-            } = stmt
-            else {
-                continue;
-            };
-            if import_source.starts_with('.')
-                || import_source.starts_with('/')
-                || import_source.contains(':')
-                || crate::module_graph::is_compiler_ui_spec(import_source)
-                || crate::is_stdlib_module_spec(import_source)
-            {
-                continue;
-            }
-            unknown.extend(
-                specifiers
-                    .iter()
-                    .filter(|spec| is_prelude_binding_name(spec.imported))
-                    .map(|spec| {
-                        Diagnostic::error(
-                            spec.span.start.line,
-                            spec.span.start.column,
-                            format!(
-                                "cannot resolve imported name `{}` from `{}`",
-                                spec.imported, import_source
-                            ),
-                        )
-                    }),
-            );
-        }
-        if !unknown.is_empty() {
-            return Err(unknown);
-        }
-    }
-
     if options.client {
         if let Some(diagnostic) = client_ui_server_error(source) {
             return Err(vec![diagnostic]);
         }
-    }
-
-    // A package import with no resolved signature must not be allowed to fall
-    // through to a prelude name (for example `Result` or `Option`). In the
-    // single-file path the import map is only an inferred-signature map, not a
-    // complete resolver, so leave ordinary package imports alone. Report only
-    // the missing bindings that canonicalization could reinterpret as prelude
-    // types or enum constructors.
-    let unresolved_imports: Vec<Diagnostic> = program
-        .statements
-        .iter()
-        .filter_map(|stmt| {
-            let deka_syntax::Stmt::Import {
-                specifiers, source, ..
-            } = stmt
-            else {
-                return None;
-            };
-            if imports.contains_key(source)
-                || source.starts_with('.')
-                || source.starts_with('/')
-                || source.starts_with("@/")
-                || !source.contains('/')
-            {
-                return None;
-            }
-            let diagnostics = specifiers
-                .iter()
-                .filter(|spec| is_prelude_binding_name(spec.imported))
-                .map(|spec| {
-                    Diagnostic::error(
-                        spec.span.start.line,
-                        spec.span.start.column,
-                        format!(
-                            "cannot resolve imported name `{}` from `{}`",
-                            spec.imported, source
-                        ),
-                    )
-                })
-                .collect::<Vec<_>>();
-            (!diagnostics.is_empty()).then_some(diagnostics)
-        })
-        .flatten()
-        .collect();
-    if !unresolved_imports.is_empty() {
-        return Err(unresolved_imports);
     }
 
     resolve_imported_enum_constructors(&mut program, arena, imports);
@@ -1050,12 +953,36 @@ const labels: Array<string> = build {
         let source = r#"
 import { load } from "./dev-data.ds"
 import { greeting } from "./runtime.ds"
-const users: Array<string> = build {
+const users: string = build {
   return Ok(load())
 }
 const message: string = greeting()
 "#;
-        let result = compile_to_js(source, "app/users.ds").expect("dev binding compiles");
+        let arena = Bump::new();
+        let mut dev_exports = ModuleExports::default();
+        dev_exports.values.insert(
+            "load",
+            Type::Function {
+                params: vec![],
+                ret: Box::new(Type::Named { name: "string" }),
+                optional: 0,
+            },
+        );
+        let mut runtime_exports = ModuleExports::default();
+        runtime_exports.values.insert(
+            "greeting",
+            Type::Function {
+                params: vec![],
+                ret: Box::new(Type::Named { name: "string" }),
+                optional: 0,
+            },
+        );
+        let imports = HashMap::from([
+            ("./dev-data.ds", &dev_exports),
+            ("./runtime.ds", &runtime_exports),
+        ]);
+        let result = compile_to_js_with_imports(source, "app/users.ds", &arena, &imports)
+            .expect("declared imports compile");
         let slot = result.dev_plan.slots.first().expect("one dev slot");
         assert!(!result.js.contains("./dev-data.ds"), "{}", result.js);
         assert!(result.js.contains("./runtime.ds"), "{}", result.js);
@@ -1276,18 +1203,17 @@ fn load() string {
     }
 
     #[test]
-    fn compile_import_and_use() {
-        let result = compile_to_js(
-            "import { add } from \"./math.ds\"; const r: number = add(1, 2);",
+    fn unresolved_import_is_an_error_boundary_not_infer() {
+        let errors = compile_to_js(
+            "import { add } from \"./math.ds\";\nconst r: number = add.missing(1);",
             "test.ds",
         )
-        .expect("compile should succeed");
-        assert!(
-            result.js.contains("import { add } from \"./math.ds\";"),
-            "got: {}",
-            result.js
-        );
-        assert!(result.js.contains("add(1, 2)"), "got: {}", result.js);
+        .expect_err("unresolved imports must fail before their uses can typecheck");
+
+        assert_eq!(errors.len(), 1, "got: {errors:?}");
+        assert_eq!(errors[0].line, 1);
+        assert!(errors[0].message.contains("imported name `add`"));
+        assert!(errors[0].message.contains("./math.ds"));
     }
 
     #[test]
@@ -1836,12 +1762,12 @@ const arrow = unsafe { () => User { name: "Bob" } }
     }
 
     #[test]
-    fn compile_form_import_from_ui_form() {
+    fn compile_form_import_from_ui_form_uses_documented_virtual_stdlib_bypass() {
         let result = compile_to_js(
             "import { Form } from \"ui/form\";\nconst el = <Form action=\"/api/hello\" method=\"post\">Send</Form>;",
             "test.dsx",
         )
-        .expect("ui/form is a compiler-provided specifier");
+        .expect("ui/form remains a documented virtual stdlib import pending dsc#129");
         assert!(result.js.contains("from \"ui/form\""), "got: {}", result.js);
         assert!(result.js.contains("Form"), "got: {}", result.js);
     }

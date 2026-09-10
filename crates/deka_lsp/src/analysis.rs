@@ -223,16 +223,19 @@ const page = <Counter />\n";
     }
 
     #[test]
-    fn leaves_resolver_owned_package_imports_unflagged() {
+    fn reports_resolver_owned_package_imports_without_signatures() {
         let source = r#"
             import { Widget } from "@acme/widgets"
             import { helper } from "@user/helpers"
         "#;
         let diagnostics = analyze(source, &AnalysisContext::new("file:///workspace/main.ds"));
-        assert!(
-            diagnostics.is_empty(),
-            "resolver-owned package imports must not be rejected by single-file LSP analysis: {diagnostics:?}"
-        );
+        assert_eq!(diagnostics.len(), 2, "got: {diagnostics:?}");
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("@acme/widgets")));
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("@user/helpers")));
     }
 
     #[test]

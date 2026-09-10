@@ -441,32 +441,27 @@ mod tests {
     }
 
     #[test]
-    fn project_rejects_user_declared_type_parameters() {
-        // deka#561: user code cannot declare type parameters, at the wasm
-        // project boundary too. The ban diagnostic must surface in the
-        // compile response, naming the offending module.
+    fn project_compiles_user_declared_type_parameters() {
+        // rfd#56 phase 1 reverses deka#561: user code may declare type
+        // parameters, unbounded form, at the wasm project boundary too. A
+        // generic export must compile and instantiate at the importing
+        // call site.
         let mut project = ProjectState::new();
         project.write(
             "lib.ds",
             "export fn first<T>(values: Array<T>) Option<T> { return Some(values[0]) }\n",
         );
-        project.write("main.ds", "import { first } from \"./lib.ds\"\n");
+        project.write(
+            "main.ds",
+            "import { first } from \"./lib.ds\"\nconst item: number = match (first([1])) { Some(value) => value, None => 0 }\n",
+        );
 
         let json = project.compile();
         let response: Value = serde_json::from_str(&json).expect("valid compile response JSON");
 
-        assert_eq!(response["ok"], false, "expected compile failure");
-        let messages: Vec<&str> = response["diagnostics"]
-            .as_array()
-            .expect("diagnostics array")
-            .iter()
-            .map(|d| d["message"].as_str().unwrap_or(""))
-            .collect();
-        assert!(
-            messages.iter().any(|m| m.contains("user code cannot declare type parameters")),
-            "expected the ban diagnostic, got: {:?}",
-            messages
-        );
+        assert_eq!(response["ok"], true, "compile failed: {}", json);
+        let main = response["modules"]["main.ds"]["code"].as_str().unwrap();
+        assert!(main.contains("first([1])"), "got:\n{}", main);
     }
 
     #[test]

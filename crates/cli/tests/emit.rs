@@ -538,13 +538,13 @@ const greeting: string = build {
 
 #[test]
 fn unsafe_err_payloads_cross_as_strings() {
-    // dsc#60: DekaScript's error model is errors-as-values — `Err` carries
-    // the diagnostic text. A bare `unsafe { }` types as `Result<Infer,
-    // Infer>`, so a JavaScript Error object leaking into the Err payload was
-    // silently accepted as any type. The emitter now normalizes the bare
-    // form's Err payload to its string representation at the boundary. The
-    // annotated form (`Result<T, JsError>`, deka#460) deliberately keeps an
-    // Error object, and the probe pins that too.
+    // dsc#60/dsc#103: DekaScript's error model is errors-as-values — `Err`
+    // carries the diagnostic text. A bare `unsafe { }` types as
+    // `Result<Infer, string>`, so the checker and the runtime agree that the
+    // Err payload is diagnostic text. The emitter normalizes the bare form's
+    // Err payload to its string representation at the boundary. The annotated
+    // form (`Result<T, JsError>`, deka#460) deliberately keeps an Error
+    // object, and the probe pins that too.
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
     write(

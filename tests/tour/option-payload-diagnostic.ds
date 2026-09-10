@@ -1,0 +1,2 @@
+// An explicit Option binding must check the payload inside Some.
+const x: Option<number> = Some("text")

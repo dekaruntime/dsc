@@ -1320,14 +1320,18 @@ impl<'a> Checker<'a> {
                 // Explicit `Option<T>` bindings must be initialized with
                 // `Some(...)` or `none`; the struct-field sugar that accepts a
                 // concrete `T` does not apply here.
-                if !value_type.is_error()
-                    && !matches!(value_type, Type::Option { .. } | Type::None | Type::Infer)
-                {
-                    self.error_at_expr(
-                        value,
-                        format!(
+                if !self.is_assignable(&expected, &value_type) {
+                    let message = match &value_type {
+                        Type::Option { inner: actual } => format!(
+                            "`{name}` expects Option payload type `{inner}`, found payload type `{actual}`"
+                        ),
+                        _ => format!(
                             "`{name}` is declared Option<{inner}> but the initializer is {value_type}"
                         ),
+                    };
+                    self.error_at_expr(
+                        value,
+                        message,
                     );
                 }
             } else if !self.is_assignable(&expected, &value_type) {

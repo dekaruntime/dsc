@@ -1,0 +1,6 @@
+{
+  "title": "Accessing a member the interface bound does not declare is rejected",
+  "stage": "typecheck",
+  "expectedDiagnosticContains": "interface `Priced` has no field `name`",
+  "notes": "rfd#56 phase 2: <T: Priced> unlocks Priced's members (price, label) and nothing else. The bound is the whole surface — a passing positive test would prove nothing about the restriction."
+}

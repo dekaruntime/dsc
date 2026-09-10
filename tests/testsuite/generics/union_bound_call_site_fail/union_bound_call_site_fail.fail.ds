@@ -1,0 +1,13 @@
+// rfd#56 phase 2: the bound is checked at the call site after inference.
+// infer_type_args solves T = Widget from the argument; Widget is not a
+// member of the union bound, so the call fails naming the bound.
+struct Product { price: number }
+struct Bundle { price: number }
+struct Widget { size: number }
+
+fn render<T: Product | Bundle>(item: T) T {
+  return item
+}
+
+const w = Widget { size: 1 }
+const r = render(w)

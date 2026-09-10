@@ -490,11 +490,32 @@ impl<'a> Checker<'a> {
                 let object_type = self.check_expr(object);
                 self.check_expr(index);
                 if let Type::Param { name } = &object_type {
-                    // rfd#56 phase 1: indexing is not on the unbounded-T
-                    // operation list. Without this arm, collection_element
-                    // would silently return `Infer` (the dsc#90 shape).
-                    self.reject_param_operation(name, "index into", *span);
-                    return Type::Error;
+                    match self.lookup_param_bound(name) {
+                        // rfd#56 phase 2: an indexable bound (`<T:
+                        // Array<E>>`, `<T: string>`) unlocks indexing, the
+                        // element type coming from the bound.
+                        Some(bound @ (Type::Array { .. } | Type::Named { name: "string" })) => {
+                            return bound.collection_element();
+                        }
+                        Some(bound) => {
+                            self.error_span(
+                                *span,
+                                format!(
+                                    "cannot index into a value of type parameter `{name}` \
+                                     bounded by `{bound}` (rfd#56)"
+                                ),
+                            );
+                            return Type::Error;
+                        }
+                        None => {
+                            // rfd#56 phase 1: indexing is not on the
+                            // unbounded-T operation list. Without this arm,
+                            // collection_element would silently return
+                            // `Infer` (the dsc#90 shape).
+                            self.reject_param_operation(name, "index into", *span);
+                            return Type::Error;
+                        }
+                    }
                 }
                 object_type.collection_element()
             }
@@ -1053,14 +1074,25 @@ impl<'a> Checker<'a> {
             return Type::Error;
         }
 
-        match &object_type {
-            Type::Param { name } => {
-                // rfd#56 phase 1: an unbounded type parameter has no fields.
-                // `s.value` where `s: T` is exactly the operation the rule
-                // forbids — rejected explicitly, not left to emerge.
-                self.reject_param_operation(name, &format!("access field `{field}` on"), span);
-                Type::Error
+        // rfd#56 phase 2: a bounded type parameter exposes exactly the
+        // operations its bound declares. `s.value` where `s: T` bounded by
+        // `Named` resolves `value` against `Named`; an unbounded `T` keeps
+        // the phase-1 rejection below.
+        let object_type = if let Type::Param { name } = &object_type {
+            match self.lookup_param_bound(name) {
+                Some(bound) => bound,
+                None => {
+                    // rfd#56 phase 1: an unbounded type parameter has no
+                    // fields — rejected explicitly, not left to emerge.
+                    self.reject_param_operation(name, &format!("access field `{field}` on"), span);
+                    return Type::Error;
+                }
             }
+        } else {
+            object_type
+        };
+
+        match &object_type {
             Type::Infer | Type::Var => {
                 // An externally-provided or unresolved value (`Infer`) and an
                 // unconstrained one (`Var`) may both have any field. Cloning the
@@ -1663,6 +1695,25 @@ impl<'a> Checker<'a> {
         }
 
         let scrutinee_type = self.check_expr(scrutinee);
+        // rfd#56 phase 2: matching a value whose type is a bounded type
+        // parameter checks the pattern — and later the exhaustiveness — as
+        // the bound. `<T: A | B | C>` is matched exactly like `A | B | C`;
+        // an unbounded `T` keeps whatever type the scrutinee has (an
+        // unbounded parameter is not matchable with constructor patterns,
+        // same as before).
+        let effective_scrutinee = self.bounded_param_type(&scrutinee_type);
+        // The union bound of the scrutinee parameter, when that is what the
+        // match runs against: arm bodies may narrow the parameter to a
+        // member, and arms returning that narrowed member must merge even
+        // though the members differ (identity preservation through the
+        // match — see the merge check below).
+        let scrutinee_union_bound = match &scrutinee_type {
+            Type::Param { .. } => match &effective_scrutinee {
+                Type::Union { .. } => Some(effective_scrutinee.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
         let mut result_type: Option<Type<'a>> = None;
         let mut coverage = Coverage::nothing();
         let mut has_catch_all = false;
@@ -1670,7 +1721,7 @@ impl<'a> Checker<'a> {
         for arm in arms {
             self.scopes.push(HashMap::new());
             self.mutables.push(HashSet::new());
-            self.check_pattern(&arm.pattern, &scrutinee_type);
+            self.check_pattern(&arm.pattern, &effective_scrutinee);
             // Union type-patterns rebind the operand within the arm
             // (rfd#42): `match (v) { string(s) => ... }` shadows `v` with
             // `string` inside the arm. Plain shadowing — DekaScript has no
@@ -1695,11 +1746,14 @@ impl<'a> Checker<'a> {
                     .union_type_patterns
                     .contains_key(&(&arm.pattern as *const ast::Pattern<'a>))
                 {
-                    if let Type::Union { members } = &scrutinee_type {
+                    if let Type::Union { members } = &effective_scrutinee {
                         if let Some(member) = members
                             .iter()
                             .find(|m| Self::union_member_name(m) == Some(pattern_name))
                         {
+                            // The narrowing is scope-shadowing like any
+                            // match arm binding: after the arm, the name
+                            // reverts to `T` (rfd#56 phase 2).
                             self.declare_var(name, member.clone());
                         }
                     }
@@ -1723,7 +1777,17 @@ impl<'a> Checker<'a> {
                 // after it and made the result depend on arm order (deka#407).
                 Some(Type::Never) => result_type = Some(arm_type),
                 Some(expected) => {
-                    if !self.is_assignable(expected, &arm_type) {
+                    // rfd#56 phase 2: over a union-bounded parameter, an arm
+                    // returning the narrowed member (a different concrete
+                    // type per arm) still merges — the members are exactly
+                    // what `T` may be, and the match's identity stays `T`
+                    // (the caller receives the member it passed). Without
+                    // this, each arm after the first would report "match arm
+                    // has type `Bundle`, expected type `Product`".
+                    let narrowed_member = scrutinee_union_bound
+                        .as_ref()
+                        .is_some_and(|bound| self.is_assignable(bound, &arm_type));
+                    if !self.is_assignable(expected, &arm_type) && !narrowed_member {
                         self.error_at_expr(
                             &arm.body,
                             super::with_union_narrowing_hint(
@@ -1740,9 +1804,9 @@ impl<'a> Checker<'a> {
             }
         }
 
-        if !has_catch_all && !scrutinee_type.is_error() {
-            let scrutinee_type = scrutinee_type.clone();
-            self.check_match_exhaustiveness(span, &scrutinee_type, &coverage);
+        if !has_catch_all && !effective_scrutinee.is_error() {
+            let effective_scrutinee = effective_scrutinee.clone();
+            self.check_match_exhaustiveness(span, &effective_scrutinee, &coverage);
         }
 
         result_type.unwrap_or(Type::None)
@@ -2289,6 +2353,21 @@ impl<'a> Checker<'a> {
             Type::Infer
         } else {
             self.check_expr(right)
+        };
+        // rfd#56 phase 2: a bounded operand is checked as its bound — `<T:
+        // number>` arithmetic is number arithmetic. Unbounded parameters
+        // pass through unchanged and hit the phase-1 rejection below.
+        // Plain `Assign` is excluded: assigning a `T` to a `T` slot is a
+        // phase-1 permitted operation and must stay param-to-param, not
+        // bound-to-bound (the slot may hold any member the bound allows,
+        // not every value the bound names).
+        let (left_type, right_type) = if op == ast::BinOp::Assign {
+            (left_type, right_type)
+        } else {
+            (
+                self.bounded_param_type(&left_type),
+                self.bounded_param_type(&right_type),
+            )
         };
 
         // rfd#56 phase 1: arithmetic and comparison on an unbounded type
@@ -2837,6 +2916,8 @@ impl<'a> Checker<'a> {
         _span: ast::Span,
     ) -> Type<'a> {
         let operand_type = self.check_expr(operand);
+        // rfd#56 phase 2: a bounded operand is checked as its bound.
+        let operand_type = self.bounded_param_type(&operand_type);
         if let Type::Param { name } = &operand_type {
             // rfd#56 phase 1: unary arithmetic/logic on an unbounded type
             // parameter is not on its operation list.
@@ -2901,6 +2982,25 @@ impl<'a> Checker<'a> {
         }
 
         let object_type = self.check_expr(object);
+
+        // rfd#56 phase 2: runtime type interrogation on a type parameter is
+        // not a bound-guaranteed operation — a bound unlocks exactly the
+        // members it declares, and for an unbounded `T` no operations exist
+        // at all. Left alone, the builtin paths below would typecheck
+        // `x.getType()` on any `T` and emit a runtime descriptor lookup,
+        // the introspection seam rfd#56 defers.
+        if let Type::Param { name } = &object_type {
+            if matches!(method_name, "getType" | "signature") {
+                self.reject_param_operation(name, &format!("call `{method_name}` on"), span);
+                return Some(Type::Error);
+            }
+        }
+
+        // rfd#56 phase 2: a bounded type parameter exposes exactly the
+        // members its bound declares, so method dispatch runs against the
+        // bound type. An unbounded parameter stays `Type::Param` and is
+        // rejected by the phase-1 check further below.
+        let object_type = self.bounded_param_type(&object_type);
 
         // Builtin `.getType()` (rfd#41, deka#529): returns a first-class
         // `Type` value. User code named `getType` (interface member,
@@ -3816,6 +3916,40 @@ impl<'a> Checker<'a> {
                 } else {
                     HashMap::new()
                 };
+
+                // rfd#56 phase 2: a bound is a contract at the call site.
+                // After inference solves a type parameter, the solution is
+                // verified against the declared bound; an argument outside
+                // the bound is an error naming the bound it failed. A
+                // missing or still-open solution means inference could not
+                // pin the parameter — the type error (if any) is reported by
+                // the argument check below, so the bound check stays silent
+                // rather than crashing or double-reporting.
+                if let ast::Expr::Identifier { name, .. } = callee {
+                    if let Some(bounds) = self.fn_param_bounds.get(name).cloned() {
+                        for (param, bound) in bounds {
+                            let Some(solution) = subst.get(param) else {
+                                continue;
+                            };
+                            if matches!(
+                                solution,
+                                Type::Var | Type::Infer | Type::Error | Type::Param { .. }
+                            ) {
+                                continue;
+                            }
+                            if !self.is_assignable(&bound, solution) {
+                                self.error_span(
+                                    span,
+                                    format!(
+                                        "type argument `{solution}` for type parameter \
+                                         `{param}` of function `{name}` does not satisfy \
+                                         the bound `{bound}` (rfd#56)"
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                }
 
                 // Parameters inference left unsolved name no type the call
                 // could pin: they are unconstrained (`Var`), not unresolved.

@@ -795,6 +795,57 @@ mod tests {
     }
 
     #[test]
+    fn type_parameter_bounds_erase_from_emitted_js() {
+        // rfd#56 phase 2 pin: bounds are a checker-side contract only. The
+        // emitted JavaScript for a program with bounds must be byte-identical
+        // to the same program without them — the same erasure guarantee phase
+        // 1 pinned for bare type parameters.
+        let unbounded = r#"
+interface Named { name: string }
+struct User { name: string }
+fn greet<T>(x: T) T { return x }
+const u = User { name: "Ada" }
+const back = greet(u)
+"#;
+        let bounded = r#"
+interface Named { name: string }
+struct User { name: string }
+fn greet<T: Named>(x: T) T { return x }
+const u = User { name: "Ada" }
+const back = greet(u)
+"#;
+        let union_unbounded_pair = r#"
+struct Product { price: number }
+struct Bundle { price: number }
+fn render<T>(item: T) T { return item }
+const widget = Product { price: 5 }
+const back = render(widget)
+"#;
+        let union_bounded_pair = r#"
+struct Product { price: number }
+struct Bundle { price: number }
+fn render<T: Product | Bundle>(item: T) T { return item }
+const widget = Product { price: 5 }
+const back = render(widget)
+"#;
+        for (plain, bounded) in [
+            (unbounded, bounded),
+            (union_unbounded_pair, union_bounded_pair),
+        ] {
+            let plain_js = compile_to_js(plain, "test.ds")
+                .expect("unbounded program compiles")
+                .js;
+            let bounded_js = compile_to_js(bounded, "test.ds")
+                .expect("bounded program compiles")
+                .js;
+            assert_eq!(
+                plain_js, bounded_js,
+                "bounds must erase: emitted JS differs\n--- plain ---\n{plain_js}\n--- bounded ---\n{bounded_js}"
+            );
+        }
+    }
+
+    #[test]
     fn compile_dev_binding_emits_virtual_value_and_separate_entry() {
         let source = r#"
 struct User { name: string }

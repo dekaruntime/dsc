@@ -1084,16 +1084,30 @@ impl<'a> Parser<'a> {
         Some(alloc_slice(self.arena, params))
     }
 
-    /// `<T, U>` after a declaration name. Unbounded form only in rfd#56
-    /// phase 1 — a bound (`<T: Named>`) is phase 2 and does not parse yet.
+    /// `<T, U: Bound>` after a declaration name. The bound is any type
+    /// expression already writable — an interface, a union, or a concrete
+    /// type (rfd#56 phase 2). One rule, not two mechanisms: no `extends`,
+    /// no where clauses.
     pub(super) fn parse_type_params(&mut self) -> Option<&'a [TypeParam<'a>]> {
         self.expect(TokenKind::Lt)?;
         let mut params = Vec::new();
 
         loop {
             let name = self.expect_identifier()?;
-            let span = self.span_from(self.prev.span.start, self.prev.span.byte_start);
-            params.push(TypeParam { name, span });
+            let name_span = self.span_from(self.prev.span.start, self.prev.span.byte_start);
+            // `<T: A | B | C>` — parse_type covers unions, so the bound is a
+            // single full type expression, not a restricted sub-grammar.
+            let bound = if self.eat(TokenKind::Colon) {
+                Some(self.parse_type()?)
+            } else {
+                None
+            };
+            let span = self.span_from(name_span.start, name_span.byte_start);
+            params.push(TypeParam {
+                name,
+                bound,
+                span,
+            });
             if !self.eat(TokenKind::Comma) {
                 break;
             }

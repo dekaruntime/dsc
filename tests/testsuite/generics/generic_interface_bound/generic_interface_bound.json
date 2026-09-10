@@ -1,0 +1,6 @@
+{
+  "title": "Interface bound: members the interface declares are callable on T",
+  "stage": "run",
+  "expectedStdoutNative": "5 Widget\n",
+  "notes": "rfd#56 phase 2 (dsc#96): <T: Priced> permits the phase-1 operation list plus Priced's members — field `price` and method `label()`. The struct satisfies the interface structurally; bounds erase, so the call emits plain field/method access."
+}

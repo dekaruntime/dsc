@@ -1,0 +1,11 @@
+enum Shape {
+  Empty,
+  Rect(number),
+}
+
+fn describe(s: Shape | number) string {
+  return match (s) {
+    Shape.Rect(n) => "rect " + string(n),
+    number(n) => string(n),
+  }
+}

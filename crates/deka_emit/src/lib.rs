@@ -128,6 +128,28 @@ mod tests {
     }
 
     #[test]
+    fn emit_union_enum_case_pattern_tests_brand_and_case() {
+        let out = parse_check_and_emit(
+            "enum Shape { Empty, Rect(number) }\n\
+             fn describe(s: Shape | number) string {\n\
+               return match (s) {\n\
+                 Shape.Empty => \"empty\",\n\
+                 Shape.Rect(n) => \"rect \" + string(n),\n\
+                 number(n) => string(n),\n\
+               }\n\
+             }",
+        );
+        assert!(
+            out.contains("__deka_match_scrutinee_1.__enum === \"Shape\" && __deka_match_scrutinee_1.__case === \"Rect\""),
+            "expected enum brand and case predicate, got: {out}"
+        );
+        assert!(
+            out.contains("const n = __deka_match_scrutinee_1.value;"),
+            "enum payload must bind from the constructor value: {out}"
+        );
+    }
+
+    #[test]
     fn emit_struct_module_has_no_global_write() {
         // deka#551: the prelude's `const deka = globalThis.deka = {...}`
         // write is gone. Struct machinery is module-local, and the brand is

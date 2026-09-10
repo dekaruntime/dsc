@@ -350,6 +350,17 @@
     "expectCompile": true
   },
   {
+    "id": "match-union-enum-patterns",
+    "title": "match union enum patterns",
+    "expectCompile": true
+  },
+  {
+    "id": "match-union-enum-pattern-diagnostic",
+    "title": "match union enum pattern diagnostic",
+    "expectCompile": false,
+    "expectError": "non-exhaustive match: missing Shape::Empty"
+  },
+  {
     "id": "multiple-awaits",
     "title": "multiple awaits",
     "expectCompile": true

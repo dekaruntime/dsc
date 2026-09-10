@@ -212,6 +212,9 @@ pub enum UnionMemberTest<'a> {
     Struct(&'a str),
     /// Enum: `x.__enum === "<Name>"`.
     Enum(&'a str),
+    /// An enum case matched while its enum is one member of a union. The
+    /// emitter must test both this enum brand and the constructor's `__case`.
+    EnumCase(&'a str),
 }
 
 /// How a binary or unary operator on newtypes should be lowered.

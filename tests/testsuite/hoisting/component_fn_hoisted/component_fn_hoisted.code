@@ -6,5 +6,5 @@ fn Card() Component {
 const result = unsafe { deka.ui.renderToString(app) }
 match (result) {
   Ok(r) => echo(r.html),
-  Err(e) => echo(e.message),
+  Err(e) => echo(e),
 }

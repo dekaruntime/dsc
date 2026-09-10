@@ -1,0 +1,5 @@
+{
+  "title": "bare unsafe that throws an Error surfaces its message text as the Err payload",
+  "stage": "run",
+  "notes": "dsc#103: pins the Err path itself (executed, not parse-checked). A thrown Error is normalized to its message text (dsc#60), and the bare form types that payload as `string` — `e` is echoed directly, no `.message`."
+}

@@ -531,10 +531,11 @@ mod tests {
         );
     }
 
-    /// dsc#60: the bare legacy form types as `Result<Infer, Infer>`, so an
-    /// Error object in its Err payload would be silently accepted as any
-    /// type (`string` included). The payload is normalized to the thrown
-    /// value's string representation at the boundary instead.
+    /// dsc#60/dsc#103: the bare legacy form types as `Result<Infer, string>`,
+    /// so an Error object in its Err payload would be silently accepted as any
+    /// type. The payload is normalized to the thrown value's string
+    /// representation at the boundary instead, matching the `string` Err side
+    /// the checker now types it with.
     #[test]
     fn emit_unsafe_bare_err_payload_is_string() {
         let out = parse_and_emit("const r = unsafe { throw new Error(\"boom\") };");

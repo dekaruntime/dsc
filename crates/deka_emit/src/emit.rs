@@ -3977,13 +3977,13 @@ impl<'a> Emitter<'a> {
         // (deka#460), so its payload stays an Error object — thrown Errors
         // pass through, anything else is wrapped — which is exactly what the
         // `JsError` member table (.message/.name) promises. The bare legacy
-        // form yields `Result<Infer, Infer>` (deka#252): its Err side is
-        // universally assignable, so an Error object leaking out would be
-        // silently accepted as any type, `string` included. Until the bare
-        // form is migrated to mandatory annotations, its Err payload is
-        // normalized to the thrown value's string representation here, at the
-        // boundary, so errors-as-values (`Err` carries diagnostic text) holds
-        // on every path.
+        // form yields `Result<Infer, string>` (deka#252, dsc#103): its Err
+        // side is the thrown value's string representation, so an Error
+        // object leaking out would be silently accepted as any type. Until
+        // the bare form is migrated to mandatory annotations, its Err payload
+        // is normalized to the thrown value's string representation here, at
+        // the boundary, so errors-as-values (`Err` carries diagnostic text)
+        // holds on every path.
         let err_payload = if bare {
             "(err instanceof Error ? (err.message || String(err)) : String(err))"
         } else {

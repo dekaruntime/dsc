@@ -426,7 +426,9 @@ pub enum Expr<'a> {
         source: &'a str,
         /// The declared success type: `unsafe<T> { ... }` yields
         /// `Result<T, JsError>`. `None` is the legacy bare form, which is
-        /// deprecated and yields `Result<Infer, Infer>` (deka#460).
+        /// deprecated and yields `Result<Infer, string>` (deka#460, dsc#103):
+        /// the emitter stringifies the Err payload, so the Err side is
+        /// `string`.
         result_type: Option<Type<'a>>,
         span: Span,
     },

@@ -5,5 +5,5 @@ const r = unsafe {
 }
 echo(match (r) {
   Ok(v) => `ok: ${v}`,
-  Err(e) => `err: ${e.message}`,
+  Err(e) => `err: ${e}`,
 })

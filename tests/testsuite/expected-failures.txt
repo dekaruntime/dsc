@@ -13,13 +13,6 @@
 # Every line must be traceable to an issue. Do not add a line to make a
 # build green; fix the fixture or file the bug.
 
-# Renderer over-escapes apostrophes in text nodes (one escapeHtml serving
-# text and attributes). Fix lands in the deka repo; once a runtime release
-# ships it and scripts/deka-runtime-version is bumped past that release,
-# this fixture passes and this line must be deleted (the runner fails
-# otherwise). dekaruntime/dsc#79
-components-jsx-multiscript-text
-
 # Expects pre-RFD-24 island HTML (no data-deka-id marker, prerendered signal
 # state); current runtime stamps the marker and renders the live signal read
 # empty. Needs a deka-side decision on prerendering. dekaruntime/dsc#82

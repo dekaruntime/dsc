@@ -10,9 +10,9 @@ pub mod prelude;
 mod util;
 
 pub use emit::{
-    ModuleEmit, build_factory_names, css_scope_hash, dev_slot_id, dev_slot_source_path,
-    dev_uses_name, emit_dev_entry, emit_js, emit_js_module_with_options, emit_js_with_imports,
-    emit_js_with_options, live_dev_uses_name,
+    ModuleEmit, build_factory_names, collect_js_identifier_tokens, css_scope_hash, dev_slot_id,
+    dev_slot_source_path, dev_uses_name, emit_dev_entry, emit_js, emit_js_module_with_options,
+    emit_js_with_imports, emit_js_with_options, live_dev_uses_name,
 };
 
 #[cfg(test)]
@@ -527,6 +527,34 @@ mod tests {
         assert!(
             out.contains("await fetch(url)"),
             "expected raw await, got: {}",
+            out
+        );
+    }
+
+    /// dsc#60: the bare legacy form types as `Result<Infer, Infer>`, so an
+    /// Error object in its Err payload would be silently accepted as any
+    /// type (`string` included). The payload is normalized to the thrown
+    /// value's string representation at the boundary instead.
+    #[test]
+    fn emit_unsafe_bare_err_payload_is_string() {
+        let out = parse_and_emit("const r = unsafe { throw new Error(\"boom\") };");
+        assert!(
+            out.contains("(err instanceof Error ? (err.message || String(err)) : String(err))"),
+            "bare unsafe must normalize the Err payload to a string, got: {}",
+            out
+        );
+    }
+
+    /// dsc#60 negative fixture: the annotated form types as
+    /// `Result<T, JsError>` (deka#460), and the `JsError` member table
+    /// (`.message`/`.name`) is only sound because the payload stays an
+    /// Error object. It must not be stringified.
+    #[test]
+    fn emit_unsafe_annotated_err_payload_stays_jserror() {
+        let out = parse_and_emit("const r = unsafe<string> { throw new Error(\"boom\") };");
+        assert!(
+            out.contains("(err instanceof Error ? err : new Error(String(err)))"),
+            "annotated unsafe must keep the JsError payload, got: {}",
             out
         );
     }

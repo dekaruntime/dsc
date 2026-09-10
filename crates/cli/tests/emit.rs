@@ -427,3 +427,111 @@ fn transpile_file_is_unchanged() {
         "{emitted}"
     );
 }
+
+/// Run a Node.js script in `dir`, returning combined output. Node is a CI
+/// prerequisite (the ui tests and testsuite already require it); the unsafe
+/// fixtures below execute emitted JavaScript rather than asserting on text.
+fn run_node(dir: &Path, script: &str) -> std::process::Output {
+    Command::new("node")
+        .arg(script)
+        .current_dir(dir)
+        .output()
+        .expect("node is required to execute emitted JavaScript")
+}
+
+#[test]
+fn plan_entry_referencing_unsafe_only_helper_executes() {
+    // dsc#59: a helper reachable only from inside an `unsafe` arrow body was
+    // omitted from the build plan's entry, so build-entry execution failed
+    // with an unknown-identifier error even though the source typechecks.
+    // This executes the emitted entry with Node — the assertion that fails
+    // on the old emitter is the ReferenceError, not a text mismatch.
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    write(
+        &root.join("main.ds"),
+        r#"fn greet() string { return "hello from helper" }
+
+const greeting: string = build {
+  const run = unsafe { () => greet() }
+  return match (run) {
+    Ok(f) => f(),
+    Err(_) => "err",
+  }
+}
+"#,
+    );
+
+    let output = run_in(root, &["plan", "main.ds"]);
+    assert!(output.status.success(), "{}", combined(&output));
+    let plan: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("plan must be JSON");
+    let entry = plan["slots"][0]["entry"].as_str().expect("entry js");
+    assert!(
+        entry.contains("function greet"),
+        "helper must be emitted in the entry:\n{entry}"
+    );
+    write(&root.join("entry.mjs"), entry);
+    write(
+        &root.join("runner.mjs"),
+        "import entry from './entry.mjs';\nentry().then(v => console.log('RESULT:' + v));\n",
+    );
+
+    let run = run_node(root, "runner.mjs");
+    assert!(run.status.success(), "{}", combined(&run));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "RESULT:hello from helper"
+    );
+}
+
+#[test]
+fn unsafe_err_payloads_cross_as_strings() {
+    // dsc#60: DekaScript's error model is errors-as-values — `Err` carries
+    // the diagnostic text. A bare `unsafe { }` types as `Result<Infer,
+    // Infer>`, so a JavaScript Error object leaking into the Err payload was
+    // silently accepted as any type. The emitter now normalizes the bare
+    // form's Err payload to its string representation at the boundary. The
+    // annotated form (`Result<T, JsError>`, deka#460) deliberately keeps an
+    // Error object, and the probe pins that too.
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    write(
+        &root.join("main.ds"),
+        r#"const r = unsafe { throw new Error("boom") }
+const s = unsafe { throw "plain string" }
+const o = unsafe { throw { code: 42 } }
+const a = unsafe<string> { throw new Error("typed") }
+"#,
+    );
+
+    let output = run_in(root, &["transpile", "main.ds"]);
+    assert!(output.status.success(), "{}", combined(&output));
+    let emitted = fs::read_to_string(root.join("main.js")).expect("emitted js");
+    let probe = r#"
+const shape = (p) =>
+  typeof p === "string" ? "string:" + p
+  : p instanceof Error ? "error:" + p.message
+  : "other:" + typeof p;
+for (const k of ["r", "s", "o", "a"]) console.log(k + "=" + shape(eval(k).error));
+"#;
+    write(&root.join("probe.cjs"), format!("{emitted}\n{probe}").as_str());
+
+    let run = run_node(root, "probe.cjs");
+    assert!(run.status.success(), "{}", combined(&run));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    let lines: std::collections::HashMap<_, _> = stdout
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .collect();
+    assert_eq!(lines.get("r").copied(), Some("string:boom"));
+    assert_eq!(
+        lines.get("s").copied(),
+        Some("string:plain string")
+    );
+    assert_eq!(
+        lines.get("o").copied(),
+        Some("string:[object Object]")
+    );
+    assert_eq!(lines.get("a").copied(), Some("error:typed"));
+}

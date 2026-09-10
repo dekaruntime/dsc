@@ -138,6 +138,43 @@ fn declared_name<'a>(stmt: &'a Stmt<'a>) -> Option<&'a str> {
     }
 }
 
+/// Every identifier-shaped token in a chunk of raw JavaScript.
+///
+/// Deliberately not a lexer: this feeds dead-code elimination, where a false
+/// positive keeps a binding alive and a false negative breaks the program.
+/// Shared with the module-graph shaker (deka_compile::shake), which solved
+/// the same problem for the runtime graph (deka#437).
+pub fn collect_js_identifier_tokens(source: &str, out: &mut HashSet<String>) {
+    let mut current = String::new();
+    for ch in source.chars() {
+        if ch.is_alphanumeric() || ch == '_' || ch == '$' {
+            current.push(ch);
+        } else if !current.is_empty() {
+            push_identifier(std::mem::take(&mut current), out);
+        }
+    }
+    if !current.is_empty() {
+        push_identifier(current, out);
+    }
+}
+
+fn push_identifier(token: String, out: &mut HashSet<String>) {
+    // A leading digit means it was a number, not a name.
+    if token.starts_with(|ch: char| ch.is_ascii_digit()) {
+        return;
+    }
+    out.insert(token);
+}
+
+/// Whether a raw `unsafe` body mentions `target`. The body is spliced
+/// verbatim into the output, so ordinary expression walking sees nothing
+/// inside it and every name it uses must be found by token scan instead.
+fn js_mentions_name(source: &str, target: &str) -> bool {
+    let mut tokens = HashSet::new();
+    collect_js_identifier_tokens(source, &mut tokens);
+    tokens.contains(target)
+}
+
 fn collect_dev_stmt_names(stmt: &Stmt<'_>, out: &mut HashSet<String>) {
     visit_stmt_exprs(stmt, &mut |expr| match expr {
         Expr::Identifier { name, .. } => {
@@ -158,6 +195,10 @@ fn collect_dev_stmt_names(stmt: &Stmt<'_>, out: &mut HashSet<String>) {
         {
             out.insert(element.tag.to_string());
         }
+        // An `unsafe` body is raw JS text, invisible to the walker; a helper
+        // referenced only inside it must still be retained for the dev entry
+        // (dsc#59). Over-approximation is the safe direction here.
+        Expr::Unsafe { source, .. } => collect_js_identifier_tokens(source, out),
         _ => {}
     });
 }
@@ -171,6 +212,7 @@ fn runtime_uses_name(program: &Program<'_>, target: &str) -> bool {
         visit_stmt_exprs(stmt, &mut |expr| {
             if matches!(expr, Expr::Identifier { name, .. } if *name == target)
                 || matches!(expr, Expr::JsxElement { element, .. } if element.tag == target)
+                || matches!(expr, Expr::Unsafe { source, .. } if js_mentions_name(source, target))
             {
                 used = true;
             }
@@ -277,6 +319,10 @@ fn build_body_uses_name(body: &[Stmt<'_>], target: &str) -> bool {
                 || matches!(expr, Expr::StructLiteral { name, .. } if *name == target)
                 || matches!(expr, Expr::EnumConstructor { enum_name: name, .. } if *name == target)
                 || matches!(expr, Expr::JsxElement { element, .. } if element.tag == target)
+                // Raw `unsafe` text must count too: an import used only
+                // inside it still has to be retained for the dev entry
+                // (dsc#59).
+                || matches!(expr, Expr::Unsafe { source, .. } if js_mentions_name(source, target))
             {
                 used = true;
             }
@@ -3595,8 +3641,10 @@ impl<'a> Emitter<'a> {
                 self.out.push_str("...");
                 self.emit_expr(expr)?;
             }
-            Expr::Unsafe { source, .. } => {
-                self.emit_unsafe(source)?;
+            Expr::Unsafe {
+                source, result_type, ..
+            } => {
+                self.emit_unsafe(source, result_type.is_none())?;
             }
             // Valid dev blocks are replaced at their enclosing top-level
             // binding. This fallback prevents an invalid nested form from
@@ -3916,21 +3964,40 @@ impl<'a> Emitter<'a> {
         Ok(entries.join(", "))
     }
 
-    fn emit_unsafe(&mut self, source: &str) -> Result<(), String> {
+    fn emit_unsafe(&mut self, source: &str, bare: bool) -> Result<(), String> {
         // deka#622 finding F: splice the shared Result constructors from
         // `crate::prelude` (deka#582) instead of transcribing an unbranded
         // `{ __case }` literal. The generated match tests `__case` today, but
         // anything that keys on the `__enum` brand (union member `Result(r)`,
         // `.getType()`, exhaustiveness) must see the exact shape
         // `Result.Ok`/`Result.Err` produce — same as `__deka_to_result`.
+        //
+        // dsc#60: the Err payload expression depends on the form. The
+        // annotated form `unsafe<T> { }` types as `Result<T, JsError>`
+        // (deka#460), so its payload stays an Error object — thrown Errors
+        // pass through, anything else is wrapped — which is exactly what the
+        // `JsError` member table (.message/.name) promises. The bare legacy
+        // form yields `Result<Infer, Infer>` (deka#252): its Err side is
+        // universally assignable, so an Error object leaking out would be
+        // silently accepted as any type, `string` included. Until the bare
+        // form is migrated to mandatory annotations, its Err payload is
+        // normalized to the thrown value's string representation here, at the
+        // boundary, so errors-as-values (`Err` carries diagnostic text) holds
+        // on every path.
+        let err_payload = if bare {
+            "(err instanceof Error ? (err.message || String(err)) : String(err))"
+        } else {
+            "(err instanceof Error ? err : new Error(String(err)))"
+        };
         let trimmed = source.trim();
         if trimmed.is_empty() {
             self.out.push_str("(function() { try { return (");
             self.out.push_str(crate::prelude::RESULT_OK);
             self.out.push_str(")(undefined); } catch (err) { return (");
             self.out.push_str(crate::prelude::RESULT_ERR);
-            self.out
-                .push_str(")(err instanceof Error ? err : new Error(String(err))); } })()");
+            self.out.push_str(")(");
+            self.out.push_str(err_payload);
+            self.out.push_str("); } })()");
             return Ok(());
         }
 
@@ -3981,8 +4048,9 @@ impl<'a> Emitter<'a> {
         self.out.push_str(&awaited);
         self.out.push_str("); } catch (err) { return (");
         self.out.push_str(crate::prelude::RESULT_ERR);
-        self.out
-            .push_str(")(err instanceof Error ? err : new Error(String(err))); } })()");
+        self.out.push_str(")(");
+        self.out.push_str(err_payload);
+        self.out.push_str("); } })()");
 
         Ok(())
     }

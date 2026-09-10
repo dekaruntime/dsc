@@ -2260,6 +2260,60 @@ mod tests {
     }
 
     #[test]
+    fn graph_dev_entry_emits_helper_referenced_only_inside_unsafe() {
+        // dsc#59: a helper reachable only from inside an `unsafe` arrow body
+        // in a build body was dropped from the dev plan entry, so executing
+        // the entry failed with an unknown-identifier error even though the
+        // source typechecks. The dev-entry liveness scans raw `unsafe` text
+        // for identifier tokens, matching what the runtime shaker has done
+        // since deka#437. The unrelated helper pins the over-approximation
+        // at the import-retention sites: it must stay out of the entry.
+        let main = PathBuf::from("/project/main.ds");
+        let helper = PathBuf::from("/project/helper.ds");
+        let mut files = HashMap::new();
+        files.insert(
+            main.clone(),
+            "import { greet } from \"./helper.ds\";\n\
+             fn local_helper() string { return \"local\" }\n\
+             fn unrelated_helper() string { return \"unrelated\" }\n\
+             const greeting: string = build {\n\
+             \x20 const run = unsafe { () => greet() + \" \" + local_helper() }\n\
+             \x20 return match (run) { Ok(f) => f(), Err(_) => \"err\" }\n\
+             }"
+                .to_string(),
+        );
+        files.insert(
+            helper.clone(),
+            "export fn greet() string { return \"imported\" }".to_string(),
+        );
+        let mut aliases = HashMap::new();
+        aliases.insert((main.clone(), "./helper.ds".to_string()), helper.clone());
+        let result = compile_module_graph(&main, &InMemoryLoader { files, aliases })
+            .expect("graph compiles");
+        let slot = result
+            .dev_plan
+            .slots
+            .iter()
+            .find(|slot| slot.binding == "greeting")
+            .expect("one build slot for greeting");
+        assert!(
+            slot.entry.contains("function local_helper"),
+            "module-local helper must be emitted in the dev entry:\n{}",
+            slot.entry
+        );
+        assert!(
+            slot.entry.contains("import { greet } from \"./helper.js\";"),
+            "imported helper must be retained in the dev entry:\n{}",
+            slot.entry
+        );
+        assert!(
+            !slot.entry.contains("unrelated_helper"),
+            "the token scan may over-approximate liveness but must not emit unrelated code:\n{}",
+            slot.entry
+        );
+    }
+
+    #[test]
     fn client_graph_rejects_ui_server() {
         let root = PathBuf::from("/project");
         let main = root.join("main.dsx");

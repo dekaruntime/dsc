@@ -2843,6 +2843,43 @@ mod tests {
     }
 
     #[test]
+    fn option_binding_payload_mismatch_fails() {
+        let errors = typeck("const o: Option<number> = Some(\"text\");");
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0].message.contains("number"),
+            "{}",
+            errors[0].message
+        );
+        assert!(
+            errors[0].message.contains("string"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn option_binding_none_passes() {
+        assert!(typeck("const o: Option<number> = None;").is_empty());
+    }
+
+    #[test]
+    fn nested_option_binding_payload_mismatch_fails() {
+        let errors = typeck("const o: Option<Option<number>> = Some(Some(\"text\"));");
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0].message.contains("Option<number>"),
+            "{}",
+            errors[0].message
+        );
+        assert!(
+            errors[0].message.contains("Option<string>"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
     fn result_ok_constructor_passes() {
         assert!(typeck("const r: Result<number, string> = Ok(5);").is_empty());
     }

@@ -182,6 +182,12 @@
     "expectCompile": true
   },
   {
+    "id": "option-payload-diagnostic",
+    "title": "Option payload diagnostic",
+    "expectCompile": false,
+    "expectError": "expects Option payload type `number`, found payload type `string`"
+  },
+  {
     "id": "async-functions",
     "title": "async functions",
     "expectCompile": true

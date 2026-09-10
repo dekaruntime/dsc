@@ -109,9 +109,43 @@ impl<'a> Coverage<'a> {
                 .iter()
                 .map(|alternative| Coverage::of_pattern(alternative, cases))
                 .fold(Coverage::nothing(), Coverage::merge),
+            ast::Pattern::Struct { fields, .. } => {
+                // A struct pattern names its runtime type, but on a scrutinee
+                // already known to be that struct it is exhaustive precisely
+                // when every named field pattern is irrefutable. Fields left
+                // out of the pattern are deliberately ignored.
+                if fields.iter().all(|field| {
+                    Self::is_irrefutable(&field.pattern, cases)
+                }) {
+                    Coverage::All
+                } else {
+                    Coverage::nothing()
+                }
+            }
+            // Array-backed tuple patterns are length-sensitive, so no tuple
+            // pattern is irrefutable for Array<T>.
+            ast::Pattern::Literal { .. } | ast::Pattern::Tuple { .. } => Coverage::nothing(),
+        }
+    }
+
+    fn is_irrefutable(
+        pattern: &ast::Pattern<'a>,
+        cases: &HashMap<*const ast::Pattern<'a>, &'a str>,
+    ) -> bool {
+        match pattern {
+            ast::Pattern::Wildcard { .. } => true,
+            ast::Pattern::Identifier { .. } => {
+                !cases.contains_key(&(pattern as *const ast::Pattern<'a>))
+            }
+            ast::Pattern::Struct { fields, .. } => fields
+                .iter()
+                .all(|field| Self::is_irrefutable(&field.pattern, cases)),
+            ast::Pattern::Or { alternatives, .. } => alternatives
+                .iter()
+                .any(|alternative| Self::is_irrefutable(alternative, cases)),
             ast::Pattern::Literal { .. }
-            | ast::Pattern::Struct { .. }
-            | ast::Pattern::Tuple { .. } => Coverage::nothing(),
+            | ast::Pattern::Constructor { .. }
+            | ast::Pattern::Tuple { .. } => false,
         }
     }
 
@@ -2175,12 +2209,94 @@ impl<'a> Checker<'a> {
                     self.check_pattern(alternative, scrutinee_type);
                 }
             }
-            ast::Pattern::Struct { span, .. } | ast::Pattern::Tuple { span, .. } => {
-                self.error_span(
-                    *span,
-                    "struct/tuple patterns are not supported in v2 typeck",
-                );
+            ast::Pattern::Struct { name, fields, span } => {
+                self.check_struct_pattern(name, fields, *span, scrutinee_type);
             }
+            ast::Pattern::Tuple { elements, span } => {
+                self.check_tuple_pattern(elements, *span, scrutinee_type);
+            }
+        }
+    }
+
+    /// Check `Name { field: pattern }`. Struct patterns are nominal at the
+    /// outer level (the emitter tests the factory brand); fields not named in
+    /// the pattern are ignored, while every named field binds/checks exactly
+    /// as its nested pattern says.
+    fn check_struct_pattern(
+        &mut self,
+        name: &'a str,
+        fields: &'a [ast::PatternField<'a>],
+        span: ast::Span,
+        scrutinee_type: &Type<'a>,
+    ) {
+        let type_args = match scrutinee_type {
+            Type::Struct { name: actual } if *actual == name => None,
+            Type::Generic { base, args } if *base == name && self.structs.contains_key(base) => {
+                Some(args.as_slice())
+            }
+            Type::Infer | Type::Var | Type::Error => None,
+            _ => {
+                self.error_span(
+                    span,
+                    format!("struct pattern `{name}` does not match scrutinee type `{scrutinee_type}`"),
+                );
+                return;
+            }
+        };
+
+        if !self.structs.contains_key(name) {
+            self.error_span(span, format!("unknown struct `{name}`"));
+            return;
+        }
+
+        let mut seen = HashSet::new();
+        for field in fields {
+            if !seen.insert(field.name) {
+                self.error_span(
+                    field.span,
+                    format!("duplicate field `{}` in struct pattern `{name}`", field.name),
+                );
+                continue;
+            }
+            let field_type = match type_args {
+                Some(args) => self.resolve_field_type_substituted(name, field.name, args),
+                None => self.resolve_field_type(name, field.name),
+            };
+            match field_type {
+                Some(field_type) => self.check_pattern(&field.pattern, &field_type),
+                None => self.error_span(
+                    field.span,
+                    format!("struct `{name}` has no field `{}`", field.name),
+                ),
+            }
+        }
+    }
+
+    /// Tuple patterns destructure the existing homogeneous Array<T> runtime
+    /// representation. They match only arrays with exactly the written arity;
+    /// each element is checked recursively against T.
+    fn check_tuple_pattern(
+        &mut self,
+        elements: &'a [ast::Pattern<'a>],
+        span: ast::Span,
+        scrutinee_type: &Type<'a>,
+    ) {
+        match scrutinee_type {
+            Type::Array { elem } => {
+                let elem_type = elem.as_ref().clone();
+                for element in elements {
+                    self.check_pattern(element, &elem_type);
+                }
+            }
+            Type::Infer | Type::Var | Type::Error => {
+                for element in elements {
+                    self.check_pattern(element, scrutinee_type);
+                }
+            }
+            _ => self.error_span(
+                span,
+                format!("tuple pattern requires an array scrutinee, found type `{scrutinee_type}`"),
+            ),
         }
     }
 
@@ -2200,6 +2316,12 @@ impl<'a> Checker<'a> {
             ast::Pattern::Constructor { payload, .. } => {
                 payload.and_then(|inner| Self::pattern_binding_name(inner, cases))
             }
+            ast::Pattern::Struct { fields, .. } => fields
+                .iter()
+                .find_map(|field| Self::pattern_binding_name(&field.pattern, cases)),
+            ast::Pattern::Tuple { elements, .. } => elements
+                .iter()
+                .find_map(|element| Self::pattern_binding_name(element, cases)),
             ast::Pattern::Or { alternatives, .. } => alternatives
                 .iter()
                 .find_map(|alternative| Self::pattern_binding_name(alternative, cases)),

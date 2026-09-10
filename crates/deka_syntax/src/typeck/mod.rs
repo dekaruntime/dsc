@@ -2910,6 +2910,57 @@ mod tests {
     }
 
     #[test]
+    fn match_struct_pattern_binds_named_fields_and_ignores_others() {
+        assert!(typeck(
+            "struct Point { x: number; y: number }\n\
+             fn x_of(point: Point) number {\n\
+               return match (point) { Point { x } => x };\n\
+             }"
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn match_tuple_pattern_binds_array_elements() {
+        assert!(typeck(
+            "fn first(pair: Array<number>) number {\n\
+               return match (pair) { (first, second) => first, _ => 0 };\n\
+             }"
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn match_pattern_recurses_from_enum_to_struct() {
+        assert!(typeck(
+            "struct Point { x: number; y: number }\n\
+             enum Message { Move(Point), Stop }\n\
+             fn x_of(message: Message) number {\n\
+               return match (message) {\n\
+                 Move(Point { x }) => x,\n\
+                 Stop => 0,\n\
+               };\n\
+             }"
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn match_struct_pattern_wrong_scrutinee_type_fails() {
+        let errors = typeck(
+            "struct Point { x: number }\n\
+             const value: string = \"nope\";\n\
+             const answer = match (value) { Point { x } => x, _ => 0 };",
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message.contains("struct pattern `Point` does not match scrutinee type `string`")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
     fn user_defined_enum_constructor_passes() {
         assert!(typeck("enum Color { Red, Green, Blue } const c: Color = Color.Red;").is_empty());
     }

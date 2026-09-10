@@ -4341,19 +4341,14 @@ impl<'a> Emitter<'a> {
                 }
                 let mut conditions = vec![format!("{}.__case === \"{}\"", scrutinee_var, name)];
                 if let Some(payload) = payload {
-                    if let Pattern::Constructor {
-                        name: payload_name, ..
-                    } = payload
-                    {
-                        let payload_access = if *name == "Err" {
-                            format!("{}.error", scrutinee_var)
-                        } else {
-                            format!("{}.value", scrutinee_var)
-                        };
-                        conditions.push(format!(
-                            "{}.__case === \"{}\"",
-                            payload_access, payload_name
-                        ));
+                    let payload_access = if *name == "Err" {
+                        format!("{}.error", scrutinee_var)
+                    } else {
+                        format!("{}.value", scrutinee_var)
+                    };
+                    let payload_condition = self.match_condition(payload, &payload_access);
+                    if payload_condition != "true" {
+                        conditions.push(payload_condition);
                     }
                 }
                 conditions.join(" && ")
@@ -4367,7 +4362,33 @@ impl<'a> Emitter<'a> {
                     .collect();
                 format!("({})", tests.join(" || "))
             }
-            Pattern::Struct { .. } | Pattern::Tuple { .. } => "false".to_string(),
+            Pattern::Struct { name, fields, .. } => {
+                let brand = self.struct_brand(name);
+                let mut conditions = vec![format!(
+                    "{}?.__deka_struct === \"{}\"",
+                    scrutinee_var, brand
+                )];
+                for field in fields.iter() {
+                    conditions.push(self.match_condition(
+                        &field.pattern,
+                        &format!("{}.{}", scrutinee_var, field.name),
+                    ));
+                }
+                conditions.join(" && ")
+            }
+            Pattern::Tuple { elements, .. } => {
+                let mut conditions = vec![
+                    format!("Array.isArray({})", scrutinee_var),
+                    format!("{}.length === {}", scrutinee_var, elements.len()),
+                ];
+                for (index, element) in elements.iter().enumerate() {
+                    conditions.push(self.match_condition(
+                        element,
+                        &format!("{}[{}]", scrutinee_var, index),
+                    ));
+                }
+                conditions.join(" && ")
+            }
         }
     }
 
@@ -4463,7 +4484,24 @@ impl<'a> Emitter<'a> {
                     self.emit_pattern_bindings(payload, &payload_access, indent)?;
                 }
             }
-            Pattern::Struct { .. } | Pattern::Tuple { .. } => {}
+            Pattern::Struct { fields, .. } => {
+                for field in fields.iter() {
+                    self.emit_pattern_bindings(
+                        &field.pattern,
+                        &format!("{}.{}", scrutinee_var, field.name),
+                        indent,
+                    )?;
+                }
+            }
+            Pattern::Tuple { elements, .. } => {
+                for (index, element) in elements.iter().enumerate() {
+                    self.emit_pattern_bindings(
+                        element,
+                        &format!("{}[{}]", scrutinee_var, index),
+                        indent,
+                    )?;
+                }
+            }
         }
         Ok(())
     }

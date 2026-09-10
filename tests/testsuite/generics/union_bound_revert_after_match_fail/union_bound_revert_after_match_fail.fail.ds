@@ -1,0 +1,14 @@
+// rfd#56 phase 2: narrowing is scoped to the match arm. Inside
+// `Product(p) => ...` the scrutinee is the member; after the match, `item`
+// is T again — and T may be a Bundle, so a member-only field access is an
+// error demanding a narrowing match.
+struct Product { price: number }
+struct Bundle { price: number }
+
+fn bad<T: Product | Bundle>(item: T) number {
+  const n = match item {
+    Product(p) => p.price
+    Bundle(b) => b.price
+  }
+  return item.price
+}

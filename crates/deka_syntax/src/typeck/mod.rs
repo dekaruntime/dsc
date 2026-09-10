@@ -2168,6 +2168,246 @@ mod tests {
     }
 
     #[test]
+    fn type_param_interface_bound_unlocks_declared_members() {
+        // rfd#56 phase 2: `<T: Named>` permits the phase-1 list plus the
+        // members `Named` declares.
+        assert!(typeck(
+            "interface Named { name: string }\n\
+             struct User { name: string }\n\
+             fn greet<T: Named>(x: T) string { return x.name }\n\
+             const u = User { name: \"Ada\" }\n\
+             const s = greet(u);"
+        )
+        .is_empty());
+
+        // A member the bound does not declare is a check-time error.
+        let errors = typeck(
+            "interface Named { name: string }\n\
+             struct User { name: string; age: number }\n\
+             fn greet<T: Named>(x: T) number { return x.age }",
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("no field `age`"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn type_param_interface_method_call_dispatches_on_bound() {
+        assert!(typeck(
+            "interface Named { fn describe() string }\n\
+             struct User { name: string }\n\
+             fn (u User) describe() string { return u.name }\n\
+             fn greet<T: Named>(x: T) string { return x.describe() }\n\
+             const u = User { name: \"Ada\" }\n\
+             const s = greet(u);"
+        )
+        .is_empty());
+
+        // Calling a method the bound does not declare fails.
+        let errors = typeck(
+            "interface Named { fn describe() string }\n\
+             fn greet<T: Named>(x: T) string { return x.shout() }",
+        );
+        assert!(!errors.is_empty(), "undeclared method must fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("shout")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn type_param_concrete_bound_unlocks_bound_operations() {
+        // `<T: number>` arithmetic is number arithmetic.
+        assert!(typeck(
+            "fn double<T: number>(x: T) number { return x * 2 }\nconst y = double(21);"
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn type_param_assignment_stays_param_to_param() {
+        // Assignment is a phase-1 permitted operation and stays T-to-T even
+        // with a bound: the slot may hold any member, not every value the
+        // bound names.
+        assert!(typeck(
+            "struct Product { price: number }\n\
+             struct Bundle { price: number }\n\
+             fn carry<T: Product | Bundle>(item: T) T {\n\
+             \x20 let slot = item\n\
+             \x20 slot = item\n\
+             \x20 return slot\n\
+             }"
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn type_param_unknown_bound_is_an_error() {
+        // A bound that does not resolve is a check-time error, reported once
+        // even though signature collection and body checking both push the
+        // parameter scope.
+        let errors = typeck("fn f<T: Nope>(x: T) T { return x }");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("unknown type `Nope`"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn type_param_union_bound_narrows_per_arm_and_preserves_identity() {
+        // rfd#56 phase 2: the load-bearing case. Matching narrows T to the
+        // concrete member inside each arm, the declared return type T still
+        // holds (a narrowed member is assignable to T), and the caller
+        // receives the member it passed without narrowing again.
+        let source = "struct Product { price: number }\n\
+             struct Bundle { price: number }\n\
+             fn render<T: Product | Bundle>(item: T) T {\n\
+             \x20 return match item {\n\
+             \x20   Product(p) => p\n\
+             \x20   Bundle(b) => b\n\
+             \x20 }\n\
+             }\n\
+             const widget = Product { price: 5 }\n\
+             const back = render(widget)\n\
+             const n: number = back.price;";
+        assert!(typeck(source).is_empty(), "{:?}", typeck(source));
+
+        // Using a member outside the bound is not narrowed to it: matching a
+        // name that is not a bound member is an error.
+        let errors = typeck(
+            "struct Product { price: number }\n\
+             struct Bundle { price: number }\n\
+             struct GiftCard { credit: number }\n\
+             fn render<T: Product | Bundle>(item: T) T {\n\
+             \x20 return match item {\n\
+             \x20   Product(p) => p\n\
+             \x20   Bundle(b) => b\n\
+             \x20   GiftCard(g) => g\n\
+             \x20 }\n\
+             }",
+        );
+        assert!(!errors.is_empty(), "non-member pattern must fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("GiftCard")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn type_param_union_bound_requires_exhaustiveness() {
+        let errors = typeck(
+            "struct Product { price: number }\n\
+             struct Bundle { price: number }\n\
+             struct GiftCard { credit: number }\n\
+             fn render<T: Product | Bundle | GiftCard>(item: T) number {\n\
+             \x20 return match item {\n\
+             \x20   Product(p) => p.price\n\
+             \x20   Bundle(b) => b.price\n\
+             \x20 }\n\
+             }",
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("missing GiftCard"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn type_param_narrowing_reverts_after_the_match() {
+        // Inside the arm `item` is the member; after the match it is T
+        // again, and a member-only field access is an error.
+        let errors = typeck(
+            "struct Product { price: number }\n\
+             struct Bundle { price: number }\n\
+             fn f<T: Product | Bundle>(item: T) number {\n\
+             \x20 const n = match item {\n\
+             \x20   Product(p) => p.price\n\
+             \x20   Bundle(b) => b.price\n\
+             \x20 }\n\
+             \x20 return item.price\n\
+             }",
+        );
+        assert!(!errors.is_empty(), "narrowed member must not leak");
+    }
+
+    #[test]
+    fn type_param_bound_checked_at_call_site_after_inference() {
+        // The union bound: an argument outside the union names the bound.
+        let errors = typeck(
+            "struct Product { price: number }\n\
+             struct Bundle { price: number }\n\
+             struct Widget { size: number }\n\
+             fn render<T: Product | Bundle>(item: T) T { return item }\n\
+             const w = Widget { size: 1 }\n\
+             const r = render(w);",
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("does not satisfy the bound `Bundle | Product`"),
+            "{}",
+            errors[0].message
+        );
+
+        // The interface bound: a type that does not satisfy the interface
+        // names the interface.
+        let errors = typeck(
+            "interface Named { name: string }\n\
+             struct Point { x: number }\n\
+             fn greet<T: Named>(x: T) T { return x }\n\
+             const p = Point { x: 1 }\n\
+             const r = greet(p);",
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("does not satisfy the bound `Named`"),
+            "{}",
+            errors[0].message
+        );
+
+        // Inference failure must not crash the bound check: an unannotated
+        // empty array leaves T unsolved (Var) and only the argument error
+        // is reported.
+        let errors = typeck(
+            "struct Product { price: number }\n\
+             fn render<T: Product | Bundle>(item: T) T { return item }\n\
+             const xs = []\n\
+             const r = render(xs.first());",
+        );
+        assert!(!errors.is_empty());
+        assert!(
+            errors
+                .iter()
+                .all(|e| !e.message.contains("does not satisfy")),
+            "unsolved T must not produce a bound error: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn type_param_get_type_is_not_a_bound_operation() {
+        // Runtime type interrogation on a type parameter is deferred by
+        // rfd#56; neither an unbounded nor a bounded T may call getType.
+        let errors = typeck(
+            "interface Named { name: string }\n\
+             fn f<T: Named>(x: T) {\n\
+             \x20 const t = x.getType()\n\
+             }",
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("cannot call `getType` on"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
     fn template_interpolation_is_checked() {
         // dsc#89: a name that does not exist must be a check-time error with
         // a span pointing at the interpolation, not a runtime surprise from

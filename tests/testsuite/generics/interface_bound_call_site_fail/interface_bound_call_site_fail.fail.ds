@@ -1,0 +1,15 @@
+// rfd#56 phase 2: the bound is checked at the call site after inference.
+// infer_type_args solves T = Point from the argument; Point does not
+// satisfy the interface bound Named, so the call fails naming the bound.
+interface Named {
+  name: string;
+}
+
+struct Point { x: number }
+
+fn greet<T: Named>(x: T) T {
+  return x
+}
+
+const p = Point { x: 1 }
+const r = greet(p)

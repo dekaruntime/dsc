@@ -1,0 +1,12 @@
+// rfd#56 phase 2: exhaustiveness over a union bound is checked, and the
+// error names the member that was forgotten.
+struct Product { price: number }
+struct Bundle { price: number }
+struct GiftCard { credit: number }
+
+fn total<T: Product | Bundle | GiftCard>(item: T) number {
+  return match item {
+    Product(p) => p.price
+    Bundle(b) => b.price
+  }
+}

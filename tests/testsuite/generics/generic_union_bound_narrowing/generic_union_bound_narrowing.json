@@ -1,0 +1,6 @@
+{
+  "title": "Union bound: match narrows T per arm and the return still holds T (identity preserved)",
+  "stage": "run",
+  "expectedStdoutNative": "Widget\n5\nBox\nGC-1\nproduct Widget 5\nbundle Box 9\ngift GC-1\n",
+  "notes": "rfd#56 phase 2 (dsc#96): <T: Product | Bundle | GiftCard> narrows T to the concrete member inside each arm. render() pins identity in both directions: pass a Product, receive a Product (back.name, back.price with no re-narrowing); pass a Bundle or GiftCard, receive that member. label() pins that arms may derive values from the narrowed member. If narrowing does not work, the feature has no purpose."
+}

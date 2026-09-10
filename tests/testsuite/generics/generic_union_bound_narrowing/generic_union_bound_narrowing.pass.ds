@@ -1,0 +1,51 @@
+import { echo } from "io"
+
+// rfd#56 phase 2: a union bound narrows T to the concrete member inside
+// each match arm, and the declared return type T still holds. This is the
+// entire reason a union bound beats taking a union parameter: `fn f(x: A |
+// B | C) A | B | C` loses identity — pass an A, receive A | B | C, narrow
+// again. <T: A | B | C> preserves it: pass an A, receive an A.
+struct Product { name: string; price: number }
+struct Bundle { name: string; price: number }
+struct GiftCard { code: string }
+
+// Identity, direction 1: each arm narrows `item` to the concrete member —
+// `p` and the rebound `item` are Product / Bundle / GiftCard here — and the
+// member is returned as T.
+fn render<T: Product | Bundle | GiftCard>(item: T) T {
+  return match item {
+    Product(p) => p
+    Bundle(b) => b
+    GiftCard(g) => g
+  }
+}
+
+// Arms may also derive values from the narrowed member: each arm returns a
+// string built from member fields, so the match result is string, not T.
+fn label<T: Product | Bundle | GiftCard>(item: T) string {
+  return match item {
+    Product(p) => "product " + p.name + " " + string(p.price)
+    Bundle(b) => "bundle " + b.name + " " + string(b.price)
+    GiftCard(g) => "gift " + g.code
+  }
+}
+
+const widget = Product { name: "Widget", price: 5 }
+const boxed = Bundle { name: "Box", price: 9 }
+const card = GiftCard { code: "GC-1" }
+
+const back = render(widget)
+// Identity, direction 1 pinned: the caller receives the member it passed —
+// `back` is a Product, and its field is accessible with no second match.
+echo(back.name)
+echo(string(back.price))
+
+// Identity, direction 2: pass a different member, receive that member.
+const back2 = render(boxed)
+echo(back2.name)
+const back3 = render(card)
+echo(back3.code)
+
+echo(label(widget))
+echo(label(boxed))
+echo(label(card))

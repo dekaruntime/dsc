@@ -1,0 +1,6 @@
+{
+  "title": "A non-exhaustive match over a union bound fails, naming the forgotten member",
+  "stage": "typecheck",
+  "expectedDiagnosticContains": "non-exhaustive match: missing GiftCard",
+  "notes": "rfd#56 phase 2: <T: Product | Bundle | GiftCard> is matched like the union it is bounded by, so the exhaustiveness rule from rfd#42 applies and names GiftCard as the missing arm."
+}

@@ -1577,6 +1577,18 @@ impl<'a> Checker<'a> {
                 continue;
             };
             let Some(exports) = imports.get(source) else {
+                for spec in specifiers.iter() {
+                    self.error_span(
+                        spec.span,
+                        format!(
+                            "cannot resolve imported name `{}` from `{}`",
+                            spec.imported, source
+                        ),
+                    );
+                    // Continue from an error boundary so the unresolved name
+                    // cannot create an assignable `Infer` region.
+                    self.declare_var(spec.local, Type::Error);
+                }
                 continue;
             };
             // Private factories named by the dependency's fragments are
@@ -1654,6 +1666,22 @@ impl<'a> Checker<'a> {
                         }
                     }
                     self.build_fragments.insert(local, tree);
+                }
+
+                let known = exports.values.contains_key(imported)
+                    || exports.structs.contains_key(imported)
+                    || exports.enums.contains_key(imported)
+                    || exports.aliases.contains_key(imported)
+                    || exports.newtypes.contains_key(imported);
+                if !known {
+                    self.error_span(
+                        spec.span,
+                        format!(
+                            "cannot resolve imported name `{}` from `{}`",
+                            imported, source
+                        ),
+                    );
+                    self.declare_var(local, Type::Error);
                 }
             }
         }

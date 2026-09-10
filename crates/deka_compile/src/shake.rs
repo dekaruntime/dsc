@@ -823,13 +823,10 @@ mod tests {
     }
 
     #[test]
-    fn live_import_unused_by_user_is_dropped_but_injection_still_binds_it() {
-        // End to end through graph shaking (deka#744 F3): the user imports
-        // `live` without referencing it, so shaking drops it from the user's
-        // import line — it binds nothing, and the compiler's injected
-        // `import { live }` must still appear. The reverse hazard (user binds
-        // the name and the injection duplicates it) is pinned in
-        // deka_emit's tests; this pins the hazard in the other direction.
+    fn unresolved_reactive_import_is_not_silently_typed_for_shaking() {
+        // Shaking can identify that `live` is unused, but it must not make an
+        // unresolved `ui/reactive` import typecheck. The emitter-level import
+        // deduplication behavior remains covered in deka_emit's tests.
         let source = "import { signal, live } from \"ui/reactive\";\n\
                       export fn Page() {\n\
                         const s = signal(7);\n\
@@ -842,7 +839,7 @@ mod tests {
             !live.contains("live"),
             "the unused `live` import must not survive shaking: {live:?}"
         );
-        let result = crate::compile_to_js_with_options(
+        let errors = crate::compile_to_js_with_options(
             source,
             "page.dsx",
             crate::CompileOptions {
@@ -850,21 +847,10 @@ mod tests {
                 ..Default::default()
             },
         )
-        .expect("compile failed");
+        .expect_err("ui/reactive needs a declared module signature");
         assert!(
-            result.js.contains("import { signal } from \"ui/reactive\""),
-            "the user's import must keep the referenced `signal` binding: {}",
-            result.js
-        );
-        assert!(
-            result.js.contains("import { live } from \"ui/reactive\""),
-            "the injected live binding must survive even though the user's import was dropped: {}",
-            result.js
-        );
-        assert!(
-            !result.js.contains("import { signal, live }"),
-            "`live` may be bound only once across both imports: {}",
-            result.js
+            errors.iter().any(|error| error.message.contains("ui/reactive")),
+            "expected unresolved ui/reactive diagnostic: {errors:?}"
         );
     }
 }

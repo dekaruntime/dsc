@@ -528,7 +528,7 @@ mod tests {
     }
 
     #[test]
-    fn project_with_module_base_resolves_stdlib_imports() {
+    fn project_with_module_base_rejects_stdlib_without_declarations() {
         let mut project = ProjectState::new();
         project.set_module_base("https://hats.dump.invalid/modules");
         project.write(
@@ -543,17 +543,14 @@ mod tests {
         let json = project.compile();
         let response: Value = serde_json::from_str(&json).expect("valid compile response JSON");
 
-        assert_eq!(response["ok"], true, "compile failed: {}", json);
-        let main = response["modules"]["main.ds"]["code"].as_str().unwrap();
+        assert_eq!(response["ok"], false, "compile unexpectedly succeeded: {}", json);
+        let diagnostics = response["diagnostics"].as_array().unwrap();
         assert!(
-            main.contains("import { echo } from \"https://hats.dump.invalid/modules/io.mjs\""),
-            "expected moduleBase rewrite, got:\n{}",
-            main
-        );
-        assert!(
-            main.contains("import { add } from \"./math.ds\""),
-            "expected relative import preserved, got:\n{}",
-            main
+            diagnostics.iter().any(|diagnostic| diagnostic["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("imported name `echo`"))),
+            "expected unresolved import diagnostic, got: {}",
+            json
         );
     }
 

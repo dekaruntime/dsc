@@ -1,0 +1,5 @@
+// dsc#88: a mixed array literal used to be modeled as Array<number> from
+// the FIRST element, with the string reaching user code typed as number
+// (silent wrong answer). Now it is a check-time error.
+const mixed = [1, "x"]
+echo(mixed)

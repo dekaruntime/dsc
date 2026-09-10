@@ -453,15 +453,44 @@ impl<'a> Checker<'a> {
                 payload,
                 span,
             } => self.check_enum_constructor(enum_name, case_name, payload.as_deref(), *span),
-            ast::Expr::Array { elements, .. } => {
-                let mut elem_type = None;
+            ast::Expr::Array { elements, span } => {
+                let mut elem_type: Option<Type<'a>> = None;
                 for element in elements.iter() {
                     let ty = self.check_expr(element);
                     if ty.is_error() {
                         return Type::Error;
                     }
-                    if elem_type.is_none() {
-                        elem_type = Some(ty);
+                    match &elem_type {
+                        None => elem_type = Some(ty),
+                        Some(acc) => {
+                            if self.is_assignable(acc, &ty) {
+                                // `ty` fits the running element type
+                                // (covariance): `[1, 2]`, `[Some(1), None]`.
+                            } else if self.is_assignable(&ty, acc) {
+                                // `ty` is wider than the running element
+                                // type (`[None, Some(1)]`): adopt it.
+                                elem_type = Some(ty);
+                            } else {
+                                // dsc#88: the old rule silently typed
+                                // `[1, "x"]` as `Array<number>`, letting the
+                                // string reach user code as a `number`.
+                                // Deka arrays are homogeneous and the
+                                // language never infers unions from
+                                // expressions (unions are declared, rfd#42),
+                                // so a mixed literal is a check-time error.
+                                self.error_span(
+                                    *span,
+                                    format!(
+                                        "array literal has mixed element types \
+                                         `{acc}` and `{ty}` (Deka arrays are \
+                                         homogeneous; declare an \
+                                         `Array<{acc} | {ty}>` and push to \
+                                         build a union array)"
+                                    ),
+                                );
+                                return Type::Error;
+                            }
+                        }
                     }
                 }
                 Type::Array {

@@ -3489,6 +3489,186 @@ mod tests {
     }
 
     #[test]
+    fn mixed_array_literal_is_a_check_time_error() {
+        // dsc#88: `[1, "x"]` used to model as `Array<number>` — the string
+        // reached user code typed as `number`.
+        let errors = typeck("const a = [1, \"x\"];");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("mixed element types"),
+            "{}",
+            errors[0].message
+        );
+        assert!(
+            errors[0].message.contains("number"),
+            "{}",
+            errors[0].message
+        );
+        assert!(
+            errors[0].message.contains("string"),
+            "{}",
+            errors[0].message
+        );
+
+        // Homogeneous literals, and literals mixing only along an
+        // assignable direction (`None` into `Option<T>`), still pass.
+        assert!(typeck("const a = [1, 2, 3];").is_empty());
+        let errors = typeck("const a = [Some(1), None];");
+        assert!(errors.is_empty(), "{errors:?}");
+        let errors = typeck("const a = [None, Some(1)];");
+        assert!(errors.is_empty(), "{errors:?}");
+
+        // Mixed named types are rejected too.
+        let errors = typeck(
+            "struct Product { price: number }\n\
+             struct Bundle { price: number }\n\
+             const a = [Product { price: 1 }, Bundle { price: 2 }];",
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("mixed element types"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn spread_preserves_known_element_type() {
+        // dsc#88: spread used to return `Infer` unconditionally, erasing the
+        // element type. Now a spread element contributes the source's
+        // element type, so a following element of a different type is a
+        // mixed-literal error instead of silently unchecked.
+        let errors = typeck(
+            "const xs = [\"a\", \"b\"]\n\
+             const ys = [...xs, 1];",
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("mixed element types"),
+            "{}",
+            errors[0].message
+        );
+
+        // The erased-`Infer` hole, pinned directly: indexing the spread
+        // array used to yield `Infer`, assignable to anything.
+        let errors = typeck(
+            "const xs = [\"a\", \"b\"]\n\
+             const n: number = [...xs][0];",
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("string"),
+            "{}",
+            errors[0].message
+        );
+        assert!(
+            errors[0].message.contains("number"),
+            "{}",
+            errors[0].message
+        );
+
+        // A homogeneous spread still builds the array it always did.
+        assert!(typeck("const xs = [\"a\"]\nconst ys = [...xs, \"b\"];").is_empty());
+    }
+
+    #[test]
+    fn non_numeric_index_is_a_check_time_error() {
+        // dsc#88: `items["nope"]` used to type as the element type while
+        // JavaScript answers `undefined`.
+        let errors = typeck("const a = [1, 2, 3]\nconst x = a[\"nope\"];");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("index must be a number"),
+            "{}",
+            errors[0].message
+        );
+
+        // Same rule for string indexing.
+        let errors = typeck("const s = \"abc\"\nconst c = s[\"x\"];");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("index must be a number"),
+            "{}",
+            errors[0].message
+        );
+
+        // Numeric indices are unaffected (out-of-range is the Option<T>
+        // question, split from this lane — see dsc#88).
+        assert!(typeck("const a = [1, 2, 3]\nconst x = a[999];").is_empty());
+    }
+
+    #[test]
+    fn indexing_non_collection_is_a_check_time_error() {
+        // dsc#88: indexing a non-collection used to fall through to
+        // `Infer`, silently unchecked.
+        let errors = typeck("const o = { a: 1 }\nconst x = o[0];");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("cannot index into"),
+            "{}",
+            errors[0].message
+        );
+
+        let errors = typeck(
+            "struct Point { x: number }\n\
+             const p = Point { x: 1 }\n\
+             const y = p[0];",
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("cannot index into"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn bytes_indexing_yields_number() {
+        // dsc#88: `bytes` is a Uint8Array view; integer indexing reads a
+        // byte. Previously this fell through collection_element to Infer.
+        assert!(typeck("fn first_byte(b: bytes) number { return b[0]; }").is_empty());
+
+        // The element type is real: it does not flow into an unrelated type.
+        let errors = typeck("fn f(b: bytes) string { return b[0]; }");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("number"),
+            "{}",
+            errors[0].message
+        );
+        assert!(
+            errors[0].message.contains("string"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn duplicate_object_literal_keys_are_rejected() {
+        // dsc#88: `{ a: 1, a: "x" }` typed the field by the FIRST write
+        // while JavaScript keeps the LAST write. Rejected now.
+        let errors = typeck("const o = { a: 1, a: \"x\" };");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("duplicate key `a`"),
+            "{}",
+            errors[0].message
+        );
+
+        // A duplicate anywhere in the literal is rejected.
+        let errors = typeck("const o = { a: 1, b: 2, a: 3 };");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("duplicate key `a`"),
+            "{}",
+            errors[0].message
+        );
+
+        // Distinct keys are unaffected.
+        assert!(typeck("const o = { a: 1, b: \"x\" };").is_empty());
+    }
+
+    #[test]
     fn for_of_binds_array_element_type_in_sync_and_async_functions() {
         let errors = typeck(
             "fn takes_string(x: string) {}\

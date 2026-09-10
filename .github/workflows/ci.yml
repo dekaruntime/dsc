@@ -138,14 +138,27 @@ jobs:
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != '' && env.SCCACHE_ENDPOINT != '' }}
         run: sccache --show-stats
 
-      # rfd#38: this repo owns tests/tour + tests/testsuite. cargo test
-      # already runs fmt corpus + wasm tour; name the gate and refuse an
-      # empty tree (the wasm test used to return on a missing manifest).
-      - name: Language fixtures
+      # Tour remains local. The shared Hats corpus is downloaded from its
+      # owner, dekaruntime/testsuite, through a reviewed checksum pin.
+      - name: Forbid vendored testsuite corpus
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
         run: |
+          if find tests -type d -name testsuite -print -quit | grep -q .; then
+            echo "::error::testsuite corpus must not be vendored; use scripts/ci-fetch-testsuite-corpus.sh"
+            exit 1
+          fi
+
+      - name: Fetch pinned testsuite corpus
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
+        run: scripts/ci-fetch-testsuite-corpus.sh "$GITHUB_WORKSPACE/.cache/testsuite-corpus"
+
+      - name: Language fixtures
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
+        env:
+          DEKA_TESTSUITE_ROOT: ${{ github.workspace }}/.cache/testsuite-corpus
+        run: |
           test -f tests/tour/manifest.json
-          n=$(find tests/testsuite \( -name '*.pass.ds' -o -name '*.pass.dsx' \) | wc -l)
+          n=$(find "$DEKA_TESTSUITE_ROOT" \( -name '*.pass.ds' -o -name '*.pass.dsx' \) | wc -l)
           test "$n" -gt 100
           cargo test --locked -p deka-fmt --test corpus_roundtrip
           cargo test --locked -p deka_compiler_wasm all_website_tour_sources_match_the_native_abi_contract
@@ -154,7 +167,7 @@ jobs:
       # them. dsc cannot build the runtime (V8 stays out of this repo), so the
       # gate downloads the released runtime pinned in
       # scripts/deka-runtime-version and fails the job on any fixture
-      # mismatch not listed in tests/testsuite/expected-failures.txt (a
+      # mismatch not listed in the owner corpus's expected-failures.txt (a
       # ratchet, not a suppression list).
       - name: Setup Bun for the testsuite runner
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
@@ -175,7 +188,7 @@ jobs:
         env:
           DEKA_NATIVE: ${{ github.workspace }}/.cache/deka-runtime/deka
           DEKA_DSC: ${{ github.workspace }}/target/release/dsc
-        run: bun tests/testsuite/run.mjs
+        run: bun "$GITHUB_WORKSPACE/.cache/testsuite-corpus/run.mjs"
 
       - name: Check wasm32 compiler + diagnostics
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}

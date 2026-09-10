@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Download the pinned deka runtime CLI for CI so tests/testsuite/run.mjs
+# Download the pinned deka runtime CLI for CI so the owner corpus runner
 # (Hats) can execute fixtures with a real `deka run`.
 #
 #   scripts/ci-install-deka-runtime.sh /path/to/deka

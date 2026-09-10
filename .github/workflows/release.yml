@@ -125,6 +125,10 @@ jobs:
       - name: Build WASM artifacts
         env:
           RUSTC_WRAPPER: sccache
+          # deka_compiler_metadata() reads this via option_env! at compile time.
+          # Without it SOURCE_COMMIT falls back to the literal string "unknown",
+          # which testsuite.deka.gg then renders as "@unknown" beside the version.
+          DEKA_SOURCE_COMMIT: ${{ github.sha }}
         run: scripts/build-wasm.sh dist/wasm
 
       - name: Upload WASM artifacts

@@ -254,6 +254,12 @@
     "expectCompile": true
   },
   {
+    "id": "pipe-unresolved-diagnostic",
+    "title": "pipe unresolved target diagnostic",
+    "expectCompile": false,
+    "expectError": "unknown identifier `missing`"
+  },
+  {
     "id": "pipe-arguments",
     "title": "pipe arguments",
     "expectCompile": true

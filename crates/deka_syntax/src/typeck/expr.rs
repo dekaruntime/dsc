@@ -1742,11 +1742,13 @@ impl<'a> Checker<'a> {
         if params.is_empty() {
             return Type::Named { name: enum_name };
         }
-        // Parameters a payload-free case cannot pin stay Infer, which is
-        // compatible with any concrete type until one is available.
+        // Parameters a payload-free case cannot pin are genuinely
+        // unconstrained, not unresolved. Keep them as `Var`, which may unify
+        // freely without preserving an inference failure as an assignable
+        // `Infer` (deka#468, dsc#115).
         let args: Vec<Type<'a>> = params
             .iter()
-            .map(|p| inferred.get(p).cloned().unwrap_or(Type::Infer))
+            .map(|p| inferred.get(p).cloned().unwrap_or(Type::Var))
             .collect();
         Type::Generic {
             base: enum_name,
@@ -2742,7 +2744,16 @@ impl<'a> Checker<'a> {
                 // Pipe desugars at emit time. Type-check the effective call.
                 match right {
                     ast::Expr::Identifier { name, span } => {
-                        let callee_type = self.lookup_var(name).unwrap_or(Type::Infer);
+                        let callee_type = match self.lookup_var(name) {
+                            Some(ty) => ty,
+                            None => {
+                                // Do not turn a missing pipe target into Infer:
+                                // that used to let `value |> missing` pass any
+                                // enclosing assignment or return check.
+                                self.error_span(*span, format!("unknown identifier `{name}`"));
+                                Type::Error
+                            }
+                        };
                         if let Type::Function {
                             params,
                             ret,
@@ -2777,6 +2788,8 @@ impl<'a> Checker<'a> {
                                 );
                             }
                             *ret
+                        } else if callee_type.is_error() {
+                            Type::Error
                         } else {
                             Type::Infer
                         }

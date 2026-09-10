@@ -1,0 +1,5 @@
+// dsc#88: a non-numeric index used to type as the element type while
+// JavaScript answers undefined (silent wrong answer).
+const items = [10, 20, 30]
+const n = items["nope"]
+echo(string(n))

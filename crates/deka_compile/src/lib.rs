@@ -1602,8 +1602,10 @@ const arrow = unsafe { () => User { name: "Bob" } }
 
     #[test]
     fn compile_array_object_index() {
+        // dsc#88: object string-key indexing (`o["x"]`) is a check-time
+        // error now, so the index half of this test uses array indexing.
         let result = compile_to_js(
-            "const a = [1, 2, 3]; const o = { x: 1 }; const v = a[0] + o[\"x\"];",
+            "const a = [1, 2, 3]; const o = { x: 1 }; const v = a[0] + a[1] + o.x;",
             "test.ds",
         )
         .expect("compile should succeed");
@@ -1629,7 +1631,7 @@ const arrow = unsafe { () => User { name: "Bob" } }
             "got: {}",
             result.js
         );
-        assert!(result.js.contains("a[0] + o[\"x\"]"), "got: {}", result.js);
+        assert!(result.js.contains("a[0] + a[1] + o.x"), "got: {}", result.js);
     }
 
     #[test]

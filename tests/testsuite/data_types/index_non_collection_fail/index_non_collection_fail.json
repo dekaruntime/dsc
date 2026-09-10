@@ -1,0 +1,6 @@
+{
+  "title": "Indexing a non-collection is a check-time error",
+  "stage": "typecheck",
+  "expectedDiagnosticContains": "cannot index into",
+  "notes": "dsc#88: obj[0] on an object record used to fall through collection_element to Infer. Indexing is only defined for arrays and strings; everything else names its type."
+}

@@ -538,7 +538,22 @@ impl<'a> Checker<'a> {
                 span,
             } => {
                 let object_type = self.check_expr(object);
-                self.check_expr(index);
+                let index_type = self.check_expr(index);
+                // dsc#88: `obj[idx]` compiles to raw JavaScript indexing,
+                // which answers a non-numeric index with `undefined` while
+                // the checker used to type the result as the element type.
+                // `Var`/`Infer`/`Error` stay permissive for the same reason
+                // `expect_number` tolerates them (deka#468).
+                if !matches!(
+                    index_type,
+                    Type::Named { name: "number" } | Type::Var | Type::Infer
+                ) && !index_type.is_error()
+                {
+                    self.error_span(
+                        index.span(),
+                        format!("index must be a number, found type `{index_type}`"),
+                    );
+                }
                 if let Type::Param { name } = &object_type {
                     match self.lookup_param_bound(name) {
                         // rfd#56 phase 2: an indexable bound (`<T:
@@ -567,7 +582,25 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-                object_type.collection_element()
+                match &object_type {
+                    // Indexable collections keep their element type
+                    // (`Infer`/`Var` stay opaque/unconstrained per deka#468).
+                    Type::Array { .. }
+                    | Type::Named { name: "string" }
+                    | Type::Named { name: "bytes" }
+                    | Type::Var
+                    | Type::Infer
+                    | Type::Error => object_type.collection_element(),
+                    // dsc#88: indexing a non-collection used to fall through
+                    // `collection_element` to `Infer`, silently unchecked.
+                    other => {
+                        self.error_span(
+                            *span,
+                            format!("cannot index into a value of type `{other}`"),
+                        );
+                        Type::Error
+                    }
+                }
             }
             ast::Expr::Spread { expr, .. } => {
                 self.check_expr(expr);

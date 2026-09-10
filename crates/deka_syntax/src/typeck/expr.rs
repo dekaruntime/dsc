@@ -1695,6 +1695,25 @@ impl<'a> Checker<'a> {
         }
 
         let scrutinee_type = self.check_expr(scrutinee);
+        // rfd#56 phase 2: matching a value whose type is a bounded type
+        // parameter checks the pattern — and later the exhaustiveness — as
+        // the bound. `<T: A | B | C>` is matched exactly like `A | B | C`;
+        // an unbounded `T` keeps whatever type the scrutinee has (an
+        // unbounded parameter is not matchable with constructor patterns,
+        // same as before).
+        let effective_scrutinee = self.bounded_param_type(&scrutinee_type);
+        // The union bound of the scrutinee parameter, when that is what the
+        // match runs against: arm bodies may narrow the parameter to a
+        // member, and arms returning that narrowed member must merge even
+        // though the members differ (identity preservation through the
+        // match — see the merge check below).
+        let scrutinee_union_bound = match &scrutinee_type {
+            Type::Param { .. } => match &effective_scrutinee {
+                Type::Union { .. } => Some(effective_scrutinee.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
         let mut result_type: Option<Type<'a>> = None;
         let mut coverage = Coverage::nothing();
         let mut has_catch_all = false;
@@ -1702,7 +1721,7 @@ impl<'a> Checker<'a> {
         for arm in arms {
             self.scopes.push(HashMap::new());
             self.mutables.push(HashSet::new());
-            self.check_pattern(&arm.pattern, &scrutinee_type);
+            self.check_pattern(&arm.pattern, &effective_scrutinee);
             // Union type-patterns rebind the operand within the arm
             // (rfd#42): `match (v) { string(s) => ... }` shadows `v` with
             // `string` inside the arm. Plain shadowing — DekaScript has no
@@ -1727,11 +1746,14 @@ impl<'a> Checker<'a> {
                     .union_type_patterns
                     .contains_key(&(&arm.pattern as *const ast::Pattern<'a>))
                 {
-                    if let Type::Union { members } = &scrutinee_type {
+                    if let Type::Union { members } = &effective_scrutinee {
                         if let Some(member) = members
                             .iter()
                             .find(|m| Self::union_member_name(m) == Some(pattern_name))
                         {
+                            // The narrowing is scope-shadowing like any
+                            // match arm binding: after the arm, the name
+                            // reverts to `T` (rfd#56 phase 2).
                             self.declare_var(name, member.clone());
                         }
                     }
@@ -1755,7 +1777,17 @@ impl<'a> Checker<'a> {
                 // after it and made the result depend on arm order (deka#407).
                 Some(Type::Never) => result_type = Some(arm_type),
                 Some(expected) => {
-                    if !self.is_assignable(expected, &arm_type) {
+                    // rfd#56 phase 2: over a union-bounded parameter, an arm
+                    // returning the narrowed member (a different concrete
+                    // type per arm) still merges — the members are exactly
+                    // what `T` may be, and the match's identity stays `T`
+                    // (the caller receives the member it passed). Without
+                    // this, each arm after the first would report "match arm
+                    // has type `Bundle`, expected type `Product`".
+                    let narrowed_member = scrutinee_union_bound
+                        .as_ref()
+                        .is_some_and(|bound| self.is_assignable(bound, &arm_type));
+                    if !self.is_assignable(expected, &arm_type) && !narrowed_member {
                         self.error_at_expr(
                             &arm.body,
                             super::with_union_narrowing_hint(
@@ -1772,9 +1804,9 @@ impl<'a> Checker<'a> {
             }
         }
 
-        if !has_catch_all && !scrutinee_type.is_error() {
-            let scrutinee_type = scrutinee_type.clone();
-            self.check_match_exhaustiveness(span, &scrutinee_type, &coverage);
+        if !has_catch_all && !effective_scrutinee.is_error() {
+            let effective_scrutinee = effective_scrutinee.clone();
+            self.check_match_exhaustiveness(span, &effective_scrutinee, &coverage);
         }
 
         result_type.unwrap_or(Type::None)

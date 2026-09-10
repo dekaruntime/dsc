@@ -1788,6 +1788,20 @@ impl<'a> Checker<'a> {
         if matches!(expected, Type::Param { .. }) && matches!(actual, Type::Param { .. }) {
             return true;
         }
+        // rfd#56 phase 2, union bounds: a value whose type is a concrete
+        // member of T's union bound is assignable to T. This is the
+        // identity-preservation rule — inside a match arm `item: T` has
+        // narrowed to the member, and `return item` against a declared
+        // return type `T` must still hold. (Members of a union bound are
+        // never themselves type parameters, so this cannot recurse back
+        // into the parameter arms.)
+        if let Type::Param { name } = expected {
+            if let Some(Type::Union { members }) = self.lookup_param_bound(name) {
+                if members.iter().any(|m| self.is_assignable(m, actual)) {
+                    return true;
+                }
+            }
+        }
         if expected == actual {
             return true;
         }

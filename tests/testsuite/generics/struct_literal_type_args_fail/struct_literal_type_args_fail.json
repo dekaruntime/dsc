@@ -1,6 +1,0 @@
-{
-  "title": "Explicit type arguments at a construction site are rejected with an inference hint",
-  "stage": "parse",
-  "expectedDiagnosticContains": "infers its type arguments from the field values",
-  "notes": "dsc#101: `Signal<T> { ... }` used to parse as comparisons (`unknown identifier T`, `cannot compare types`). The parse now names the rule: type arguments are inferred at construction, write `Signal { ... }`."
-}

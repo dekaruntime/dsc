@@ -1,1 +1,0 @@
-outer: for (const x of [1, 2]) { break outer }

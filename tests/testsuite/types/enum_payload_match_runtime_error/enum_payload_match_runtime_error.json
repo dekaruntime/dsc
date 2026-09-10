@@ -1,5 +1,0 @@
-{
-  "title": "Enum payload match with unqualified constructors",
-  "stage": "run",
-  "notes": "Unqualified constructor patterns (A, B) resolve against the enum case names at runtime."
-}

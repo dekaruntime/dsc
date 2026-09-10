@@ -1,5 +1,0 @@
-import { echo } from "io"
-
-type Email string
-const e = Email("hi@example.com")
-echo(string(e))

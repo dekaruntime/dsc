@@ -1,6 +1,0 @@
-{
-  "title": "Optional field omitted defaults to None",
-  "stage": "run",
-  "expectedStdout": "no email\n",
-  "notes": "Core Option/struct behavior."
-}

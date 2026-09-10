@@ -1,5 +1,0 @@
-{
-  "title": "Await inside match arms and subject",
-  "stage": "run",
-  "notes": "Match expressions may contain awaited values."
-}

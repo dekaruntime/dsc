@@ -1,6 +1,0 @@
-{
-  "title": "Unclosed JSX tag fails",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "expected ``<``, found `end of file`"
-}

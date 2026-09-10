@@ -1,4 +1,0 @@
-import { echo } from "io"
-const key = "a"
-const obj = { [key]: 1 }
-echo(obj.a)

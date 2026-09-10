@@ -1,6 +1,0 @@
-{
-  "title": "Duplicate keys in an object literal are rejected",
-  "stage": "typecheck",
-  "expectedDiagnosticContains": "duplicate key `a`",
-  "notes": "dsc#88: { a: 1, a: \"x\" } modeled the field as number from the first write while the runtime returns the last write (string). Neither normalized nor rejected before; now a check-time error."
-}

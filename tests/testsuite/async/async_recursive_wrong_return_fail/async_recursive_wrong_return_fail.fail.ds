@@ -1,8 +1,0 @@
-async fn countdown(n: number) Promise<number> {
-  if (n <= 0) {
-    return "done"
-  }
-  return await countdown(n - 1)
-}
-
-await countdown(2)

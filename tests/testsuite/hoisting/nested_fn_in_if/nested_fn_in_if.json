@@ -1,6 +1,0 @@
-{
-  "title": "Nested fn inside if is rejected.",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "function declarations are only allowed at the top level in DekaScript"
-}

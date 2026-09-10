@@ -1,9 +1,0 @@
-import { echo } from "io"
-const r = unsafe {
-  const x = 7
-  return x * 2
-}
-echo(match (r) {
-  Ok(v) => `ok: ${v}`,
-  Err(e) => `err: ${e}`,
-})

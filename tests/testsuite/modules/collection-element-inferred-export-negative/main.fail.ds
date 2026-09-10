@@ -1,3 +1,0 @@
-import { first } from "./lib.ds"
-
-const wrong: number = first(["bad"])

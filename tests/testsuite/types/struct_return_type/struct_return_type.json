@@ -1,5 +1,0 @@
-{
-  "title": "Function returning a struct instance",
-  "stage": "run",
-  "notes": "Struct instances are valid return values for declared struct return types."
-}

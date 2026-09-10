@@ -1,5 +1,0 @@
-import { echo } from "io"
-let something: number | string = "hello world"
-echo(something.getType().toString())
-something = 42
-echo(something.getType().toString())

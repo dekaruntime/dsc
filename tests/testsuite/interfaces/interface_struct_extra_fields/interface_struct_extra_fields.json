@@ -1,5 +1,0 @@
-{
-  "title": "Struct with extra fields still satisfies an interface",
-  "stage": "run",
-  "notes": ""
-}

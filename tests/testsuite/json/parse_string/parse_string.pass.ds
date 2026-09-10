@@ -1,5 +1,0 @@
-import { echo } from "io"
-echo(match ("\"hi\"".parseJSON<string>()) {
-  Ok(v) => v,
-  Err(e) => "fail",
-})

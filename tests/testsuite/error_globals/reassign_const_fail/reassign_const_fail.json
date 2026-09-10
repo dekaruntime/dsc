@@ -1,6 +1,0 @@
-{
-  "title": "Reassigning a const binding fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "cannot assign to immutable variable",
-  "notes": "const declarations create immutable bindings."
-}

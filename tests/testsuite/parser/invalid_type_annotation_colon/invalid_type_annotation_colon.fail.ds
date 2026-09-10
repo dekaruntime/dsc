@@ -1,3 +1,0 @@
-import { echo } from "io"
-const x: = 5
-echo(x)

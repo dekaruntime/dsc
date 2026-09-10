@@ -1,6 +1,0 @@
-import { echo } from "io"
-fn (s string) toUpperCase() string {
-  return s + "!"
-}
-echo("hey".toUpperCase())
-echo(string("abc".length))

@@ -1,6 +1,0 @@
-{
-  "title": "For-in loop rejected in favor of for-of",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected ``=``, found `identifier`",
-  "notes": "DekaScript only supports for-of iteration; for-in is rejected."
-}

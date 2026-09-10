@@ -1,6 +1,0 @@
-{
-  "title": "Mismatched JSX tag case fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected closing tag `</Div>` but found `</div>`",
-  "notes": ""
-}

@@ -1,6 +1,0 @@
-{
-  "title": "sqrt() is Option<number> and cannot be assigned to number",
-  "stage": "typecheck",
-  "expectedDiagnosticContains": "Option<number>",
-  "notes": "deka#378 step 2: partial Math functions are typed Option<number> and the type is real, so unwrapping is mandatory."
-}

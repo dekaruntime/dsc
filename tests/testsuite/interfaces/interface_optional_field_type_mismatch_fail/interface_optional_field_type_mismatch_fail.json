@@ -1,5 +1,0 @@
-{
-  "title": "Optional interface field with wrong type fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected argument type `Card`, found type `{title: string, subtitle: number}`"
-}

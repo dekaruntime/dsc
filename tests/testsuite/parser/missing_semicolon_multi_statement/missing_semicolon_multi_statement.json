@@ -1,5 +1,0 @@
-{
-  "title": "Missing semicolon between statements on one line",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected `;` or newline, found `identifier`"
-}

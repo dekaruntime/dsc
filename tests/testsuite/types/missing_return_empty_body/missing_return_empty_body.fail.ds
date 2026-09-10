@@ -1,4 +1,0 @@
-import { echo } from "io"
-fn noReturn() string {
-}
-echo("ok")

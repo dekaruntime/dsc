@@ -1,8 +1,0 @@
-{
-  "title": "State store spacing is normalized",
-  "stage": "run",
-  "notes": "Formatter should canonicalize State.create calls with nested object literals and fn expressions.",
-  "hosts": [
-    "browser"
-  ]
-}

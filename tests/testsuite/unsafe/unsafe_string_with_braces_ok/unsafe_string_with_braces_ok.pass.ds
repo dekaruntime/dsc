@@ -1,9 +1,0 @@
-import { echo } from "io"
-const r = unsafe {
-  const s = "this } is not { a brace"
-  return s.length
-}
-echo(match (r) {
-  Ok(v) => `ok: ${v}`,
-  Err(e) => `err: ${e}`,
-})

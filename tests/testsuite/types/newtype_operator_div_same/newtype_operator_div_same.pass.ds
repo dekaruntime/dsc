@@ -1,6 +1,0 @@
-import { echo } from "io"
-
-type Cents number
-const a = Cents(100)
-const b = Cents(25)
-echo(string(a / b))

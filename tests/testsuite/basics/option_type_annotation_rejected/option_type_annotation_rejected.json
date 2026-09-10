@@ -1,6 +1,0 @@
-{
-  "title": "Option annotation requires an Option value",
-  "stage": "parse",
-  "notes": "`string?` is sugar for Option<string>, so a bare \"hi\" does not satisfy it -- use Some(\"hi\"). This previously failed as a syntax error because the annotation itself was unparseable; it is now a real type error.",
-  "expectedDiagnosticContains": "is declared Option<string> but the initializer is string"
-}

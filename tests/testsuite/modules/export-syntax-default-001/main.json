@@ -1,5 +1,0 @@
-{
-  "title": "export default is rejected",
-  "stage": "parse",
-  "expectedDiagnosticContains": "Unsupported export syntax"
-}

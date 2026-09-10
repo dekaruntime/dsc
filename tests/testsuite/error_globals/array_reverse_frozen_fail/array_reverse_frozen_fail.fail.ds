@@ -1,5 +1,0 @@
-import { echo } from "io"
-const arr = [3, 1, 2]
-arr.reverse()
-const len: number = arr.length
-echo(string(len))

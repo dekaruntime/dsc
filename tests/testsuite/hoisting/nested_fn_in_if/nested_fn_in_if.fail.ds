@@ -1,1 +1,0 @@
-if (true) { fn helper() number { return 1 } }

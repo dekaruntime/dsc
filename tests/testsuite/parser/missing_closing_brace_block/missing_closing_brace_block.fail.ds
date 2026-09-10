@@ -1,4 +1,0 @@
-import { echo } from "io"
-const t = true
-if (t) {
-  echo(1)

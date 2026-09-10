@@ -1,5 +1,0 @@
-{
-  "title": "A user extension named getType shadows the builtin",
-  "stage": "run",
-  "notes": "deka#529: consistent with the deka#527 shadowing rule — the user extension rewrites to `getType$string(s)` and the builtin helper is not emitted."
-}

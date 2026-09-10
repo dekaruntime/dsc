@@ -1,6 +1,0 @@
-{
-  "title": "An attribute with no matching prop is rejected",
-  "stage": "parse",
-  "expectedDiagnosticContains": "has no prop",
-  "notes": "deka#443: JSX attributes were never checked against the props interface."
-}

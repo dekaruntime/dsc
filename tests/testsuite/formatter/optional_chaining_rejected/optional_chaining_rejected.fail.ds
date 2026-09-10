@@ -1,4 +1,0 @@
-import { echo } from "io"
-struct A{b:number}
-let a=A{b:1}
-echo(a?.b)

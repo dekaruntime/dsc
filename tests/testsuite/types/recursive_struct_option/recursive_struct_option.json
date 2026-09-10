@@ -1,5 +1,0 @@
-{
-  "title": "Recursive struct type via optional field",
-  "stage": "run",
-  "notes": "A struct can refer to itself through an optional field."
-}

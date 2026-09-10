@@ -1,5 +1,0 @@
-{
-  "title": "unsafe block returns Result.Err on thrown error",
-  "stage": "run",
-  "notes": "dsc#60: the bare `unsafe { }` Err payload is the thrown value's string representation, so the payload is echoed directly. `.message` access requires the annotated form `unsafe<T> { }` (Result<T, JsError>, deka#460)."
-}

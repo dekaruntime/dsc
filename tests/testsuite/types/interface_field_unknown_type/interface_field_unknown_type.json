@@ -1,6 +1,0 @@
-{
-  "title": "Unknown type name in interface field fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "unknown type `UnknownType`",
-  "notes": "Interface field types must refer to defined types."
-}

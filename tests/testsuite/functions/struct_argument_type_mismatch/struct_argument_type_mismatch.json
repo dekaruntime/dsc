@@ -1,6 +1,0 @@
-{
-  "title": "Passing a primitive where a struct is expected fails",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "expected argument type `Point`, found type `number`"
-}

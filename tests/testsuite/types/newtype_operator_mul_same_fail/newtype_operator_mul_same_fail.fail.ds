@@ -1,6 +1,0 @@
-import { echo } from "io"
-
-type Cents number
-const a = Cents(2)
-const b = Cents(3)
-const c = a * b

@@ -1,9 +1,0 @@
-import { echo } from "io"
-import { random_bytes } from "crypto"
-echo(string(match (random_bytes(16)) {
-  Ok(v) => match (unsafe<number> { v.byteLength }) {
-  Ok(n) => n,
-  Err(e) => 0,
-},
-  Err(e) => 0,
-}))

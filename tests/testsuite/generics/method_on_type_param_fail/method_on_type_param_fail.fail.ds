@@ -1,6 +1,0 @@
-// rfd#56 phase 1: an unbounded type parameter may only be assigned,
-// returned, stored in a field, or passed to another unbounded slot.
-// Calling a method is not on the list.
-fn bad<T>(x: T) {
-  return x.whatever()
-}

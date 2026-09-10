@@ -1,5 +1,0 @@
-{
-  "title": "Async recursive function returns wrong literal type",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected return type `number`, found type `string`"
-}

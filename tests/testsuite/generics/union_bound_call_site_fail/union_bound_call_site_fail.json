@@ -1,6 +1,0 @@
-{
-  "title": "An argument outside a union bound is rejected at the call site, naming the bound",
-  "stage": "typecheck",
-  "expectedDiagnosticContains": "does not satisfy the bound `Bundle | Product`",
-  "notes": "rfd#56 phase 2: T solves to Widget, which is not a member of Product | Bundle. The error names the failed bound. (Union display sorts members, hence the alphabetical order.)"
-}

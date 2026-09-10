@@ -1,9 +1,0 @@
-// deka#460: the error side of an `unsafe` block is `JsError`. Returning it
-// from the same match as the success value is a type error -- this is exactly
-// the shape `@deka/io`'s `echo` uses today, which only typechecked because
-// both arms were `Infer`.
-const r = unsafe<string> { String(1) }
-const out = match (r) {
-  Ok(v) => v,
-  Err(e) => e,
-}

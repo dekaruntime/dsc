@@ -1,5 +1,0 @@
-{
-  "title": "import-subdirectory-nested-001",
-  "stage": "parse",
-  "expectedDiagnosticContains": "Failed to read module '<entry>': operation not supported on this platform"
-}

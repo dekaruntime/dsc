@@ -1,5 +1,0 @@
-import { echo } from "io"
-import { jsx, jsxs } from "ui/jsx"
-import { renderToString } from "ui/server"
-const html = renderToString(jsxs("div", {children: [jsx("p", {children: "one"}), jsx("p", {children: "two"})]}))
-echo(html.html)

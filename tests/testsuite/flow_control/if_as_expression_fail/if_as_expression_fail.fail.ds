@@ -1,3 +1,0 @@
-import { echo } from "io"
-const x = if (true) { 1 } else { 2 }
-echo(x)

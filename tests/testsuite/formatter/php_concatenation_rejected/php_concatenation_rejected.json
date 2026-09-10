@@ -1,6 +1,0 @@
-{
-  "title": "Php Concatenation Rejected",
-  "stage": "parse",
-  "notes": "Formatter passthrough for invalid php concatenation rejected source.",
-  "expectedDiagnosticContains": "expected identifier, found `string`"
-}

@@ -1,4 +1,0 @@
-// deka#461: a JSX element is a `Component`, not `Infer`. Binding one to
-// `number` must be rejected -- it was accepted for as long as JSX was
-// universally assignable.
-const n: number = <p>hi</p>

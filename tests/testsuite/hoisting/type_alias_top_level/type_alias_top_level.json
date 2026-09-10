@@ -1,5 +1,0 @@
-{
-  "title": "A type alias can annotate a top-level binding",
-  "stage": "run",
-  "notes": "The alias half of the Go pattern: name a type once, then use it on a binding. This fixture was a .pass.ds whose metadata still expected the old rejection diagnostic, so it could never pass."
-}

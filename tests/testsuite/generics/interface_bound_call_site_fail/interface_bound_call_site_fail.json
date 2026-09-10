@@ -1,6 +1,0 @@
-{
-  "title": "An argument that does not satisfy an interface bound is rejected at the call site",
-  "stage": "typecheck",
-  "expectedDiagnosticContains": "type argument `Point` for type parameter `T` of function `greet` does not satisfy the bound `Named`",
-  "notes": "rfd#56 phase 2: the bound check runs after infer_type_args solves T, and the error names the bound that failed."
-}

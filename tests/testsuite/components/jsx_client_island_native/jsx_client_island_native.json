@@ -1,5 +1,0 @@
-{
-  "title": "client:load wraps SSR HTML in island comments with JSON props",
-  "stage": "run",
-  "hosts": ["native"]
-}

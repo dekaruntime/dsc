@@ -1,5 +1,0 @@
-{
-  "title": "Enum variant with equals value is rejected",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected `,` or newline between enum cases"
-}

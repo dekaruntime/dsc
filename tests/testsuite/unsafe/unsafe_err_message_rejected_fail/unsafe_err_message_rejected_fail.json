@@ -1,6 +1,0 @@
-{
-  "title": "bare unsafe Err payload is a string, not an object with .message",
-  "stage": "typecheck",
-  "expectedDiagnosticContains": "`string` has no field `message`",
-  "notes": "dsc#103: bare `unsafe { }` is Result<Infer, string>; the Err arm binds diagnostic text. Before this, `Infer` accepted the member access and the fixture would print `undefined` at runtime."
-}

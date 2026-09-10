@@ -1,3 +1,0 @@
-import { echo } from "io"
-const f = async () => 1
-echo(f())

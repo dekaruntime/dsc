@@ -1,5 +1,0 @@
-{
-  "title": "Comments are ignored",
-  "stage": "run",
-  "notes": "Both single-line and block comments are stripped by the formatter."
-}

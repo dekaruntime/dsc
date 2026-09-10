@@ -1,5 +1,0 @@
-{
-  "title": "Match on Option with a default wildcard arm",
-  "stage": "run",
-  "notes": "Option.Some and Option.None arms are recognized, and the wildcard arm is unreachable but accepted."
-}

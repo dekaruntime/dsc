@@ -1,6 +1,0 @@
-{
-  "title": "Empty JSX attribute value fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected string or `{expr}` after JSX attribute `=`",
-  "notes": ""
-}

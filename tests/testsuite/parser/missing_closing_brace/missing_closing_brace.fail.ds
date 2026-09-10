@@ -1,3 +1,0 @@
-import { echo } from "io"
-fn f() {
-  echo(1)

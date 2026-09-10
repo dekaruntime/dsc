@@ -1,6 +1,0 @@
-import { echo } from "io"
-
-type Cents number
-const a = Cents(1)
-const b = Cents(2)
-echo(string(unboxNumber(a + b)))

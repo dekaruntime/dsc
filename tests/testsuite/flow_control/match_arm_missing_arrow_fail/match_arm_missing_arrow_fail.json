@@ -1,6 +1,0 @@
-{
-  "title": "Match arm missing body fails",
-  "stage": "parse",
-  "notes": "Each match arm must have a body expression after `=>`.",
-  "expectedDiagnosticContains": "expected expression, found ``}``"
-}

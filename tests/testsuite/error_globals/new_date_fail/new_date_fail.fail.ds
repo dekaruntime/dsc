@@ -1,3 +1,0 @@
-import { echo } from "io"
-const d = new(Date("2024-01-15"))
-echo(d.getFullYear())

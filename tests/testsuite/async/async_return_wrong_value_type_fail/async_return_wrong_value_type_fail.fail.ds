@@ -1,5 +1,0 @@
-import { echo } from "io"
-async fn value() Promise<string> {
-  return 7
-}
-echo("ok")

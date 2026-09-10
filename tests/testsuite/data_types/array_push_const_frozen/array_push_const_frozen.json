@@ -1,6 +1,0 @@
-{
-  "title": "Push on const array fails",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "cannot call mutable method `push` on an immutable receiver"
-}

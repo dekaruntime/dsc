@@ -1,9 +1,0 @@
-import { echo } from "io"
-fn maybeReturn(x: boolean) number {
-  if (x) {
-    return 1
-  } else {
-    return 2
-  }
-}
-echo(string(maybeReturn(true)))

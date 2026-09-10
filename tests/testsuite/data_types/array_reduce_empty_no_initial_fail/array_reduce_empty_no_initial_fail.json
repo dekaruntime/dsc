@@ -1,5 +1,0 @@
-{
-  "title": "Array reduce on empty array without initial value fails",
-  "stage": "run",
-  "notes": ""
-}

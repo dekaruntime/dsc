@@ -1,5 +1,0 @@
-{
-  "title": "Type descriptors are interned singletons",
-  "stage": "run",
-  "notes": "deka#529: one frozen descriptor per (kind, name), so `==` on descriptors is identity."
-}

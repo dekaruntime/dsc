@@ -1,9 +1,0 @@
-{
-  "title": "crypto.uuid_v4 length",
-  "stage": "run",
-  "notes": "crypto was removed from the ambient globals (deka#378); @deka/crypto is the DekaScript replacement.",
-  "packages": [
-    "crypto",
-    "io"
-  ]
-}

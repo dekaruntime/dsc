@@ -1,5 +1,0 @@
-import { echo } from "io"
-
-echo(string(toNumber(7)))
-echo(string(toNumber(true)))
-echo(string(toNumber(false)))

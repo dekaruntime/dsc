@@ -1,5 +1,0 @@
-{
-  "title": "unwrap at module top level runs in source order",
-  "stage": "run",
-  "notes": "deka#445: statement ordering, not scoping."
-}

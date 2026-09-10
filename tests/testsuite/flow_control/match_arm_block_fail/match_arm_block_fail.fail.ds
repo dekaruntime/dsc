@@ -1,9 +1,0 @@
-import { echo } from "io"
-const x = 1
-const r = match (x) {
-  1 => {
-    echo("one")
-    "result"
-  },
-  _ => "other"
-}

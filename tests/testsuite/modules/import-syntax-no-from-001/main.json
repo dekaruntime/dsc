@@ -1,5 +1,0 @@
-{
-  "title": "import missing from clause is rejected",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected ``from``, found ``;``"
-}

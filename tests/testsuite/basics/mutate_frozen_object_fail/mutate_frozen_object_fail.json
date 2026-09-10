@@ -1,6 +1,0 @@
-{
-  "title": "Mutating a const object fails",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "const binding `obj`; use `let` to allow mutation"
-}

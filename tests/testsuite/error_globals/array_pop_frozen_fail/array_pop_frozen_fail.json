@@ -1,6 +1,0 @@
-{
-  "title": "Popping a const array fails",
-  "stage": "parse",
-  "notes": "The checker rejects mutation before emission.",
-  "expectedDiagnosticContains": "cannot call mutable method `pop` on an immutable receiver"
-}

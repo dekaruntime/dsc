@@ -1,7 +1,0 @@
-struct Point {
-  x: number;
-  y: number;
-}
-fn f() number {
-  return Point { x: 1, y: 2 }
-}

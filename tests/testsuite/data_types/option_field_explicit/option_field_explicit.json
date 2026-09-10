@@ -1,5 +1,0 @@
-{
-  "title": "`name?: T` and `name: T?` are one type",
-  "stage": "run",
-  "notes": "deka#416: one mechanism for absence, whichever way it is spelled."
-}

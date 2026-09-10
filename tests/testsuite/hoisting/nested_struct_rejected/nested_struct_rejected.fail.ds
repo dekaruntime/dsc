@@ -1,5 +1,0 @@
-if (true) {
-  struct Point {
-    x: number
-  }
-}

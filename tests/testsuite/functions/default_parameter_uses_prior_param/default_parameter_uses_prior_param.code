@@ -1,6 +1,0 @@
-import { echo } from "io"
-fn scale(x: number, factor: number = x) number {
-  return x * factor
-}
-echo(string(scale(3)))
-echo(string(scale(3, 4)))

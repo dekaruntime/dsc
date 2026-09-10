@@ -1,3 +1,0 @@
-import { echo } from "io"
-const double = (x: number): number => x * 2
-echo(double(4))

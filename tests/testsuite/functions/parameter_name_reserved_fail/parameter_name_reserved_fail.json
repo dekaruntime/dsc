@@ -1,6 +1,0 @@
-{
-  "title": "Using a reserved keyword as a parameter name fails",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "expected identifier, found ``fn``"
-}

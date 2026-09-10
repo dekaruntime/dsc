@@ -1,5 +1,0 @@
-{
-  "title": "try/catch statement is rejected",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected `;` or newline, found ``{``"
-}

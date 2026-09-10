@@ -1,7 +1,0 @@
-struct User {
-  name: string;
-}
-fn (u User) greet() string {
-  return "hi " + u.name
-}
-export { User }

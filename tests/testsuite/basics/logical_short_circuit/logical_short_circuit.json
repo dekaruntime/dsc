@@ -1,5 +1,0 @@
-{
-  "title": "Logical && short-circuits on false",
-  "stage": "run",
-  "notes": "If short-circuiting works, the inner echo is never called."
-}

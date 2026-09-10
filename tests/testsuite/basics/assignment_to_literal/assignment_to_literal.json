@@ -1,6 +1,0 @@
-{
-  "title": "Assignment to a literal value is rejected",
-  "stage": "parse",
-  "expectedDiagnosticContains": "assignment target must be a mutable local variable, field, or index",
-  "notes": ""
-}

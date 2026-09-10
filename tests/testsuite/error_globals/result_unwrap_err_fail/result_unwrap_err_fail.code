@@ -1,3 +1,0 @@
-import { echo } from "io"
-const r = Result.Err("bad")
-echo(r.unwrap())

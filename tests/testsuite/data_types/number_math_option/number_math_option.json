@@ -1,5 +1,0 @@
-{
-  "title": "Partial Math functions return None where JS returns NaN",
-  "stage": "run",
-  "notes": "deka#378 step 2, rfd#40 phase 2 + rfd#13: sqrt/log/asin/acos/pow/sin/cos/tan are typed Option<number> and the emitted wrapper answers None exactly where `Math.*` would produce NaN. Infinity is a legitimate number and stays Some — except for sin/cos/tan, where Math answers NaN for non-finite inputs, so (1.0/0.0).sin() is None."
-}

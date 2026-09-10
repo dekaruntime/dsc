@@ -1,4 +1,0 @@
-import { echo } from "io"
-const obj = {a: 1, b: 2}
-const copy = {...obj, c: 3}
-echo(string(copy.c))

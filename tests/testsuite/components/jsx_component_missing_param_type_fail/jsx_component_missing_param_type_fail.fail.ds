@@ -1,7 +1,0 @@
-import { echo } from "io"
-const ui = globalThis.deka.ui
-fn Box(props) object {
-  return ui.jsx("div", {})
-}
-const html = ui.renderToString(ui.jsx(Box, {}))
-echo(html.html)

@@ -1,6 +1,0 @@
-{
-  "title": "A narrowed member does not leak past the match: T has reverted, member access fails",
-  "stage": "typecheck",
-  "expectedDiagnosticContains": "cannot access field `price` on union type",
-  "notes": "rfd#56 phase 2: the arm-scope shadowing that narrows T pops with the arm. After the match, item: T again — and T is only matchable, not field-accessible, exactly like an ordinary union value. DekaScript has no flow-sensitive typing."
-}

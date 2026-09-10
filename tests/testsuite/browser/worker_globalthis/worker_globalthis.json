@@ -1,8 +1,0 @@
-{
-  "title": "Browser Worker exposes TextEncoder",
-  "stage": "run",
-  "notes": "Browser-host only. Native isolate also has these, but this fixture is the Worker column.",
-  "hosts": [
-    "browser"
-  ]
-}

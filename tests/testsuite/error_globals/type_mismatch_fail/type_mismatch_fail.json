@@ -1,6 +1,0 @@
-{
-  "title": "A binding initializer must match its declared type",
-  "stage": "parse",
-  "notes": "Now a real type error rather than a syntax error. The annotation parses, so the mismatch between `number` and \"not a number\" is what fails -- which is what this fixture was named for.",
-  "expectedDiagnosticContains": "expected type `number`, found type `string`"
-}

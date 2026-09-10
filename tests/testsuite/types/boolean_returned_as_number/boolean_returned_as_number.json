@@ -1,6 +1,0 @@
-{
-  "title": "Returning a number from a boolean-typed function fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected return type `boolean`, found type `number`",
-  "notes": "Boolean return types reject numeric return values."
-}

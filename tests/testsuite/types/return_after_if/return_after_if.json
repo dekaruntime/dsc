@@ -1,5 +1,0 @@
-{
-  "title": "An early return followed by a trailing return is accepted",
-  "stage": "run",
-  "notes": "The shape most likely to be mis-flagged by return analysis: one branch returns early, the fallthrough path returns after the if (deka#476)."
-}

@@ -1,5 +1,0 @@
-{
-  "title": "A type alias annotates a binding",
-  "stage": "run",
-  "notes": "Binding type annotations are supported as of deka #273. They were rejected because DekaScript const rode the PHP ClassConst node and let rode StaticVar, neither of which has a type position, so the parser demanded `=` after the name."
-}

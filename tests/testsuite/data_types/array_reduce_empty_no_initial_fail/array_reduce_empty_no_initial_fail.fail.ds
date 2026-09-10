@@ -1,4 +1,0 @@
-import { echo } from "io"
-const arr = []
-const sum = arr.reduce(fn(acc: number, x: number) number { return acc + x })
-echo(string(sum))

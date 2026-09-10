@@ -28,8 +28,11 @@ use std::path::{Path, PathBuf};
 fn corpus_files() -> Vec<PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests");
     let mut files = Vec::new();
-    collect(&root.join("testsuite"), "pass.ds", &mut files);
-    collect(&root.join("testsuite"), "pass.dsx", &mut files);
+    if let Some(testsuite) = std::env::var_os("DEKA_TESTSUITE_ROOT") {
+        let testsuite = PathBuf::from(testsuite);
+        collect(&testsuite, "pass.ds", &mut files);
+        collect(&testsuite, "pass.dsx", &mut files);
+    }
     collect(&root.join("tour"), "ds", &mut files);
     collect(&root.join("tour"), "dsx", &mut files);
     files.sort();
@@ -58,11 +61,11 @@ fn collect(dir: &Path, suffix: &str, out: &mut Vec<PathBuf>) {
 fn fmt_output_parses_and_is_idempotent_across_corpus() {
     let files = corpus_files();
     if files.is_empty() {
-        panic!("tests/testsuite and tests/tour are missing");
+        panic!("tests/tour is missing");
     }
     assert!(
-        files.len() > 100,
-        "corpus lookup is broken: only {} files found",
+        files.len() > 50,
+        "corpus lookup is broken: only {} files found (set DEKA_TESTSUITE_ROOT for Hats fixtures)",
         files.len()
     );
 

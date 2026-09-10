@@ -1,5 +1,0 @@
-{
-  "title": "Non-literal JSX interpolations snapshot through live()",
-  "stage": "run",
-  "hosts": ["native"]
-}

@@ -1,5 +1,0 @@
-{
-  "title": "Nested generic Option<Option<number>> parses and typechecks",
-  "stage": "run",
-  "notes": "The lexer emits >> as a single Shr token; the type parser splits it when closing nested generics (deka#465)."
-}

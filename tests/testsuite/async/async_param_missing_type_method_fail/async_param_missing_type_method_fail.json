@@ -1,5 +1,0 @@
-{
-  "title": "Async method parameter missing type annotation fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "parameter `x` is missing a type annotation"
-}

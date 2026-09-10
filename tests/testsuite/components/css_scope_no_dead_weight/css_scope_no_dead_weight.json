@@ -1,8 +1,0 @@
-{
-  "title": "Component without styles emits no scope attribute",
-  "stage": "run",
-  "notes": "RFD 24 §10.6: no component CSS means no data-deka-cid attribute — no dead weight in markup. data-deka-id must still be present (hydration correlation).",
-  "hosts": [
-    "native"
-  ]
-}

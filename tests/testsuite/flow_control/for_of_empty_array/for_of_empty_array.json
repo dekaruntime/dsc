@@ -1,5 +1,0 @@
-{
-  "title": "For-of over an empty array",
-  "stage": "run",
-  "notes": "An empty iterable produces no loop iterations."
-}

@@ -1,9 +1,0 @@
-import { echo } from "io"
-struct Point {
-  x: number;
-  y: number;
-}
-fn dist(p: Point) number {
-  return p.x + p.y
-}
-echo(dist(1))

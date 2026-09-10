@@ -1,4 +1,0 @@
-fn add(a: number, b: number) number {
-  return a + b
-}
-const f = add(_, _)

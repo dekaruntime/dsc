@@ -1,6 +1,0 @@
-{
-  "title": "A member call on an unbounded receiver type parameter is rejected",
-  "stage": "typecheck",
-  "expectedDiagnosticContains": "cannot call method `whatever` on a value of unbounded type parameter `T`",
-  "notes": "dsc#101: the receiver binds T (`fn (s Signal<T>)`), and the unbounded-parameter capability rule applies inside the body exactly as it does for `fn bad<T>(x: T)`."
-}

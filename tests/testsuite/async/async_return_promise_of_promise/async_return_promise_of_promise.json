@@ -1,5 +1,0 @@
-{
-  "title": "Async function returning Promise<Promise<T>> parses and runs",
-  "stage": "run",
-  "notes": "Used to fail parsing with \"expected `>`, found `>>`\" until the type parser learned to split the lexer's Shr token (deka#465). The body returns value(), a Promise<number>, which matches the inner type."
-}

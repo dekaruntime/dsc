@@ -1,6 +1,0 @@
-{
-  "title": "Async function expression is rejected",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "expected return type `number`, found type `Promise<number>`"
-}

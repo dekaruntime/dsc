@@ -1,5 +1,0 @@
-{
-  "title": "Assigning to an awaited expression fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "assignment target must be a mutable local variable, field, or index"
-}

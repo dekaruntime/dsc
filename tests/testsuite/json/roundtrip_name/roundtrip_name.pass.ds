@@ -1,8 +1,0 @@
-import { echo } from "io"
-struct User { name: string }
-const encoded = (User { name: "deka" }).toJSON()
-const name = match (encoded.parseJSON<User>()) {
-  Err(e) => "",
-  Ok(o) => o.name,
-}
-echo(name)

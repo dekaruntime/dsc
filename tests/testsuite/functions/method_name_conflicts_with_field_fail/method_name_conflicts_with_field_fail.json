@@ -1,5 +1,0 @@
-{
-  "title": "Method name colliding with a field fails at runtime",
-  "stage": "run",
-  "notes": ""
-}

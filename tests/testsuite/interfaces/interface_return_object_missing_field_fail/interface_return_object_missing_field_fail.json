@@ -1,6 +1,0 @@
-{
-  "title": "Returning an object missing a required interface field fails",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "expected return type `Named`, found type `{}`"
-}

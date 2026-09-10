@@ -1,5 +1,0 @@
-import { echo } from "io"
-import { from_string, to_string } from "bytes"
-
-const encoded = from_string("hello")
-echo(to_string(encoded))

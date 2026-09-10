@@ -1,5 +1,0 @@
-import { echo } from "io"
-async fn fetch() Promise<string> {
-  return 123
-}
-echo("ok")

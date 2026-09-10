@@ -1,6 +1,0 @@
-{
-  "title": "Returning a value from a void function fails",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "expected return type `void`, found type `number`"
-}

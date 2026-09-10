@@ -1,6 +1,0 @@
-{
-  "title": "A union is not assignable to one of its members",
-  "stage": "typecheck",
-  "expectedDiagnosticContains": "number | string`; narrow it with a match before use",
-  "notes": "deka#530, rfd#42. Widening (member to union) is safe; narrowing (union to member) requires a match."
-}

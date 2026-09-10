@@ -1,6 +1,0 @@
-{
-  "title": "Passing the wrong argument type to a receiver method on a generic type is a check-time error",
-  "stage": "typecheck",
-  "expectedDiagnosticContains": "expected argument type `number`, found type `string`",
-  "notes": "dsc#101: `fn (mut s Signal<T>) set(next: T)` substitutes T = number from the receiver value's type argument at the call site; the string literal fails the argument check."
-}

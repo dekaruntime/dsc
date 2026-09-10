@@ -1,5 +1,0 @@
-{
-  "title": "bytes.length returns the octet count",
-  "stage": "run",
-  "notes": "dsc#92: `.length` is the first member of the bytes catalog (RFD 15 `len`). Template interpolation `${v.length}` is the dsc#89 regression case."
-}

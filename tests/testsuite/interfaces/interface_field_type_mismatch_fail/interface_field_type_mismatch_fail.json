@@ -1,6 +1,0 @@
-{
-  "title": "Interface field type mismatch fails",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "expected argument type `Named`, found type `{name: number}`"
-}

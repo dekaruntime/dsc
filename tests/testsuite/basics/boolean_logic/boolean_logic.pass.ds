@@ -1,3 +1,0 @@
-import { echo } from "io"
-echo(string(true && false))
-echo(string(true || false))

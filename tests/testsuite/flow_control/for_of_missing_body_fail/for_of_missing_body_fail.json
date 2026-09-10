@@ -1,6 +1,0 @@
-{
-  "title": "For-of missing loop body fails",
-  "stage": "parse",
-  "notes": "A for-of statement must have a body block.",
-  "expectedDiagnosticContains": "expected ``{``, found `end of file`"
-}

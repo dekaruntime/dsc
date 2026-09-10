@@ -1,9 +1,0 @@
-import { echo } from "io"
-
-type Cents number
-fn (c Cents) add(other: Cents) Cents {
-  return Cents(unboxNumber(c) + unboxNumber(other))
-}
-const a = Cents(100)
-const b = Cents(200)
-echo(string(unboxNumber(a.add(b))))

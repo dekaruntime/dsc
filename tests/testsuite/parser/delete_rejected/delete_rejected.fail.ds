@@ -1,2 +1,0 @@
-const x = {a: 1}
-delete(x.a)

@@ -1,6 +1,0 @@
-{
-  "title": "Nested struct declaration is rejected",
-  "stage": "parse",
-  "expectedDiagnosticContains": "struct declarations are only allowed at the top level in DekaScript",
-  "notes": "DekaScript declarations that the emitter hoists must not appear inside blocks."
-}

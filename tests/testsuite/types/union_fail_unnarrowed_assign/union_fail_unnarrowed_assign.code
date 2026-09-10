@@ -1,4 +1,0 @@
-// deka#530, rfd#42: a union is assignable to an expected type only when
-// EVERY member is. `string | number` is not assignable to `string`.
-const v: string | number = 1
-const s: string = v

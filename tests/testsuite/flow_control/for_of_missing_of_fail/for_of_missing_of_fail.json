@@ -1,6 +1,0 @@
-{
-  "title": "For-of missing `of` keyword fails",
-  "stage": "parse",
-  "notes": "DekaScript for-of loops require the `of` keyword.",
-  "expectedDiagnosticContains": "expected ``=``, found ``[``"
-}

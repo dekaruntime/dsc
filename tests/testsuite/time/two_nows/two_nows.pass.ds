@@ -1,5 +1,0 @@
-import { echo } from "io"
-import { now } from "time"
-const a = now()
-const b = now()
-echo(string(b >= a))

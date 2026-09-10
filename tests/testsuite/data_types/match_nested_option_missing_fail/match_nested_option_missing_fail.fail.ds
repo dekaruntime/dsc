@@ -1,9 +1,0 @@
-fn read() Result<Option<number>, string> {
-  return Result.Ok(Option.Some(1))
-}
-fn value() number {
-  return match (read()) {
-    Err(e) => 0,
-    Ok(Some(v)) => v,
-  }
-}

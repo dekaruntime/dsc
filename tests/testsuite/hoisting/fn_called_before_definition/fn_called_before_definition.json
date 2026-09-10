@@ -1,5 +1,0 @@
-{
-  "title": "fn declarations are hoisted and callable before source position.",
-  "stage": "run",
-  "notes": ""
-}

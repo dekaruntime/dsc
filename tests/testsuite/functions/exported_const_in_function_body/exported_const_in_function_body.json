@@ -1,5 +1,0 @@
-{
-  "title": "Exported module-scope const is visible inside function bodies.",
-  "stage": "run",
-  "notes": "Regression for deka#600."
-}

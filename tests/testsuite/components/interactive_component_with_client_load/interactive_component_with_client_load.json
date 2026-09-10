@@ -1,5 +1,0 @@
-{
-  "title": "client:load preserves an interactive component island",
-  "stage": "run",
-  "hosts": ["native"]
-}

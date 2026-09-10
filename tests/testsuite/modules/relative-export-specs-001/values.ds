@@ -1,2 +1,0 @@
-const localValue = 42
-export { localValue }

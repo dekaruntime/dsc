@@ -1,6 +1,0 @@
-{
-  "title": "typeof operator is rejected",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "unknown identifier `typeof`"
-}

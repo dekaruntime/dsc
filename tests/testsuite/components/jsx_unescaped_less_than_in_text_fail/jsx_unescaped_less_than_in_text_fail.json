@@ -1,5 +1,0 @@
-{
-  "title": "Unescaped less-than in JSX text fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected identifier, found ``<``"
-}

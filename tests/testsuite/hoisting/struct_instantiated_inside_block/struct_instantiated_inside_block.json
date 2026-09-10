@@ -1,5 +1,0 @@
-{
-  "title": "Hoisted struct factory is usable inside a block.",
-  "stage": "run",
-  "notes": ""
-}

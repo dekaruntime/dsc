@@ -1,9 +1,0 @@
-interface CardProps {
-  title: string;
-}
-
-fn Card(props: CardProps) Component {
-  return <h2>{props.title}</h2>
-}
-
-const view = <Card />

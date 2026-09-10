@@ -1,5 +1,0 @@
-{
-  "title": "Formatter should not corrupt embedded struct syntax",
-  "stage": "run",
-  "notes": "Regression guard for the 'embed' keyword duplication bug."
-}

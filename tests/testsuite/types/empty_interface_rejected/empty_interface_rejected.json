@@ -1,6 +1,0 @@
-{
-  "title": "Empty interface declaration is rejected",
-  "stage": "parse",
-  "expectedDiagnosticContains": "interface `Empty` must declare at least one member",
-  "notes": "Empty interfaces are not allowed; the parser expects at least one member."
-}

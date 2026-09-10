@@ -1,9 +1,0 @@
-// `Option` has no failure payload, so the only arm would be `None`. A
-// one-armed match written to look thorough is the shape of slop even when it
-// is correct (deka#445).
-fn f(o: Option<string>) string {
-  let v = unwrap(o) or match {
-    None => "n",
-  }
-  return v
-}

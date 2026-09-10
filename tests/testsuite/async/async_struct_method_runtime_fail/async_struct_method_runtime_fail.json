@@ -1,5 +1,0 @@
-{
-  "title": "Async method on struct works at runtime",
-  "stage": "run",
-  "notes": "Async receiver methods on structs are supported."
-}

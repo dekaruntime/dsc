@@ -1,3 +1,0 @@
-import { echo } from "io"
-struct Empty {}
-echo((Empty {}).toJSON())

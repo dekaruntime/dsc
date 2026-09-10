@@ -1,6 +1,0 @@
-import { echo } from "io"
-import { jsxs } from "ui/jsx"
-import { renderToString } from "ui/server"
-const name = "Deka"
-const html = renderToString(jsxs("p", {children: ["Hello ", name]}))
-echo(html.html)

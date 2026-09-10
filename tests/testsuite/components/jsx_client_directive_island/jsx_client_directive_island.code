@@ -1,8 +1,0 @@
-import { echo } from "io"
-import { jsx } from "ui/jsx"
-import { renderToString } from "ui/server"
-fn Counter() Component {
-  return jsx("button", {children: "0"})
-}
-const html = renderToString(jsx(Counter, {"client:load": true}))
-echo(html.html)

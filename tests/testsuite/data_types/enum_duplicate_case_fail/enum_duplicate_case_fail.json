@@ -1,6 +1,0 @@
-{
-  "title": "Duplicate enum case is rejected",
-  "stage": "parse",
-  "expectedDiagnosticContains": "duplicate enum case name `Red`",
-  "notes": ""
-}

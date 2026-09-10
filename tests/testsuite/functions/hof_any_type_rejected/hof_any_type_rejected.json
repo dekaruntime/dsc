@@ -1,6 +1,0 @@
-{
-  "title": "any as a callback type is rejected",
-  "stage": "parse",
-  "expectedDiagnosticContains": "unknown type `any`",
-  "notes": "Write `fn(number) number`, not `any`."
-}

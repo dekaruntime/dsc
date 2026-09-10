@@ -1,3 +1,0 @@
-import { echo } from "io"
-import { PI } from "./constants.ds"
-echo(PI)

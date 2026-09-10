@@ -1,6 +1,0 @@
-{
-  "title": "unsafe error payload is JsError and does not unify with the success type",
-  "stage": "parse",
-  "expectedDiagnosticContains": "match arm has type `JsError`",
-  "notes": "deka#460."
-}

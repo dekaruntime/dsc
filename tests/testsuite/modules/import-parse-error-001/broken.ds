@@ -1,5 +1,0 @@
-export fn helper() string {
-  return "x"
-}
-
-const = 5

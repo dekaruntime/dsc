@@ -1,6 +1,0 @@
-{
-  "title": "Commas used between struct fields",
-  "stage": "parse",
-  "notes": "Struct fields must be separated by semicolons, not commas; using commas is a parse error.",
-  "expectedDiagnosticContains": "Missing semicolon"
-}

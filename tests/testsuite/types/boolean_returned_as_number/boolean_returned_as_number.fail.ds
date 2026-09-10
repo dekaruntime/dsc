@@ -1,5 +1,0 @@
-import { echo } from "io"
-fn flag() boolean {
-  return 1
-}
-echo(flag())

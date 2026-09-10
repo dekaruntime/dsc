@@ -1,6 +1,0 @@
-{
-  "title": "Invalid unary star operator",
-  "stage": "parse",
-  "notes": "`*` is not a unary operator; using it as one is a parse error.",
-  "expectedDiagnosticContains": "expected expression, found ``*``"
-}

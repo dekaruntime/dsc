@@ -1,3 +1,0 @@
-import { echo } from "io"
-struct S{x:number y:number}
-echo(1)

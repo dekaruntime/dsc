@@ -1,3 +1,0 @@
-import { echo } from "io"
-let [a, b] = [1, 2]
-echo(a)

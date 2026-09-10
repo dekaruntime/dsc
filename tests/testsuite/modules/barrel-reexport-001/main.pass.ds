@@ -1,3 +1,0 @@
-import { echo } from "io"
-import { validate } from "./index.ds"
-echo(validate("hi"))

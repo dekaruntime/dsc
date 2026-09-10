@@ -1,5 +1,0 @@
-{
-  "title": "Async method missing a receiver type fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected identifier, found ``)``"
-}

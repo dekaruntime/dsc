@@ -1,5 +1,0 @@
-{
-  "title": "three-module barrel re-export resolves through an intermediate module",
-  "stage": "run",
-  "notes": "deka#554. The entry imports validate from index.ds, which explicitly re-exports it from validate.ds; validate.ds also exercises the local import/export form used by the original repro."
-}

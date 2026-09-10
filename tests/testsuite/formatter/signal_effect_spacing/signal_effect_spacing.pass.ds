@@ -1,6 +1,0 @@
-import { echo } from "io"
-import { signal } from "ui/reactive"
-const signalPair = signal(0)
-const getCount = signalPair[0]
-const doubled = fn() number { return getCount() * 2 }
-echo(doubled())

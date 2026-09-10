@@ -1,4 +1,0 @@
-// deka#530, rfd#42: a union member must have a decidable runtime
-// predicate. Function types have none — the emitter could not test for
-// them at runtime — so they are rejected, naming the rule.
-const f: (fn(number) number) | string = "a"

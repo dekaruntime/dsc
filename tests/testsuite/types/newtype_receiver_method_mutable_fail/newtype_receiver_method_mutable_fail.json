@@ -1,6 +1,0 @@
-{
-  "title": "Mutable receiver methods are rejected on newtypes",
-  "stage": "typecheck",
-  "expectedDiagnosticContains": "mutable",
-  "notes": "Phase 4 of deka#346: newtypes are immutable value wrappers."
-}

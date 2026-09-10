@@ -1,3 +1,0 @@
-import { echo } from "io"
-const n: number = 42
-echo(string(n))

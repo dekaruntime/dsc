@@ -1,6 +1,0 @@
-{
-  "title": "Assigning to a frozen global field fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "cannot assign to field",
-  "notes": "Global objects like Math are frozen."
-}

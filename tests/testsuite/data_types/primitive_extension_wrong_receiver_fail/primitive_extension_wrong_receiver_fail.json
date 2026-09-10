@@ -1,6 +1,0 @@
-{
-  "title": "Calling a string extension on a number fails",
-  "stage": "typecheck",
-  "expectedDiagnosticContains": "method `slugify` is declared on `string`, not `number`",
-  "notes": "deka#527: the diagnostic names the receiver type."
-}

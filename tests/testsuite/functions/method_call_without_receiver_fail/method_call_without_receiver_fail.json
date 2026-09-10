@@ -1,5 +1,0 @@
-{
-  "title": "Calling a method without a receiver fails",
-  "stage": "parse",
-  "notes": ""
-}

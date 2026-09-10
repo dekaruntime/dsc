@@ -1,6 +1,0 @@
-{
-  "title": "Keyword JSX attribute names (type, for, class, any keyword)",
-  "stage": "run",
-  "hosts": ["native"],
-  "notes": "dsc#77: keywords are contextual in JSX attribute-name position, so the common form attributes type/for/class are writable and the for/id association survives into rendered HTML."
-}

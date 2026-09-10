@@ -1,6 +1,0 @@
-import { echo } from "io"
-const r = unsafe { JSON.parse('{"x":1}') }
-echo(match (r) {
-  Ok(v) => `ok: ${v.x}`,
-  Err(e) => `err: ${e}`,
-})

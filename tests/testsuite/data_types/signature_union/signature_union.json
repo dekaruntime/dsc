@@ -1,5 +1,0 @@
-{
-  "title": "signature reports declared type while getType reports runtime type",
-  "stage": "run",
-  "notes": "deka#529, rfd#41: the two descriptors intentionally disagree for a union value."
-}

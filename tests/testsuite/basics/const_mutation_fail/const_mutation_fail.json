@@ -1,5 +1,0 @@
-{
-  "title": "Mutating a const binding fails",
-  "stage": "parse",
-  "notes": ""
-}

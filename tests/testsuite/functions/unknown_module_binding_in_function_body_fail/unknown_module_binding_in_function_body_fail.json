@@ -1,6 +1,0 @@
-{
-  "title": "A binding that does not exist at module scope is still unknown inside function bodies.",
-  "stage": "parse",
-  "notes": "Negative control for deka#600: seeding must not over-hoist.",
-  "expectedDiagnosticContains": "unknown identifier `missing`"
-}

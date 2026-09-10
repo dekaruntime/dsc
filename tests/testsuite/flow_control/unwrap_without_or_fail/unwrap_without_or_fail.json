@@ -1,6 +1,0 @@
-{
-  "title": "unwrap without a block is rejected",
-  "stage": "parse",
-  "expectedDiagnosticContains": "absent case handled",
-  "notes": "deka#445: the lazy form does not compile, so it cannot be the shape that ships."
-}

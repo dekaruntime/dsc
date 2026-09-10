@@ -1,6 +1,0 @@
-{
-  "title": "Declaring a generic interface parses and validates, but instantiating one is still unsupported",
-  "stage": "typecheck",
-  "notes": "Deliberate status change for rfd#56 phase 1: declaring `interface Box<T>` used to be a parse-time ban (deka#561); the declaration itself is now accepted and its members validate against T. Instantiating a generic interface at a use site (`Box<number>`) remains a phase-2 item and fails with the honest unsupported-generic-type error.",
-  "expectedDiagnosticContains": "unsupported generic type `Box`"
-}

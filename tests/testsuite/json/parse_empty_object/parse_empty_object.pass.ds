@@ -1,7 +1,0 @@
-import { echo } from "io"
-struct Empty {}
-const text = Empty {}.toJSON()
-echo(match (text.parseJSON<Empty>()) {
-  Ok(v) => "ok",
-  Err(e) => "err",
-})

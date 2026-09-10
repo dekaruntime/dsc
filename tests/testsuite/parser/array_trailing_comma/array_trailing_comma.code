@@ -1,3 +1,0 @@
-import { echo } from "io"
-const a = [1, 2]
-echo(string(a.length))

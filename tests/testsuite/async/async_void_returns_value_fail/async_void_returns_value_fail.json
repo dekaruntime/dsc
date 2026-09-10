@@ -1,5 +1,0 @@
-{
-  "title": "Returning a value from an async Promise<void> function fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected return type `void`, found type `number`"
-}

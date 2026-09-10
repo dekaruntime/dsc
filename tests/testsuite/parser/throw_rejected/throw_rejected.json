@@ -1,5 +1,0 @@
-{
-  "title": "throw statement is rejected",
-  "stage": "parse",
-  "expectedDiagnosticContains": "unknown identifier `throw`"
-}

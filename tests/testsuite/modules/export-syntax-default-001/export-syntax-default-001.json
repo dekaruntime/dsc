@@ -1,5 +1,0 @@
-{
-  "title": "export-syntax-default-001",
-  "expectedDiagnosticContains": "Unsupported export syntax",
-  "stage": "parse"
-}

@@ -1,6 +1,0 @@
-{
-  "title": "Match without a covering arm fails",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "missing Color::Blue"
-}

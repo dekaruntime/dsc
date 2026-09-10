@@ -1,5 +1,0 @@
-{
-  "title": "For loop indentation",
-  "stage": "run",
-  "notes": "Formatter should canonicalize for loop indentation."
-}

@@ -1,6 +1,0 @@
-{
-  "title": "Pushing to a const array fails",
-  "stage": "parse",
-  "notes": "The checker rejects mutation before emission.",
-  "expectedDiagnosticContains": "cannot call mutable method `push` on an immutable receiver"
-}

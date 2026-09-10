@@ -1,5 +1,0 @@
-import { echo } from "io"
-const arr = [1, 2]
-arr.pop()
-const len: number = arr.length
-echo(string(len))

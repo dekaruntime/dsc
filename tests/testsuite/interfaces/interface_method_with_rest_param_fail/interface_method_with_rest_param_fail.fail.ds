@@ -1,3 +1,0 @@
-interface Logger {
-  fn log(...msgs: string[]) void
-}

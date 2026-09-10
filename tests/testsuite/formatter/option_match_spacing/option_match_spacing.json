@@ -1,5 +1,0 @@
-{
-  "title": "Option match spacing is normalized",
-  "stage": "run",
-  "notes": "Formatter should expand a single-line Option match into canonical multiline arms."
-}

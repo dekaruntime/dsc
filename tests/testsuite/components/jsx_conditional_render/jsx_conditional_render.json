@@ -1,7 +1,0 @@
-{
-  "title": "Component conditionally renders branches",
-  "stage": "run",
-  "hosts": [
-    "browser"
-  ]
-}

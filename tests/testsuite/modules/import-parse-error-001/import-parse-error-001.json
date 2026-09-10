@@ -1,6 +1,0 @@
-{
-  "title": "a module that fails to parse names itself and its cause, with no <infer> cascade",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected identifier",
-  "notes": "deka#567: broken.ds does not parse. The entry's match on helper() would previously cascade as three bare `<infer>` errors blaming the entry file, with the real cause last. Now the run fails with only the module's own path-prefixed parse diagnostic."
-}

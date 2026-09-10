@@ -1,5 +1,0 @@
-{
-  "title": "Promise<void> passed where a number is expected fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected argument type `number`, found type `Promise<void>`"
-}

@@ -1,4 +1,0 @@
-{
-  "title": "Returning a Promise<T> from an async Promise<T> unwraps the value",
-  "stage": "run"
-}

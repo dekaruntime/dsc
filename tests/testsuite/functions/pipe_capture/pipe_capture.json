@@ -1,5 +1,0 @@
-{
-  "title": "Pipe fills a function-capture hole that is not argument 0",
-  "stage": "run",
-  "notes": "RFD 30"
-}

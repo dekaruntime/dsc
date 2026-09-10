@@ -1,4 +1,0 @@
-struct Node {
-  Node;
-  value: number;
-}

@@ -1,6 +1,0 @@
-{
-  "title": "Calling a function with too few arguments fails",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "expected 2 arguments, found 1"
-}

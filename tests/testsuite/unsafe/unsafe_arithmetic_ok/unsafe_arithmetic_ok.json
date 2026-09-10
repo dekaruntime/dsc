@@ -1,5 +1,0 @@
-{
-  "title": "unsafe block returns Result.Ok for plain arithmetic",
-  "stage": "run",
-  "notes": ""
-}

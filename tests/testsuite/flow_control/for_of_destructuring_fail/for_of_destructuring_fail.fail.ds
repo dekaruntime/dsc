@@ -1,4 +1,0 @@
-import { echo } from "io"
-for (const x, y of [[1, 2]]) {
-  echo(x)
-}

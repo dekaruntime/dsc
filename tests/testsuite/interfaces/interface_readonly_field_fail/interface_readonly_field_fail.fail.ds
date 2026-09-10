@@ -1,8 +1,0 @@
-import { echo } from "io"
-interface Config {
-  readonly port: number
-}
-fn show(c: Config) {
-  echo(c.port)
-}
-show({ port: 8080 })

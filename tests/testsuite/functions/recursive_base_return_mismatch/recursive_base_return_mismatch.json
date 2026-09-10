@@ -1,6 +1,0 @@
-{
-  "title": "Recursive function with wrong base-case return type fails",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "expected return type `number`, found type `string`"
-}

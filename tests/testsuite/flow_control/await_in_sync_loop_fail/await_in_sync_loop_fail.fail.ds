@@ -1,7 +1,0 @@
-fn tick() {
-  for (let i = 0; i < 3; i = i + 1) {
-    await "x"
-    i = i + 1
-  }
-}
-tick()

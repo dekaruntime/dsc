@@ -1,6 +1,0 @@
-import { echo } from "io"
-
-// sqrt is Option<number>, not number — the declared type must not lie
-// about what comes back (deka#378 step 2, rfd#13).
-const bad: number = (4).sqrt()
-echo(string(bad))

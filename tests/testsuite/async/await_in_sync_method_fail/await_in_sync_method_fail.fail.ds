@@ -1,8 +1,0 @@
-import { echo } from "io"
-struct Box {
-  value: number;
-}
-fn (b Box) read() number {
-  return await b.value
-}
-echo(Box { value: 1 }.read())

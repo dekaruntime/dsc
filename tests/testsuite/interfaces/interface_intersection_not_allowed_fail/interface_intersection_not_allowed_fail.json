@@ -1,5 +1,0 @@
-{
-  "title": "Intersection type as interface combination fails",
-  "stage": "parse",
-  "expectedDiagnosticContains": "expected ``)``, found ``&``"
-}

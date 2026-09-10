@@ -1,5 +1,0 @@
-{
-  "title": "A JSX call site fills and wraps optional props",
-  "stage": "run",
-  "notes": "deka#416: omitted becomes Option.None, a bare value becomes Option.Some."
-}

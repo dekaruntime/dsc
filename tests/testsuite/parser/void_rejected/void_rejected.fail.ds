@@ -1,2 +1,0 @@
-import { echo } from "io"
-echo(void(0))

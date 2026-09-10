@@ -1,5 +1,0 @@
-// dsc#88: indexing a non-collection used to return Infer, silently
-// unchecked (dsc#90's Infer-as-vector shape).
-import { echo } from "io"
-const obj = { a: 1 }
-echo(string(obj[0]))

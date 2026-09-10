@@ -1,6 +1,0 @@
-{
-  "title": "Cannot add two values of a string newtype",
-  "stage": "typecheck",
-  "expectedDiagnosticContains": "cannot add",
-  "notes": "Phase 3 of deka#346: arithmetic is only supported on number newtypes."
-}

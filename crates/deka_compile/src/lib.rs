@@ -2538,11 +2538,10 @@ const arrow = unsafe { () => User { name: "Bob" } }
     /// opener) rather than just the pinned one-character cases.
     #[test]
     fn truncation_of_multiscript_sources_never_panics() {
-        let fixture = std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../tests/testsuite/components/jsx_multiscript_text/jsx_multiscript_text.pass.dsx"
-        ))
-        .expect("dsc#67 fixture should exist");
+        let fixture = "const el = <p>Café Yirgacheffe — 日本語 · العربية · ☕</p>\n\
+                       const result = unsafe { deka.ui.renderToString(el) }\n\
+                       match (result) { Ok(r) => r.html, Err(e) => e }\n"
+            .to_string();
         // A plain-code counterpart: multi-script identifiers, strings, and
         // comments outside JSX, so the truncation covers dsc#70's paths too.
         let plain = "const café = \"日本語 · العربية · የቡና ☕\u{FE0F} cafe\u{301}\"\n\

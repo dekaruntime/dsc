@@ -1,4 +1,0 @@
-import { echo } from "io"
-import { renderToString } from "ui/server"
-const html = renderToString(<button disabled={missing} />)
-echo(html.html)

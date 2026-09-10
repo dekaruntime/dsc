@@ -1,3 +1,0 @@
-import { echo } from "io"
-import "./logger.ds"
-echo("after import")

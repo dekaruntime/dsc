@@ -1,4 +1,0 @@
-{
-  "title": "export { name } re-exports a local binding",
-  "stage": "run"
-}

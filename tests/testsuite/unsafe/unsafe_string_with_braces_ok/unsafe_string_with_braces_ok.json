@@ -1,5 +1,0 @@
-{
-  "title": "unsafe raw scanner ignores braces inside string literals",
-  "stage": "run",
-  "notes": ""
-}

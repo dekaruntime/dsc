@@ -1,3 +1,0 @@
-import { echo } from "io"
-undefined = 1
-echo(undefined)

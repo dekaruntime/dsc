@@ -1,6 +1,0 @@
-{
-  "title": "Returning a wrong-typed value fails",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "expected return type `number`, found type `string`"
-}

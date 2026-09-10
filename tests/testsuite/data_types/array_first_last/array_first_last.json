@@ -1,5 +1,0 @@
-{
-  "title": "first()/last() return a real Option, including on frozen arrays",
-  "stage": "run",
-  "notes": "deka#561: the emitter rewrites first()/last() to an Option-producing expression, as it now does for pop()/shift() too (deka#566). Covers empty arrays, const frozen arrays, literal receivers, and match on the result."
-}

@@ -1,5 +1,0 @@
-{
-  "title": "Redeclaring a let binding as const fails at runtime",
-  "stage": "run",
-  "notes": ""
-}

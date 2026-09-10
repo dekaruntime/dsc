@@ -1,6 +1,0 @@
-{
-  "title": "Match on Result without Err is rejected",
-  "stage": "parse",
-  "expectedDiagnosticContains": "non-exhaustive match: missing Result::Err",
-  "notes": "deka#396: exhaustiveness was skipped for Option and Result, so this compiled and threw at runtime."
-}

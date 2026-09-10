@@ -1,4 +1,0 @@
-import { echo } from "io"
-const user = {name: "Deka", score: 100}
-echo(string(user.name))
-echo(string(user.score))

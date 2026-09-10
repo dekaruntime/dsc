@@ -1,6 +1,0 @@
-{
-  "title": "missing export fails",
-  "stage": "typecheck",
-  "expectedDiagnosticContains": "Missing export",
-  "notes": "Project-mode WASM currently surfaces this as a runtime error (dekaruntime/deka#198). This fixture encodes the desired compile-time diagnostic."
-}

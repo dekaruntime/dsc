@@ -1,5 +1,0 @@
-{
-  "title": "Blank Lines Collapsed",
-  "stage": "run",
-  "notes": "Formatter should canonicalize blank lines collapsed."
-}

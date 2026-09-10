@@ -1,6 +1,0 @@
-{
-  "title": "If statement missing condition fails",
-  "stage": "parse",
-  "notes": "An if statement requires a parenthesized condition.",
-  "expectedDiagnosticContains": "expected ``(``, found ``{``"
-}

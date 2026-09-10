@@ -1,5 +1,0 @@
-{
-  "title": "Calling a method on a receiver of the wrong type fails at runtime",
-  "stage": "parse",
-  "notes": ""
-}

@@ -1,6 +1,0 @@
-{
-  "title": "Match over a union missing a member arm fails",
-  "stage": "typecheck",
-  "expectedDiagnosticContains": "non-exhaustive match: missing number",
-  "notes": "deka#530, rfd#42. Exhaustiveness over a union requires one type-pattern per member or a catch-all."
-}

@@ -1,9 +1,0 @@
-import { echo } from "io"
-
-// Without an `env` grant the global is never installed, so the unsafe call
-// fails too. Removing the capability disables the escape hatch as well.
-let cwd = unsafe<string> { process.cwd() }
-match (cwd) {
-  Ok(v) => echo("reachable"),
-  Err(e) => echo("not-installed"),
-}

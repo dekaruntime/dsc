@@ -1,6 +1,0 @@
-{
-  "title": "Embedding the same struct twice fails",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "Duplicate embedded struct 'A'"
-}

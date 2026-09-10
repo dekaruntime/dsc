@@ -1,3 +1,0 @@
-import { echo } from "io"
-const match = 1
-echo(match)

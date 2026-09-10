@@ -1,6 +1,0 @@
-import { helper } from "./broken.ds"
-
-const r = match (helper()) {
-  Ok(v) => v,
-  Err(e) => "fallback",
-}

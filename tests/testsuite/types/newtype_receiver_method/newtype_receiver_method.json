@@ -1,5 +1,0 @@
-{
-  "title": "Newtype receiver method can be declared and called",
-  "stage": "run",
-  "notes": "Phase 4 of deka#346: receiver methods on newtype prototypes."
-}

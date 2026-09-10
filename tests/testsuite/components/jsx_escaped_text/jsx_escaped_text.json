@@ -1,8 +1,0 @@
-{
-  "title": "Text content is HTML-escaped",
-  "stage": "run",
-  "notes": "",
-  "hosts": [
-    "browser"
-  ]
-}

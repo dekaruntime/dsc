@@ -1,6 +1,0 @@
-// dsc#89 nested/escaped interpolation matrix: a template inside an
-// interpolation, an escaped `\${` that must render literally, a string
-// containing a brace, and a nested template with its own interpolation.
-import { echo } from "io"
-const name = "deka"
-echo(`${`inner ${name}`}|\${literal}|${"}"}|${`deep ${name}`}`)

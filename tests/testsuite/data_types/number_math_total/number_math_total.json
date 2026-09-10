@@ -1,5 +1,0 @@
-{
-  "title": "Total Math functions are plain methods on number",
-  "stage": "run",
-  "notes": "deka#378 step 2, rfd#40 phase 2: floor/ceil/round/abs/trunc/sign/cbrt/exp/max/min always produce a genuine number, so they return `number` and emit as plain `Math.*` calls."
-}

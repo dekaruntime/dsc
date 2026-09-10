@@ -1,3 +1,0 @@
-import { echo } from "io"
-struct X { x: number }
-echo((X { x: 1 }).toJSON())

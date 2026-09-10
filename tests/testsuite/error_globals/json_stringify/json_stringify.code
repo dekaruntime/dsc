@@ -1,7 +1,0 @@
-import { echo } from "io"
-const obj = {a: 1}
-const encoded = unsafe<string> { JSON.stringify(obj) }
-echo(match (encoded) {
-  Ok(v) => v,
-  Err(_) => "",
-})

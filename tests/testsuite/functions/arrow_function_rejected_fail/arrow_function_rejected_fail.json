@@ -1,6 +1,0 @@
-{
-  "title": "Arrow functions are rejected",
-  "stage": "parse",
-  "notes": "",
-  "expectedDiagnosticContains": "expected ``)``, found ``:``"
-}

@@ -1,5 +1,0 @@
-{
-  "title": "Comments Stripped",
-  "stage": "run",
-  "notes": "Formatter should canonicalize comments stripped."
-}

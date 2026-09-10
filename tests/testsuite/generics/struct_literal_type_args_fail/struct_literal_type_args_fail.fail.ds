@@ -1,9 +1,0 @@
-// dsc#101: explicit type arguments at a construction site are not part of
-// the design — `Signal { value: initial }` infers them from the field
-// values (rfd#56). The parser rejects the spelling directly instead of
-// misparsing `<`/`>` as comparison operators.
-struct Signal<T> { value: T }
-
-fn signal<T>(initial: T) Signal<T> {
-  return Signal<T> { value: initial }
-}

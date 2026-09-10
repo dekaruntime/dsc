@@ -1,5 +1,0 @@
-{
-  "title": "Reference to an undefined variable fails",
-  "stage": "parse",
-  "notes": ""
-}

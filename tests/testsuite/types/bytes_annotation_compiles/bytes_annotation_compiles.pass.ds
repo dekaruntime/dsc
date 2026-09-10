@@ -1,5 +1,0 @@
-import { echo } from "io"
-fn size(b: bytes) number {
-  return 0
-}
-echo("ok")

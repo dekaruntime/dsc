@@ -1,6 +1,0 @@
-{
-  "title": "A mixed array literal is a check-time error",
-  "stage": "typecheck",
-  "expectedDiagnosticContains": "mixed element types",
-  "notes": "dsc#88: [1, \"x\"] used to type as Array<number> from the first element, silently flowing the string to user code as a number. Deka arrays are homogeneous and unions are declared, not inferred (rfd#42), so the literal itself is rejected."
-}

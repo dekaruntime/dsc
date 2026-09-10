@@ -1,6 +1,0 @@
-import { echo } from "io"
-export const base = 10
-fn addBase(x: number) number {
-  return x + base
-}
-echo(string(addBase(5)))

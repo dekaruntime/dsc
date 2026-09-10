@@ -1,5 +1,0 @@
-{
-  "title": "Return from inside a for-of loop",
-  "stage": "run",
-  "notes": "A return statement inside a loop exits the enclosing function early."
-}

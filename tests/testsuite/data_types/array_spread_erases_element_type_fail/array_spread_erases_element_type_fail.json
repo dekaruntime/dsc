@@ -1,0 +1,6 @@
+{
+  "title": "Array spread preserves the known element type; mixing after a spread is an error",
+  "stage": "typecheck",
+  "expectedDiagnosticContains": "mixed element types",
+  "notes": "dsc#88: spread always returned Infer, so [...xs, 1] with xs: Array<string> compiled with the 1 unchecked. Spread now contributes the source's element type, making the literal mixed — and mixed literals are check-time errors."
+}

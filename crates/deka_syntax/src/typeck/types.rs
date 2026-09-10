@@ -80,6 +80,9 @@ impl<'a> Type<'a> {
         match self {
             Type::Array { elem } => elem.as_ref().clone(),
             Type::Named { name: "string" } => Type::Named { name: "string" },
+            // `bytes` is a Uint8Array view: integer indexing reads a byte
+            // (dsc#88 — previously this fell through to `Infer`).
+            Type::Named { name: "bytes" } => Type::Named { name: "number" },
             Type::Var => Type::Var,
             Type::Error => Type::Error,
             _ => Type::Infer,

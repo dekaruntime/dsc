@@ -1,5 +1,6 @@
 {
-  "title": "Bracket access with missing key returns undefined and fails on property access",
-  "stage": "run",
-  "notes": ""
+  "title": "Bracket access with a string key on an object is a check-time error",
+  "stage": "typecheck",
+  "expectedDiagnosticContains": "index must be a number",
+  "notes": "dsc#88: obj[\"b\"] used to type as Infer and only failed at runtime when undefined.length threw. Non-numeric indices are rejected at check time now, so this fails earlier — the runtime stage is no longer reachable."
 }

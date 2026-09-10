@@ -1,0 +1,6 @@
+{
+  "title": "A non-numeric index is a check-time error",
+  "stage": "typecheck",
+  "expectedDiagnosticContains": "index must be a number",
+  "notes": "dsc#88: items[\"nope\"] used to type as the element type while JS returns undefined. Bracket indexing compiles to raw JS indexing, so the index must be a number. (Out-of-range numeric indices returning Option<T> like first/last/pop is split from this lane — see dsc#88.)"
+}

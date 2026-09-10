@@ -453,15 +453,44 @@ impl<'a> Checker<'a> {
                 payload,
                 span,
             } => self.check_enum_constructor(enum_name, case_name, payload.as_deref(), *span),
-            ast::Expr::Array { elements, .. } => {
-                let mut elem_type = None;
+            ast::Expr::Array { elements, span } => {
+                let mut elem_type: Option<Type<'a>> = None;
                 for element in elements.iter() {
                     let ty = self.check_expr(element);
                     if ty.is_error() {
                         return Type::Error;
                     }
-                    if elem_type.is_none() {
-                        elem_type = Some(ty);
+                    match &elem_type {
+                        None => elem_type = Some(ty),
+                        Some(acc) => {
+                            if self.is_assignable(acc, &ty) {
+                                // `ty` fits the running element type
+                                // (covariance): `[1, 2]`, `[Some(1), None]`.
+                            } else if self.is_assignable(&ty, acc) {
+                                // `ty` is wider than the running element
+                                // type (`[None, Some(1)]`): adopt it.
+                                elem_type = Some(ty);
+                            } else {
+                                // dsc#88: the old rule silently typed
+                                // `[1, "x"]` as `Array<number>`, letting the
+                                // string reach user code as a `number`.
+                                // Deka arrays are homogeneous and the
+                                // language never infers unions from
+                                // expressions (unions are declared, rfd#42),
+                                // so a mixed literal is a check-time error.
+                                self.error_span(
+                                    *span,
+                                    format!(
+                                        "array literal has mixed element types \
+                                         `{acc}` and `{ty}` (Deka arrays are \
+                                         homogeneous; declare an \
+                                         `Array<{acc} | {ty}>` and push to \
+                                         build a union array)"
+                                    ),
+                                );
+                                return Type::Error;
+                            }
+                        }
                     }
                 }
                 Type::Array {
@@ -471,10 +500,31 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Object { fields, .. } => {
                 let mut field_types = Vec::new();
+                let mut seen_keys: Vec<&'a str> = Vec::new();
                 for field in fields.iter() {
                     let ty = self.check_expr(&field.value);
                     if ty.is_error() {
                         return Type::Error;
+                    }
+                    // An empty key is a spread entry (`{...rest}`), which
+                    // has no key to duplicate.
+                    if !field.key.is_empty() {
+                        if seen_keys.contains(&field.key) {
+                            // dsc#88: `{ a: 1, a: "x" }` compiled with the
+                            // FIRST write's type while JavaScript keeps the
+                            // LAST write — first-write typing, last-write
+                            // semantics. Reject instead of guessing.
+                            self.error_span(
+                                field.span,
+                                format!(
+                                    "duplicate key `{}` in object literal \
+                                     (later writes overwrite earlier ones)",
+                                    field.key
+                                ),
+                            );
+                            return Type::Error;
+                        }
+                        seen_keys.push(field.key);
                     }
                     field_types.push((field.key, ty));
                 }
@@ -488,7 +538,22 @@ impl<'a> Checker<'a> {
                 span,
             } => {
                 let object_type = self.check_expr(object);
-                self.check_expr(index);
+                let index_type = self.check_expr(index);
+                // dsc#88: `obj[idx]` compiles to raw JavaScript indexing,
+                // which answers a non-numeric index with `undefined` while
+                // the checker used to type the result as the element type.
+                // `Var`/`Infer`/`Error` stay permissive for the same reason
+                // `expect_number` tolerates them (deka#468).
+                if !matches!(
+                    index_type,
+                    Type::Named { name: "number" } | Type::Var | Type::Infer
+                ) && !index_type.is_error()
+                {
+                    self.error_span(
+                        index.span(),
+                        format!("index must be a number, found type `{index_type}`"),
+                    );
+                }
                 if let Type::Param { name } = &object_type {
                     match self.lookup_param_bound(name) {
                         // rfd#56 phase 2: an indexable bound (`<T:
@@ -517,11 +582,33 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-                object_type.collection_element()
+                match &object_type {
+                    // Indexable collections keep their element type
+                    // (`Infer`/`Var` stay opaque/unconstrained per deka#468).
+                    Type::Array { .. }
+                    | Type::Named { name: "string" }
+                    | Type::Named { name: "bytes" }
+                    | Type::Var
+                    | Type::Infer
+                    | Type::Error => object_type.collection_element(),
+                    // dsc#88: indexing a non-collection used to fall through
+                    // `collection_element` to `Infer`, silently unchecked.
+                    other => {
+                        self.error_span(
+                            *span,
+                            format!("cannot index into a value of type `{other}`"),
+                        );
+                        Type::Error
+                    }
+                }
             }
             ast::Expr::Spread { expr, .. } => {
-                self.check_expr(expr);
-                Type::Infer
+                // dsc#88: a spread contributes the source's *element* type
+                // to the enclosing array literal. The old rule returned
+                // `Infer` unconditionally, erasing the element type even
+                // when it was known (`[...xs, 1]` where `xs:
+                // Array<string>` typed the `1` as nothing at all).
+                self.check_expr(expr).collection_element()
             }
             ast::Expr::Await { expr, span } => {
                 if self.in_function && !self.in_async_function {

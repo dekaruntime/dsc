@@ -1,0 +1,5 @@
+// dsc#88: duplicate keys typed the field by the FIRST write while
+// JavaScript keeps the LAST write — first-write typing, last-write
+// semantics (silent wrong answer). Now rejected.
+const o = { a: 1, a: "x" }
+echo(string(o.a))

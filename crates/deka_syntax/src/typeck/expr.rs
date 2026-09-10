@@ -603,8 +603,12 @@ impl<'a> Checker<'a> {
                 }
             }
             ast::Expr::Spread { expr, .. } => {
-                self.check_expr(expr);
-                Type::Infer
+                // dsc#88: a spread contributes the source's *element* type
+                // to the enclosing array literal. The old rule returned
+                // `Infer` unconditionally, erasing the element type even
+                // when it was known (`[...xs, 1]` where `xs:
+                // Array<string>` typed the `1` as nothing at all).
+                self.check_expr(expr).collection_element()
             }
             ast::Expr::Await { expr, span } => {
                 if self.in_function && !self.in_async_function {

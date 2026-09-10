@@ -1329,10 +1329,7 @@ impl<'a> Checker<'a> {
                             "`{name}` is declared Option<{inner}> but the initializer is {value_type}"
                         ),
                     };
-                    self.error_at_expr(
-                        value,
-                        message,
-                    );
+                    self.error_at_expr(value, message);
                 }
             } else if !self.is_assignable(&expected, &value_type) {
                 self.error_at_expr(

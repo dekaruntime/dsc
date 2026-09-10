@@ -1,0 +1,6 @@
+{
+  "title": "Receiver methods on a generic type: fn (s Signal<T>) get() T binds T from the receiver",
+  "stage": "run",
+  "expectedStdoutNative": "0\n41\n42\nactive\n",
+  "notes": "dsc#101 (rfd#56): the type parameter is bound by the receiver, not declared on the method. `signal(42).get()` yields int, `signal(\"x\").get()` yields string; the emitted JS carries no trace of the type parameter."
+}

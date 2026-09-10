@@ -1,0 +1,32 @@
+import { echo } from "io"
+
+// dsc#101: the receiver binds the type parameter —
+// `fn (s Signal<T>) get() T`, not `fn (s Signal) get<T>() T`. T resolves
+// to whatever type argument the receiver was constructed with, so
+// `count.get()` yields number and `label.get()` yields string.
+struct Signal<T> { value: T }
+
+fn signal<T>(initial: T) Signal<T> {
+  return Signal { value: initial }
+}
+
+fn (s Signal<T>) get() T {
+  return s.value
+}
+
+fn (s mut Signal<T>) set(next: T) void {
+  s.value = next
+}
+
+// T = number at this call site.
+let count = signal(0)
+echo(string(count.get()))
+count.set(41)
+echo(string(count.get()))
+count.set(count.get() + 1)
+echo(string(count.get()))
+
+// The same struct at a different instantiation in one program: types erase,
+// so both shapes are plain __deka_struct values.
+let label = signal("active")
+echo(label.get())

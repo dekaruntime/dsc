@@ -1,0 +1,18 @@
+// dsc#101 / rfd#56 phase 2: the bound on a receiver parameter is a contract
+// at the call site. `Holder<T>` itself is unbounded so `Holder { value:
+// NoName }` constructs; calling the bounded receiver method on it fails,
+// naming the bound.
+interface Named {
+  name: string;
+}
+
+struct Holder<T> { value: T }
+
+fn (x Holder<T: Named>) name() string {
+  return x.value.name
+}
+
+struct NoName { age: number }
+
+let bad = Holder { value: NoName { age: 1 } }
+const n = bad.name()

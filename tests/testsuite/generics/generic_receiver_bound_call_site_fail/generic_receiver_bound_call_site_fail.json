@@ -1,0 +1,6 @@
+{
+  "title": "A receiver method call whose type argument violates the receiver's bound is rejected",
+  "stage": "typecheck",
+  "expectedDiagnosticContains": "type argument `NoName` for type parameter `T` of method `name` on `Holder` does not satisfy the bound `Named`",
+  "notes": "dsc#101: the receiver declares the bound (`fn (x Holder<T: Named>)`), construction does not enforce it, so the method call site checks the receiver value's type argument against the bound."
+}

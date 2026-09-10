@@ -428,6 +428,57 @@ fn transpile_file_is_unchanged() {
     );
 }
 
+#[test]
+fn generic_receiver_method_emits_identically_to_erased_form() {
+    // dsc#101 / rfd#56: types are erased — `Signal<T>` with receiver-bound
+    // methods emits exactly what the same program without type parameters
+    // emits. Pin the equality so the type parameter can never leak into
+    // output.
+    let temp = tempfile::tempdir().expect("tempdir");
+    let generic = temp.path().join("generic.ds");
+    write(
+        &generic,
+        "struct Signal<T> { value: T }\n\
+         fn (s Signal<T>) get() T { return s.value }\n\
+         fn (s mut Signal<T>) set(next: T) void { s.value = next }\n\
+         export const s = Signal { value: 1 }\n\
+         export const v = s.get()\n",
+    );
+    let erased = temp.path().join("erased.ds");
+    write(
+        &erased,
+        "struct Signal { value: number }\n\
+         fn (s Signal) get() number { return s.value }\n\
+         fn (s mut Signal) set(next: number) void { s.value = next }\n\
+         export const s = Signal { value: 1 }\n\
+         export const v = s.get()\n",
+    );
+
+    for source in [&generic, &erased] {
+        let output = Command::new(cli_bin())
+            .arg("transpile")
+            .arg(source)
+            .output()
+            .expect("transpile");
+        assert!(
+            output.status.success(),
+            "{}: {}",
+            source.display(),
+            combined(&output)
+        );
+    }
+    let generic_js = fs::read_to_string(generic.with_extension("js")).expect("generic emit");
+    let erased_js = fs::read_to_string(erased.with_extension("js")).expect("erased emit");
+    assert_eq!(
+        generic_js, erased_js,
+        "the type parameter must not change emission (rfd#56)"
+    );
+    assert!(
+        generic_js.contains("get"),
+        "receiver method missing from emit: {generic_js}"
+    );
+}
+
 /// Run a Node.js script in `dir`, returning combined output. Node is a CI
 /// prerequisite (the ui tests and testsuite already require it); the unsafe
 /// fixtures below execute emitted JavaScript rather than asserting on text.

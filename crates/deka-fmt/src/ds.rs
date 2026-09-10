@@ -309,6 +309,7 @@ impl<'src> Formatter<'src> {
             }
             Stmt::ReceiverMethod {
                 receiver_type,
+                receiver_type_args,
                 receiver_name,
                 receiver_mutable,
                 name,
@@ -325,6 +326,7 @@ impl<'src> Formatter<'src> {
                     receiver_name,
                     *receiver_mutable,
                     receiver_type,
+                    receiver_type_args,
                     type_params,
                     params,
                     return_type.as_ref(),
@@ -765,6 +767,7 @@ impl<'src> Formatter<'src> {
         receiver_name: &str,
         receiver_mutable: bool,
         receiver_type: &str,
+        receiver_type_args: &[TypeParam<'_>],
         type_params: &[TypeParam<'_>],
         params: &[Param<'_>],
         return_type: Option<&Type<'_>>,
@@ -779,6 +782,11 @@ impl<'src> Formatter<'src> {
         }
         self.write(" ");
         self.write(receiver_type);
+        if !receiver_type_args.is_empty() {
+            self.write("<");
+            self.fmt_type_param_list(receiver_type_args);
+            self.write(">");
+        }
         self.write(") ");
         self.write(name);
         if !type_params.is_empty() {

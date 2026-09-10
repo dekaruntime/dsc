@@ -3258,12 +3258,18 @@ impl<'a> Checker<'a> {
         let mut info = self.find_receiver_method(receiver_type, method_name, &mut embed_path)?;
 
         // A generic receiver (`Signal<number>`) binds the method's type
-        // parameters positionally: `fn (s Signal) set<T>(next: T)` checked
-        // at `count.set(...)` where `count: Signal<number>` substitutes
-        // `T = number` into the parameter and return types (rfd#56 phase 1).
+        // parameters. With the receiver-bound spelling
+        // (`fn (s Signal<T>) get()`, rfd#56 dsc#101) the parameters named in
+        // the receiver type bind from the receiver value's type arguments by
+        // name; the phase-1 spelling (`fn (s Signal) set<T>(next: T)`)
+        // binds the method's own parameters positionally, as before.
         if let Some(type_args) = receiver_args {
-            let subst: HashMap<&'a str, Type<'a>> = info
-                .type_params
+            let binding_params: &[ast::TypeParam<'a>] = if !info.receiver_type_args.is_empty() {
+                info.receiver_type_args
+            } else {
+                info.type_params
+            };
+            let subst: HashMap<&'a str, Type<'a>> = binding_params
                 .iter()
                 .map(|p| p.name)
                 .zip(type_args.iter().cloned())
@@ -3277,6 +3283,38 @@ impl<'a> Checker<'a> {
                 info.resolved_return = info
                     .resolved_return
                     .map(|r| substitute_type(&r, &subst));
+            }
+            // rfd#56 phase 2: a bound is a contract at the call site. A bound
+            // may be declared only on the receiver (`fn (x Holder<T: Named>)`
+            // on `struct Holder<T>`), and the struct declaration's own bounds
+            // are not enforced at construction, so the receiver value's type
+            // argument is verified here against the declared bound before the
+            // call is accepted.
+            for param in binding_params.iter() {
+                let Some(bound_ast) = &param.bound else {
+                    continue;
+                };
+                let Some(solution) = subst.get(param.name) else {
+                    continue;
+                };
+                if matches!(
+                    solution,
+                    Type::Var | Type::Infer | Type::Error | Type::Param { .. }
+                ) {
+                    continue;
+                }
+                let bound = self.resolve_bound(bound_ast);
+                if !self.is_assignable(&bound, solution) {
+                    self.error_span(
+                        span,
+                        format!(
+                            "type argument `{solution}` for type parameter `{param}` \
+                             of method `{method_name}` on `{receiver_type}` does not \
+                             satisfy the bound `{bound}` (rfd#56)",
+                            param = param.name
+                        ),
+                    );
+                }
             }
         }
 

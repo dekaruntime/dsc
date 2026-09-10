@@ -1,0 +1,9 @@
+// dsc#101 / rfd#56 phase 1: inside a receiver method, an unbounded `T`
+// permits no member calls — the capability rule is the same one that
+// applies to a function parameter, and no bound is declared here that
+// could permit one.
+struct Signal<T> { value: T }
+
+fn (s Signal<T>) bad() void {
+  s.value.whatever()
+}

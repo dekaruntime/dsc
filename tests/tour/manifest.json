@@ -147,6 +147,27 @@
     "expectCompile": true
   },
   {
+    "id": "match-struct-patterns",
+    "title": "match struct patterns",
+    "expectCompile": true
+  },
+  {
+    "id": "match-tuple-patterns",
+    "title": "match tuple patterns",
+    "expectCompile": true
+  },
+  {
+    "id": "match-nested-patterns",
+    "title": "match nested patterns",
+    "expectCompile": true
+  },
+  {
+    "id": "match-pattern-type-diagnostic",
+    "title": "match pattern type diagnostic",
+    "expectCompile": false,
+    "expectError": "struct pattern `Point` does not match scrutinee type `string`"
+  },
+  {
     "id": "structs",
     "title": "structs",
     "expectCompile": true

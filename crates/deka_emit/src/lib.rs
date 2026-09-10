@@ -267,6 +267,38 @@ mod tests {
     }
 
     #[test]
+    fn emit_struct_tuple_and_nested_pattern_conditions_and_bindings() {
+        let out = parse_check_and_emit(
+            "struct Point { x: number; y: number }\n\
+             enum Message { Move(Point), Stop }\n\
+             fn point_x(message: Message) number {\n\
+               return match (message) { Move(Point { x }) => x, Stop => 0 };\n\
+             }\n\
+             fn first(pair: Array<number>) number {\n\
+               return match (pair) { (first, second) => first, _ => 0 };\n\
+             }",
+        );
+        assert!(
+            out.contains("__deka_match_scrutinee_1.__case === \"Move\" && __deka_match_scrutinee_1.value?.__deka_struct === \"Point\""),
+            "nested enum/struct condition missing: {out}"
+        );
+        assert!(
+            out.contains("const x = __deka_match_scrutinee_1.value.x;"),
+            "nested field binding missing: {out}"
+        );
+        assert!(
+            out.contains("Array.isArray(__deka_match_scrutinee_2) && __deka_match_scrutinee_2.length === 2"),
+            "tuple array/arity condition missing: {out}"
+        );
+        assert!(
+            out.contains("const first = __deka_match_scrutinee_2[0];")
+                && out.contains("const second = __deka_match_scrutinee_2[1];"),
+            "tuple bindings missing: {out}"
+        );
+        assert!(!out.contains("=> false"), "false fallback remains: {out}");
+    }
+
+    #[test]
     fn emit_match_statement_without_iife() {
         let out = parse_and_emit(
             "const o = Some(5); match o { Some(n) => console.log(n), None => console.log(0) };",

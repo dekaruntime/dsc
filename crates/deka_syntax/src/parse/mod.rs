@@ -1877,6 +1877,8 @@ mod tests {
 
     #[test]
     fn parse_template_literal() {
+        // dsc#89: `${...}` must parse as a DekaScript expression part, not
+        // text. This assertion used to pin the bug ( `${x}` as text).
         let arena = Bump::new();
         let result = parse("const s = `hello ${x}`;", &arena);
         assert!(result.errors.is_empty(), "{:?}", result.errors);
@@ -1884,12 +1886,123 @@ mod tests {
         match &program.statements[0] {
             Stmt::Const { value, .. } => match value {
                 Expr::TemplateLiteral { parts, .. } => {
-                    assert_eq!(parts.len(), 1);
-                    assert!(matches!(parts[0], TemplatePart::Text(text) if text == "hello ${x}"));
+                    assert_eq!(parts.len(), 3);
+                    assert!(matches!(parts[0], TemplatePart::Text(text) if text == "hello "));
+                    assert!(
+                        matches!(parts[1], TemplatePart::Expr(Expr::Identifier { name, .. }) if *name == "x"),
+                        "interpolation must be an expression part, got {:?}",
+                        parts[1]
+                    );
+                    assert!(matches!(parts[2], TemplatePart::Text(text) if text.is_empty()));
                 }
                 _ => panic!("expected template literal, got {:?}", value),
             },
             _ => panic!("expected const declaration"),
+        }
+    }
+
+    #[test]
+    fn parse_template_literal_adjacent_and_multi() {
+        let arena = Bump::new();
+        let result = parse("const s = `${a} and ${b}!`;", &arena);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[0] {
+            Stmt::Const { value, .. } => match value {
+                Expr::TemplateLiteral { parts, .. } => {
+                    assert_eq!(parts.len(), 5);
+                    assert!(matches!(parts[0], TemplatePart::Text(text) if text.is_empty()));
+                    assert!(matches!(parts[1], TemplatePart::Expr(Expr::Identifier { name, .. }) if *name == "a"));
+                    assert!(matches!(parts[2], TemplatePart::Text(text) if text == " and "));
+                    assert!(matches!(parts[3], TemplatePart::Expr(Expr::Identifier { name, .. }) if *name == "b"));
+                    assert!(matches!(parts[4], TemplatePart::Text(text) if text == "!"));
+                }
+                _ => panic!("expected template literal, got {:?}", value),
+            },
+            _ => panic!("expected const declaration"),
+        }
+    }
+
+    #[test]
+    fn parse_template_literal_nested_and_escaped() {
+        // Nested template inside an interpolation, an escaped `\${` (literal
+        // text, no interpolation), a backtick string inside an interpolation,
+        // and a brace inside a string inside the interpolation (dsc#89
+        // done-when matrix).
+        let arena = Bump::new();
+        let result = parse(
+            r#"const s = `${`inner ${x}`} \${literal} ${`deep ${y}`} ${"}"}`;"#,
+            &arena,
+        );
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[0] {
+            Stmt::Const { value, .. } => match value {
+                Expr::TemplateLiteral { parts, .. } => {
+                    let exprs: Vec<&Expr> = parts
+                        .iter()
+                        .filter_map(|p| match p {
+                            TemplatePart::Expr(e) => Some(*e),
+                            TemplatePart::Text(_) => None,
+                        })
+                        .collect();
+                    assert_eq!(exprs.len(), 3, "parts: {:?}", parts);
+                    // First interpolation is the nested template.
+                    match exprs[0] {
+                        Expr::TemplateLiteral { parts, .. } => {
+                            assert!(matches!(parts[0], TemplatePart::Text(t) if t == "inner "));
+                            assert!(
+                                matches!(parts[1], TemplatePart::Expr(Expr::Identifier { name, .. }) if *name == "x")
+                            );
+                        }
+                        other => panic!("expected nested template, got {:?}", other),
+                    }
+                    // `\${literal}` stays text — the backslash-escaped dollar
+                    // must not open an interpolation.
+                    assert!(
+                        parts.iter().any(
+                            |p| matches!(p, TemplatePart::Text(t) if t.contains("\\${literal}"))
+                        ),
+                        "escaped dollar must stay literal text, parts: {:?}",
+                        parts
+                    );
+                    // Third interpolation: another nested template with its
+                    // own interpolation (a backtick string inside `${}`).
+                    match exprs[1] {
+                        Expr::TemplateLiteral { parts, .. } => {
+                            assert!(matches!(parts[0], TemplatePart::Text(t) if t == "deep "));
+                            assert!(
+                                matches!(parts[1], TemplatePart::Expr(Expr::Identifier { name, .. }) if *name == "y")
+                            );
+                        }
+                        other => panic!("expected nested template, got {:?}", other),
+                    }
+                    // Fourth interpolation: a string literal containing `}`.
+                    assert!(matches!(exprs[2], Expr::String { value, .. } if *value == "}"));
+                }
+                _ => panic!("expected template literal, got {:?}", value),
+            },
+            _ => panic!("expected const declaration"),
+        }
+    }
+
+    #[test]
+    fn parse_template_literal_braces_and_calls() {
+        let arena = Bump::new();
+        let result = parse("const s = `sum: ${add(1, 2) { }`;", &arena);
+        assert!(!result.errors.is_empty(), "unbalanced brace must fail");
+    }
+
+    #[test]
+    fn parse_template_literal_unterminated_interpolation() {
+        for source in ["const s = `hello ${x`;", "const s = `hello ${x"] {
+            let arena = Bump::new();
+            let result = parse(source, &arena);
+            assert!(
+                !result.errors.is_empty(),
+                "expected diagnostics for {:?}",
+                source
+            );
         }
     }
 

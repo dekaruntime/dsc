@@ -2118,6 +2118,25 @@ mod tests {
     }
 
     #[test]
+    fn template_interpolation_is_checked() {
+        // dsc#89: a name that does not exist must be a check-time error with
+        // a span pointing at the interpolation, not a runtime surprise from
+        // emitted JavaScript.
+        let errors = typeck("const s = `hello ${undefinedName}`;");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("undefinedName"),
+            "{}",
+            errors[0].message
+        );
+        assert_eq!((errors[0].line, errors[0].column), (1, 20));
+
+        // Type errors inside the interpolation are caught like anywhere else.
+        let errors = typeck("const s = `${\"a\" - 1}`;");
+        assert!(!errors.is_empty(), "expected a type error");
+    }
+
+    #[test]
     fn array_map_solves_callback_return_type() {
         // deka#467: `map` is (T -> U) -> Array<U>; U solves from the
         // callback's return type, so downstream uses see the real element.

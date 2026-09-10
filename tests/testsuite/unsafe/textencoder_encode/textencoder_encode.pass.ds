@@ -1,6 +1,13 @@
 import { echo } from "io"
 const r = unsafe<bytes> { new TextEncoder().encode("hi") }
+// dsc#89: `${...}` is checked DekaScript now, and `bytes` has no `.length`
+// member in the type system (see the dsc#90 family). The length comes from
+// its own annotated unsafe block; the byte view still flows through `r`.
+const len = match (unsafe<number> { new TextEncoder().encode("hi").length }) {
+  Ok(v) => v,
+  Err(e) => 0,
+}
 echo(match (r) {
-  Ok(v) => `${v.length}:${v[0]}:${v[1]}`,
+  Ok(v) => `${len}:${v[0]}:${v[1]}`,
   Err(e) => `err: ${e.message}`,
 })

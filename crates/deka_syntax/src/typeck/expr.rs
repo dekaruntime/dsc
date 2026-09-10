@@ -681,7 +681,17 @@ impl<'a> Checker<'a> {
                     Type::Error
                 }
             }
-            ast::Expr::TemplateLiteral { .. } => Type::Named { name: "string" },
+            ast::Expr::TemplateLiteral { parts, .. } => {
+                // Interpolations are ordinary expressions: check them so an
+                // unknown name or a type error inside `${...}` is a
+                // compile-time failure, not runtime JavaScript (dsc#89).
+                for part in parts.iter() {
+                    if let ast::TemplatePart::Expr(expr) = part {
+                        self.check_expr(expr);
+                    }
+                }
+                Type::Named { name: "string" }
+            }
             ast::Expr::Function {
                 params,
                 return_type,

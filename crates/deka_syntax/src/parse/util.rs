@@ -124,6 +124,8 @@ pub(super) fn token_name(kind: TokenKind) -> &'static str {
         FatArrow => "`=>`",
         Question => "`?`",
         Spread => "`...`",
+        TemplateExprStart => "`${`",
+        TemplateExprEnd => "`}`",
         LtJsx => "`<`",
         GtJsx => "`>`",
         SlashJsx => "`/`",

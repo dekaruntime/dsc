@@ -500,10 +500,31 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Object { fields, .. } => {
                 let mut field_types = Vec::new();
+                let mut seen_keys: Vec<&'a str> = Vec::new();
                 for field in fields.iter() {
                     let ty = self.check_expr(&field.value);
                     if ty.is_error() {
                         return Type::Error;
+                    }
+                    // An empty key is a spread entry (`{...rest}`), which
+                    // has no key to duplicate.
+                    if !field.key.is_empty() {
+                        if seen_keys.contains(&field.key) {
+                            // dsc#88: `{ a: 1, a: "x" }` compiled with the
+                            // FIRST write's type while JavaScript keeps the
+                            // LAST write — first-write typing, last-write
+                            // semantics. Reject instead of guessing.
+                            self.error_span(
+                                field.span,
+                                format!(
+                                    "duplicate key `{}` in object literal \
+                                     (later writes overwrite earlier ones)",
+                                    field.key
+                                ),
+                            );
+                            return Type::Error;
+                        }
+                        seen_keys.push(field.key);
                     }
                     field_types.push((field.key, ty));
                 }

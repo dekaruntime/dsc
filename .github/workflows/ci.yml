@@ -72,6 +72,9 @@ jobs:
     env:
       SCCACHE_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
       SCCACHE_REGION: auto
+      # This workflow runs on ubuntu-latest. Export the bucket before the
+      # action installs sccache so every Rust step sees a complete R2 config.
+      SCCACHE_BUCKET: dsc-sccache-linux-x64
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_SCCACHE_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SCCACHE_SECRET_ACCESS_KEY }}
     steps:
@@ -116,7 +119,6 @@ jobs:
             echo "::warning::sccache is unavailable; building without a compiler cache."
             exit 0
           fi
-          echo "SCCACHE_BUCKET=dsc-sccache-linux-x64" >> "$GITHUB_ENV"
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
           echo "sccache enabled for dsc-sccache-linux-x64"
 

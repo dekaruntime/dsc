@@ -27,12 +27,11 @@ use std::path::{Path, PathBuf};
 /// `cli fmt <dir>` silently skip .dsx).
 fn corpus_files() -> Vec<PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests");
+    let testsuite =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.cache/testsuite-corpus");
     let mut files = Vec::new();
-    if let Some(testsuite) = std::env::var_os("DEKA_TESTSUITE_ROOT") {
-        let testsuite = PathBuf::from(testsuite);
-        collect(&testsuite, "pass.ds", &mut files);
-        collect(&testsuite, "pass.dsx", &mut files);
-    }
+    collect(&testsuite, "pass.ds", &mut files);
+    collect(&testsuite, "pass.dsx", &mut files);
     collect(&root.join("tour"), "ds", &mut files);
     collect(&root.join("tour"), "dsx", &mut files);
     files.sort();
@@ -65,7 +64,7 @@ fn fmt_output_parses_and_is_idempotent_across_corpus() {
     }
     assert!(
         files.len() > 50,
-        "corpus lookup is broken: only {} files found (set DEKA_TESTSUITE_ROOT for Hats fixtures)",
+        "corpus lookup is broken: only {} files found",
         files.len()
     );
 

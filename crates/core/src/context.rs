@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::args::{ParseError, parse_env};
@@ -13,7 +12,6 @@ pub struct Context {
 
 #[derive(Debug, Clone)]
 pub struct EnvContext {
-    pub vars: HashMap<String, String>,
     pub cwd: PathBuf,
 }
 
@@ -24,9 +22,8 @@ pub enum ContextError {
 
 impl EnvContext {
     pub fn load() -> Self {
-        let vars = std::env::vars().collect::<HashMap<_, _>>();
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        Self { vars, cwd }
+        Self { cwd }
     }
 }
 

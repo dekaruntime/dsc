@@ -38,6 +38,75 @@ fn file_writes_adjacent_js() {
 }
 
 #[test]
+fn transpile_output_ignores_ambient_environment() {
+    // dsc#124: an artifact is determined by source plus deka.json, never by
+    // ambient process configuration. Keep the two child environments
+    // deliberately incompatible so a newly introduced environment override
+    // cannot silently evade this regression test.
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("project");
+    let source = project.join("app/main.ds");
+    write(&project.join("deka.json"), "{\"name\": \"env-proof\"}\n");
+    write(&source, "export const answer = 42\n");
+
+    let first = project.join("first.js");
+    let first_run = Command::new(cli_bin())
+        .current_dir(&project)
+        .env_clear()
+        .env("DEKA_MODULE_ROOT", "/not-the-project")
+        .env("DEKA_MINIFY", "true")
+        .env("DEKA_SOURCEMAP", "true")
+        .env("DEKA_EXTERNAL_NODE_MODULES", "react,lodash")
+        .env("DEKA_BUNDLER_CACHE", "false")
+        .env("HOME", "/first-home")
+        .env("USERPROFILE", "C:\\first-home")
+        .env("NO_COLOR", "1")
+        .env("DEKA_NO_COLOR", "1")
+        .env("TERM", "dumb")
+        .env("LOG_LEVEL", "debug")
+        .args(["transpile", "app/main.ds", "--out"])
+        .arg(&first)
+        .output()
+        .expect("transpile in first environment");
+    assert!(
+        first_run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first_run.stderr)
+    );
+
+    let second = project.join("second.js");
+    let second_run = Command::new(cli_bin())
+        .current_dir(&project)
+        .env_clear()
+        .env("DEKA_MODULE_ROOT", "/a-different-project")
+        .env("DEKA_MINIFY", "false")
+        .env("DEKA_SOURCEMAP", "false")
+        .env("DEKA_EXTERNAL_NODE_MODULES", "")
+        .env("DEKA_BUNDLER_CACHE", "true")
+        .env("HOME", "/second-home")
+        .env("USERPROFILE", "C:\\second-home")
+        .env("NO_COLOR", "")
+        .env("DEKA_NO_COLOR", "")
+        .env("TERM", "xterm-256color")
+        .env("LOG_LEVEL", "error")
+        .args(["transpile", "app/main.ds", "--out"])
+        .arg(&second)
+        .output()
+        .expect("transpile in second environment");
+    assert!(
+        second_run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&second_run.stderr)
+    );
+
+    assert_eq!(
+        fs::read(&first).expect("first output"),
+        fs::read(&second).expect("second output"),
+        "identical source and deka.json must produce identical artifacts"
+    );
+}
+
+#[test]
 fn bytes_length_transpiles_verbatim() {
     // dsc#92: `bytes` is a Uint8Array at runtime, so `bytes.length` is a
     // plain property read -- emission must be the transparent field access

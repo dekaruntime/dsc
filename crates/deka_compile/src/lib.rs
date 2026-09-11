@@ -387,9 +387,8 @@ pub struct CompileOptions {
     pub module_base: Option<String>,
     /// Explicit project root used for module resolution. When set, bare
     /// stdlib imports are resolved against `<module_root>/ds_modules` before
-    /// falling back to the current working directory. This removes the need
-    /// for the process-global `DEKA_MODULE_ROOT` environment variable in the
-    /// v2 compiler path. Build slot ids are also hashed against this root so
+    /// falling back to the current working directory. Build slot ids are also
+    /// hashed against this root so
     /// `deka:dev/<id>` is stable across machine and checkout locations; when
     /// absent the historical absolute-path identity is kept (dsc#61).
     pub module_root: Option<PathBuf>,

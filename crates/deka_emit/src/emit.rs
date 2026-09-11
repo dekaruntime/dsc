@@ -1262,10 +1262,18 @@ struct Emitter<'a> {
     program: &'a Program<'a>,
     out: String,
     uses_struct: bool,
+    /// A promoted literal constructs a private embed through the exported
+    /// root factory, so the shared struct helper must expose its internal
+    /// factory lookup (dsc#86).
+    uses_promotion_factory: bool,
     uses_newtype: bool,
     uses_prelude_enums: bool,
     struct_order: Vec<String>,
     structs: HashMap<String, StructMeta>,
+    /// Private transitive embed metadata for imported structs. Kept outside
+    /// `structs` so it can guide promoted-literal emission without making an
+    /// embedded declaration a normal, user-addressable factory (dsc#86).
+    promotion_structs: HashMap<String, HashMap<String, StructMeta>>,
     enums: HashMap<String, EnumMeta>,
     newtypes: HashMap<String, NewtypeRepr>,
     receiver_methods: HashMap<String, Vec<ReceiverMethod<'a>>>,
@@ -1362,10 +1370,12 @@ impl<'a> Emitter<'a> {
             program,
             out: String::new(),
             uses_struct: false,
+            uses_promotion_factory: false,
             uses_newtype: false,
             uses_prelude_enums: false,
             struct_order: Vec::new(),
             structs: HashMap::new(),
+            promotion_structs: HashMap::new(),
             enums: HashMap::new(),
             newtypes: HashMap::new(),
             receiver_methods: HashMap::new(),
@@ -2076,6 +2086,7 @@ impl<'a> Emitter<'a> {
         // name, and source literals spell the local name, so aliased factories
         // must be seeded under the alias as well (dsc#51).
         let mut renamed: Vec<(&'a str, &'a str, &deka_syntax::ModuleExports<'a>)> = Vec::new();
+        let mut promotion_closures: Vec<(&'a str, &'a str, &deka_syntax::ModuleExports<'a>)> = Vec::new();
         for stmt in self.program.statements.iter() {
             let Stmt::Import {
                 specifiers, source, ..
@@ -2087,6 +2098,7 @@ impl<'a> Emitter<'a> {
                 continue;
             };
             for spec in specifiers.iter() {
+                promotion_closures.push((spec.local, spec.imported, *exports));
                 if spec.imported != spec.local {
                     renamed.push((spec.local, spec.imported, *exports));
                 }
@@ -2126,10 +2138,25 @@ impl<'a> Emitter<'a> {
                 }
             }
         }
+        for (local, imported, exports) in promotion_closures {
+            let Some(closure) = exports.promotion_structs.get(imported) else {
+                continue;
+            };
+            let mut metas = HashMap::new();
+            for (name, info) in closure {
+                metas.insert((*name).to_string(), self.struct_meta(name, info));
+            }
+            self.promotion_structs.insert(local.to_string(), metas);
+        }
         self.compute_empty_embeds();
     }
 
     fn seed_struct_export(&mut self, name: &str, brand: &str, info: &deka_syntax::StructInfo<'a>) {
+        let meta = self.struct_meta(brand, info);
+        self.structs.insert(name.to_string(), meta);
+    }
+
+    fn struct_meta(&mut self, brand: &str, info: &deka_syntax::StructInfo<'a>) -> StructMeta {
         let mut meta = StructMeta::default();
         meta.brand = brand.to_string();
         for field in info.fields.iter() {
@@ -2146,7 +2173,7 @@ impl<'a> Emitter<'a> {
         for embed in info.embeds.iter() {
             meta.embeds.push(embed.name.to_string());
         }
-        self.structs.insert(name.to_string(), meta);
+        meta
     }
 
     fn seed_enum_export(&mut self, name: &str, info: &deka_syntax::EnumInfo<'a>) {
@@ -2322,6 +2349,7 @@ impl<'a> Emitter<'a> {
                     }
                 }
             }
+            parts.embeds |= self.uses_promotion_factory;
             demand.structs = Some(parts);
         }
         demand.newtype = self.uses_newtype;
@@ -3890,13 +3918,25 @@ impl<'a> Emitter<'a> {
                 .map(|(path, name, value)| (path[1..].to_vec(), name.clone(), value.clone()))
                 .collect();
             if group.is_empty() {
-                if meta.empty_embeds.contains(embed) {
-                    entries.push(format!("{}: {}({{}})", embed, embed));
+                if meta.empty_embeds.contains(embed)
+                    || self.is_empty_embed_struct_for_promotion(name, embed)
+                {
+                    if self.promotion_structs.contains_key(name) {
+                        self.uses_promotion_factory = true;
+                    }
+                    let path = vec![embed.clone()];
+                    let factory = self.embed_factory_expr(name, &path);
+                    entries.push(format!("{}: {}({{}})", embed, factory));
                 }
                 continue;
             }
-            let body = self.emit_promoted_embed_body(embed, &group)?;
-            entries.push(format!("{}: {}({{ {} }})", embed, embed, body));
+            let path = vec![embed.clone()];
+            let body = self.emit_promoted_embed_body(name, embed, &path, &group)?;
+            if self.promotion_structs.contains_key(name) {
+                self.uses_promotion_factory = true;
+            }
+            let factory = self.embed_factory_expr(name, &path);
+            entries.push(format!("{}: {}({{ {} }})", embed, factory, body));
         }
 
         // Auto-fill omitted optional fields.
@@ -3929,18 +3969,27 @@ impl<'a> Emitter<'a> {
         field: &str,
         path: &mut Vec<String>,
     ) -> bool {
-        let meta = match self.structs.get(struct_name) {
+        self.find_promoted_field_path_from(struct_name, struct_name, field, path)
+    }
+
+    fn find_promoted_field_path_from(
+        &self,
+        root: &str,
+        struct_name: &str,
+        field: &str,
+        path: &mut Vec<String>,
+    ) -> bool {
+        let meta = match self.struct_meta_for_promotion(root, struct_name) {
             Some(m) => m,
             None => return false,
         };
         for embed in &meta.embeds {
             path.push(embed.clone());
             let declares = self
-                .structs
-                .get(embed)
+                .struct_meta_for_promotion(root, embed)
                 .map(|m| m.fields.contains(field))
                 .unwrap_or(false);
-            if declares || self.find_promoted_field_path(embed, field, path) {
+            if declares || self.find_promoted_field_path_from(root, embed, field, path) {
                 return true;
             }
             path.pop();
@@ -3948,17 +3997,45 @@ impl<'a> Emitter<'a> {
         false
     }
 
+    fn struct_meta_for_promotion(&self, root: &str, name: &str) -> Option<&StructMeta> {
+        self.promotion_structs
+            .get(root)
+            .and_then(|closure| closure.get(name))
+            .or_else(|| self.structs.get(name))
+    }
+
+    fn is_empty_embed_struct_for_promotion(&self, root: &str, name: &str) -> bool {
+        let Some(meta) = self.struct_meta_for_promotion(root, name) else {
+            return false;
+        };
+        meta.fields.is_empty()
+            && meta.embeds.iter().all(|embed| self.is_empty_embed_struct_for_promotion(root, embed))
+    }
+
+    /// The factory for a private embed remains encapsulated by the exported
+    /// root factory. The generated helper reaches it without importing or
+    /// naming the private struct in the consumer module (dsc#86).
+    fn embed_factory_expr(&self, root: &str, path: &[String]) -> String {
+        if self.promotion_structs.contains_key(root) {
+            let path = path.iter().map(|name| json_string(name)).collect::<Vec<_>>().join(", ");
+            format!("__deka_embed_factory({}, [{}])", root, path)
+        } else {
+            path.last().cloned().unwrap_or_else(|| root.to_string())
+        }
+    }
+
     /// Emit the object-literal body for an embedded struct assembled from
     /// promoted fields. Each entry carries the remaining embed path below
     /// this struct, the field name, and the already-emitted value.
     fn emit_promoted_embed_body(
         &mut self,
+        root: &str,
         struct_name: &str,
+        path: &[String],
         fields: &[(Vec<String>, String, String)],
     ) -> Result<String, String> {
         let meta = self
-            .structs
-            .get(struct_name)
+            .struct_meta_for_promotion(root, struct_name)
             .cloned()
             .ok_or_else(|| format!("unknown struct `{}` in emitter", struct_name))?;
         let mut entries = Vec::new();
@@ -3982,13 +4059,21 @@ impl<'a> Emitter<'a> {
                 .map(|(path, name, value)| (path[1..].to_vec(), name.clone(), value.clone()))
                 .collect();
             if group.is_empty() {
-                if meta.empty_embeds.contains(embed) {
-                    entries.push(format!("{}: {}({{}})", embed, embed));
+                if meta.empty_embeds.contains(embed)
+                    || self.is_empty_embed_struct_for_promotion(root, embed)
+                {
+                    let mut embed_path = path.to_vec();
+                    embed_path.push(embed.clone());
+                    let factory = self.embed_factory_expr(root, &embed_path);
+                    entries.push(format!("{}: {}({{}})", embed, factory));
                 }
                 continue;
             }
-            let body = self.emit_promoted_embed_body(embed, &group)?;
-            entries.push(format!("{}: {}({{ {} }})", embed, embed, body));
+            let mut embed_path = path.to_vec();
+            embed_path.push(embed.clone());
+            let body = self.emit_promoted_embed_body(root, embed, &embed_path, &group)?;
+            let factory = self.embed_factory_expr(root, &embed_path);
+            entries.push(format!("{}: {}({{ {} }})", embed, factory, body));
         }
         // Auto-fill omitted optional fields, mirroring emit_struct_literal.
         for (opt, default) in &meta.optional {
@@ -4283,10 +4368,12 @@ impl<'a> Emitter<'a> {
                     program: self.program,
                     out: literal,
                     uses_struct: false,
+                    uses_promotion_factory: false,
                     uses_newtype: false,
                     uses_prelude_enums: false,
                     struct_order: Vec::new(),
                     structs: HashMap::new(),
+                    promotion_structs: HashMap::new(),
                     enums: HashMap::new(),
                     newtypes: HashMap::new(),
                     receiver_methods: HashMap::new(),

@@ -170,6 +170,13 @@ fn export_type_ast_refs<'a>(
 #[derive(Clone, Debug)]
 pub struct ModuleExports<'a> {
     pub structs: HashMap<&'a str, StructInfo<'a>>,
+    /// Compiler-private transitive embed metadata for exported structs. The
+    /// outer key is the exported struct name; the inner map contains only its
+    /// embedded structs, including non-exported ones. Importers seed this
+    /// separately from `structs` and consult it only while resolving promoted
+    /// fields and emitting promoted literals (dsc#86). In particular, these
+    /// entries are not importable or nameable as ordinary types.
+    pub promotion_structs: HashMap<&'a str, HashMap<&'a str, StructInfo<'a>>>,
     pub enums: HashMap<&'a str, EnumInfo<'a>>,
     pub aliases: HashMap<&'a str, ast::Type<'a>>,
     pub newtypes: HashMap<&'a str, NewtypeInfo>,
@@ -202,6 +209,7 @@ impl<'a> Default for ModuleExports<'a> {
     fn default() -> Self {
         Self {
             structs: HashMap::new(),
+            promotion_structs: HashMap::new(),
             enums: HashMap::new(),
             aliases: HashMap::new(),
             newtypes: HashMap::new(),
@@ -1115,6 +1123,29 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
 
     let mut exports = ModuleExports::default();
 
+    // Keep the representation of public `StructInfo` unchanged. An exported
+    // struct can nevertheless promote fields of a private embed, so retain a
+    // private, transitive lookup closure alongside that exported struct. It is
+    // deliberately not added to `exports.structs`: doing so would make the
+    // embedded declarations importable from consumers.
+    fn collect_promotion_structs<'a>(
+        info: &StructInfo<'a>,
+        declared_structs: &HashMap<&'a str, StructInfo<'a>>,
+        out: &mut HashMap<&'a str, StructInfo<'a>>,
+        seen: &mut HashSet<&'a str>,
+    ) {
+        for embed in info.embeds {
+            if !seen.insert(embed.name) {
+                continue;
+            }
+            let Some(embed_info) = declared_structs.get(embed.name) else {
+                continue;
+            };
+            out.insert(embed.name, embed_info.clone());
+            collect_promotion_structs(embed_info, declared_structs, out, seen);
+        }
+    }
+
     // Compiler-private receiver methods for every declared receiver type,
     // including private ones (dsc#52): an importer can name a private nested
     // type only through a descriptor fragment, and it needs these entries to
@@ -1207,6 +1238,16 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
 
                     if let Some(info) = declared_structs.get(local) {
                         exports.structs.insert(external, info.clone());
+                        let mut closure = HashMap::new();
+                        collect_promotion_structs(
+                            info,
+                            &declared_structs,
+                            &mut closure,
+                            &mut HashSet::new(),
+                        );
+                        if !closure.is_empty() {
+                            exports.promotion_structs.insert(external, closure);
+                        }
                         // Promote receiver methods declared on the local
                         // struct to the exported name.
                         for ((rt, mn), mi) in receiver_methods.iter() {
@@ -1359,6 +1400,10 @@ struct Checker<'a> {
     case_to_enum: HashMap<&'a str, &'a str>,
     /// User-defined structs.
     structs: HashMap<&'a str, StructInfo<'a>>,
+    /// Transitive private embeds carried by an imported exported struct. This
+    /// stays separate from `structs` so a consumer cannot name a private embed
+    /// in an annotation, import, or direct struct literal (dsc#86).
+    promotion_structs: HashMap<&'a str, HashMap<&'a str, StructInfo<'a>>>,
     /// User-defined interfaces.
     interfaces: HashMap<&'a str, InterfaceInfo<'a>>,
     /// User-defined newtypes.
@@ -1480,6 +1525,7 @@ impl<'a> Checker<'a> {
             enums: HashMap::new(),
             case_to_enum: HashMap::new(),
             structs: HashMap::new(),
+            promotion_structs: HashMap::new(),
             interfaces: HashMap::new(),
             newtypes: HashMap::new(),
             receiver_methods: HashMap::new(),
@@ -1619,6 +1665,9 @@ impl<'a> Checker<'a> {
 
                 if let Some(info) = exports.structs.get(imported) {
                     self.structs.insert(local, info.clone());
+                    if let Some(closure) = exports.promotion_structs.get(imported) {
+                        self.promotion_structs.insert(local, closure.clone());
+                    }
                     for ((rt, mn), mi) in exports.receiver_methods.iter() {
                         if *rt == imported {
                             self.receiver_methods.insert((local, *mn), mi.clone());

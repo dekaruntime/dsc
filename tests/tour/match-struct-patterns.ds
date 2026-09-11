@@ -1,9 +1,0 @@
-struct Point {
-  x: number
-  y: number
-}
-
-const point = Point { x: 3, y: 4 }
-const x = match (point) {
-  Point { x } => x,
-}

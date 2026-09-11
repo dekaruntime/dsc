@@ -496,14 +496,16 @@ mod tests {
     }
 
     fn load_tour_lessons() -> Vec<(TourLesson, String)> {
+        // The tour is owned by dekaruntime/tour and fetched by
+        // scripts/ci-fetch-tour.sh; it is never vendored in this repo.
         let tour_dir =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/tour");
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.cache/tour");
         let manifest_path = tour_dir.join("manifest.json");
         let Ok(raw) = std::fs::read_to_string(&manifest_path) else {
             return Vec::new();
         };
         let manifest: Vec<TourLesson> =
-            serde_json::from_str(&raw).expect("tests/tour/manifest.json");
+            serde_json::from_str(&raw).expect(".cache/tour/manifest.json");
 
         let ds_files: Vec<String> = std::fs::read_dir(&tour_dir)
             .unwrap_or_else(|error| panic!("read {}: {error}", tour_dir.display()))
@@ -529,13 +531,13 @@ mod tests {
         for id in &ds_files {
             assert!(
                 manifest_ids.contains(id.as_str()),
-                "tests/tour/{id}.ds is not listed in manifest.json"
+                ".cache/tour/{id}.ds is not listed in manifest.json"
             );
         }
         for lesson in &manifest {
             assert!(
                 ds_files.iter().any(|id| id == &lesson.id),
-                "manifest id {} has no tests/tour/{}.ds",
+                "manifest id {} has no .cache/tour/{}.ds",
                 lesson.id,
                 lesson.id
             );
@@ -551,7 +553,7 @@ mod tests {
                 } else if dsx_path.exists() {
                     dsx_path
                 } else {
-                    panic!("tests/tour/{}.ds or .dsx not found", lesson.id);
+                    panic!(".cache/tour/{}.ds or .dsx not found", lesson.id);
                 };
                 let source = std::fs::read_to_string(&source_path)
                     .unwrap_or_else(|error| panic!("read {}: {error}", source_path.display()));
@@ -767,11 +769,11 @@ const origin = Point { x: 3, y: 4 };
         let lessons = load_tour_lessons();
         assert!(
             !lessons.is_empty(),
-            "tests/tour/manifest.json missing or empty; dsc owns tour fixtures"
+            ".cache/tour is missing; run scripts/ci-fetch-tour.sh (the tour is owned by dekaruntime/tour)"
         );
 
         let tour_dir =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/tour");
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.cache/tour");
         for (lesson, source) in lessons {
             let extension = if tour_dir.join(format!("{}.dsx", lesson.id)).exists() {
                 "dsx"
@@ -781,8 +783,9 @@ const origin = Point { x: 3, y: 4 };
             let filename = format!("{}.{}", lesson.id, extension);
             // The standalone WASM compiler cannot resolve stdlib index packages
             // like `io` because it has no filesystem/network access. Skip those
-            // lessons here; they are covered by the native language gate and the
-            // live testsuite playground instead.
+            // lessons here; they are covered by the native tour gate in CI
+            // (`.cache/tour/run.mjs` against the built dsc) and the live
+            // testsuite playground instead.
             if source.contains("from \"io\"") || source.contains("from 'io'") {
                 continue;
             }

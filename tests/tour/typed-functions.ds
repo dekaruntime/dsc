@@ -1,5 +1,0 @@
-import { echo } from "io"
-fn add(left: number, right: number) number {
-  return left + right;
-}
-echo(string(add(20, 22)));

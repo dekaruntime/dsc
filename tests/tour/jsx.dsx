@@ -1,9 +1,0 @@
-interface GreetingProps {
-  name: string
-}
-
-fn Greeting(props: GreetingProps) Component {
-  return <h1>Hello {props.name}</h1>
-}
-
-<Greeting name="DekaScript" />

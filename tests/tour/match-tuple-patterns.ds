@@ -1,5 +1,0 @@
-const pair = [3, 4]
-const first = match (pair) {
-  (head, tail) => head,
-  _ => 0,
-}

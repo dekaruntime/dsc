@@ -1,4 +1,0 @@
-import { echo } from "io"
-const name = "Deka"
-const greeting = `Hello, ${name}`
-echo(greeting.slice(0, 5))

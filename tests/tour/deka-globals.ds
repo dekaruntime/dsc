@@ -1,6 +1,0 @@
-import { echo } from "io"
-const safe: Result<number, string> = unsafe { 42 }
-match (safe) {
-  Ok(v) => echo(string(v)),
-  Err(e) => echo("failed"),
-}

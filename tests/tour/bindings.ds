@@ -1,5 +1,0 @@
-import { echo } from "io"
-const start = 2;
-let total = start;
-total += 3;
-echo(string(total));

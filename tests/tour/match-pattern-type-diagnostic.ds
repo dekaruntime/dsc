@@ -1,9 +1,0 @@
-struct Point {
-  x: number
-}
-
-const value: string = "not a point"
-const answer = match (value) {
-  Point { x } => x,
-  _ => 0,
-}

@@ -1,3 +1,0 @@
-import { echo } from "io"
-const result = unsafe { 21 + 21 }
-echo(match (result) { Ok(v) => v, Err(_) => 0 })

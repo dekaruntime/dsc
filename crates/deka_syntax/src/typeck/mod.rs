@@ -170,11 +170,11 @@ fn export_type_ast_refs<'a>(
 #[derive(Clone, Debug)]
 pub struct ModuleExports<'a> {
     pub structs: HashMap<&'a str, StructInfo<'a>>,
-    /// Compiler-private transitive embed metadata for exported structs. The
-    /// outer key is the exported struct name; the inner map contains only its
-    /// embedded structs, including non-exported ones. Importers seed this
-    /// separately from `structs` and consult it only while resolving promoted
-    /// fields and emitting promoted literals (dsc#86). In particular, these
+    /// Compiler-private transitive struct metadata. The outer key is an
+    /// exported struct name or a private struct named by an exported value;
+    /// the inner map contains that struct and its embeds as needed. Importers
+    /// seed this separately from `structs` and consult it only while resolving
+    /// fields and promoted literals (dsc#86, dsc#119). In particular, these
     /// entries are not importable or nameable as ordinary types.
     pub promotion_structs: HashMap<&'a str, HashMap<&'a str, StructInfo<'a>>>,
     pub enums: HashMap<&'a str, EnumInfo<'a>>,
@@ -738,6 +738,171 @@ pub fn infer_module_function_signatures<'a>(
     checker.globals
 }
 
+/// Infer the concrete types of this module's top-level value bindings without
+/// emitting diagnostics.
+///
+/// Export collection uses this for constants as well as the existing function
+/// signature pass. It checks source-ordered initializers after function
+/// signatures are known, so local functions and earlier constants participate.
+/// The module graph supplies resolved imports on its later refresh pass.
+pub fn infer_module_value_types<'a>(
+    program: &'a Program<'a>,
+    imports: &HashMap<&str, &ModuleExports<'a>>,
+) -> HashMap<&'a str, Type<'a>> {
+    let mut checker = Checker::new(program, imports);
+    checker.infer_only = true;
+    checker.check_program();
+    checker.scopes.first().cloned().unwrap_or_default()
+}
+
+/// A module boundary must carry a concrete type. An unresolved member inside
+/// a container is as contagious as a top-level `Infer`.
+pub(crate) fn is_concrete_export_type(ty: &Type<'_>) -> bool {
+    match ty {
+        Type::Infer | Type::Var | Type::Error => false,
+        Type::Option { inner } | Type::Array { elem: inner } => is_concrete_export_type(inner),
+        Type::Function { params, ret, .. } => {
+            params.iter().all(is_concrete_export_type) && is_concrete_export_type(ret)
+        }
+        Type::Generic { args, .. } | Type::Union { members: args } => {
+            args.iter().all(is_concrete_export_type)
+        }
+        Type::Object { fields } => fields
+            .iter()
+            .all(|(_, field_type)| is_concrete_export_type(field_type)),
+        _ => true,
+    }
+}
+
+fn collect_struct_type_names<'a>(ty: &Type<'a>, names: &mut HashSet<&'a str>) {
+    match ty {
+        Type::Struct { name } => {
+            names.insert(*name);
+        }
+        Type::Option { inner } | Type::Array { elem: inner } => collect_struct_type_names(inner, names),
+        Type::Function { params, ret, .. } => {
+            for param in params {
+                collect_struct_type_names(param, names);
+            }
+            collect_struct_type_names(ret, names);
+        }
+        Type::Generic { base, args } => {
+            // The same representation is used for `Array<T>` and a generic
+            // struct; callers retain only names present in their struct map.
+            names.insert(*base);
+            for arg in args {
+                collect_struct_type_names(arg, names);
+            }
+        }
+        Type::Union { members: args } => {
+            for arg in args {
+                collect_struct_type_names(arg, names);
+            }
+        }
+        Type::Object { fields } => {
+            for (_, field_type) in fields {
+                collect_struct_type_names(field_type, names);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Refresh exported constants after dependency exports are available.
+///
+/// Initial collection has no import map while the graph is still discovered.
+/// The graph updates the ordinary `ModuleExports::values` map in dependency
+/// order, rather than introducing a second export representation.
+pub fn refresh_module_export_values<'a>(
+    program: &'a Program<'a>,
+    imports: &HashMap<&str, &ModuleExports<'a>>,
+    exports: &mut ModuleExports<'a>,
+) {
+    let inferred_values = infer_module_value_types(program, imports);
+    let declared_structs: HashMap<&str, StructInfo<'a>> = program
+        .statements
+        .iter()
+        .filter_map(|stmt| match stmt {
+            ast::Stmt::Struct { name, fields, embeds, type_params, is_super, .. } => Some((*name, StructInfo {
+                fields: *fields,
+                embeds: *embeds,
+                type_params,
+                is_super: *is_super,
+            })),
+            _ => None,
+        })
+        .collect();
+    fn collect_struct_closure<'a>(
+        info: &StructInfo<'a>,
+        declared: &HashMap<&'a str, StructInfo<'a>>,
+        closure: &mut HashMap<&'a str, StructInfo<'a>>,
+        seen: &mut HashSet<&'a str>,
+    ) {
+        for embed in info.embeds {
+            if !seen.insert(embed.name) {
+                continue;
+            }
+            let Some(embed_info) = declared.get(embed.name) else {
+                continue;
+            };
+            closure.insert(embed.name, embed_info.clone());
+            collect_struct_closure(embed_info, declared, closure, seen);
+        }
+    }
+    let local_constants: HashSet<&str> = program
+        .statements
+        .iter()
+        .filter_map(|stmt| match stmt {
+            ast::Stmt::Const { name, .. } | ast::Stmt::Let { name, .. } => Some(*name),
+            ast::Stmt::Export {
+                decl: ast::ExportDecl::Const { name, .. },
+                ..
+            } => Some(*name),
+            _ => None,
+        })
+        .collect();
+    let exported_constants: Vec<(&str, &str)> = program
+        .statements
+        .iter()
+        .flat_map(|stmt| match stmt {
+            ast::Stmt::Export {
+                decl: ast::ExportDecl::Const { name, .. },
+                ..
+            } => vec![(*name, *name)],
+            ast::Stmt::Export {
+                decl: ast::ExportDecl::NamedGroup { names, source: None },
+                ..
+            } => names
+                .iter()
+                .filter(|name| local_constants.contains(name.name))
+                .map(|name| (name.name, name.alias.unwrap_or(name.name)))
+                .collect(),
+            _ => Vec::new(),
+        })
+        .collect();
+    for (local, exported) in exported_constants {
+        let ty = inferred_values.get(local).cloned().unwrap_or(Type::Error);
+        let concrete = is_concrete_export_type(&ty);
+        exports.values.insert(
+            exported,
+            if concrete { ty.clone() } else { Type::Error },
+        );
+        if concrete {
+            let mut names = HashSet::new();
+            collect_struct_type_names(&ty, &mut names);
+            for name in names {
+                let Some(info) = declared_structs.get(name) else {
+                    continue;
+                };
+                let mut closure = HashMap::new();
+                closure.insert(name, info.clone());
+                collect_struct_closure(info, &declared_structs, &mut closure, &mut HashSet::new());
+                exports.promotion_structs.insert(name, closure);
+            }
+        }
+    }
+}
+
 /// Build compiler-private descriptor fragments for a module's declared
 /// factories, in the declaring module's own namespace.
 ///
@@ -1292,6 +1457,9 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
         }
     }
 
+    // Direct callers can infer literals and local expressions. Module graph
+    // compilation refreshes these same values with dependency imports.
+    refresh_module_export_values(program, &HashMap::new(), &mut exports);
     exports
 }
 
@@ -1697,6 +1865,18 @@ impl<'a> Checker<'a> {
 
                 if let Some(ty) = exports.values.get(imported) {
                     self.declare_var(local, ty.clone());
+                    // A value can carry a private struct type (for example,
+                    // `export const origin = Point { ... }`). Reuse the
+                    // compiler-private closure from dsc#86 for field lookup
+                    // without adding the struct to `self.structs`, which
+                    // would make it nameable or constructible by importers.
+                    let mut names = HashSet::new();
+                    collect_struct_type_names(ty, &mut names);
+                    for name in names {
+                        if let Some(closure) = exports.promotion_structs.get(name) {
+                            self.promotion_structs.insert(name, closure.clone());
+                        }
+                    }
                 }
 
                 if let Some(tree) = exports.build_fragments.get(imported) {

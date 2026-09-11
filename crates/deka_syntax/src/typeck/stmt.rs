@@ -926,6 +926,20 @@ impl<'a> Checker<'a> {
             ast::Stmt::Export { decl, .. } => match decl {
                 ast::ExportDecl::Const { name, ty, value } => {
                     self.check_binding(name, ty.as_ref(), value, false, value.span());
+                    if ty.is_none()
+                        && self
+                            .scopes
+                            .first()
+                            .and_then(|scope| scope.get(name))
+                            .is_some_and(|value_type| !super::is_concrete_export_type(value_type))
+                    {
+                        self.error_at_expr(
+                            value,
+                            format!(
+                                "could not infer a type for exported constant `{name}`; add an explicit type annotation"
+                            ),
+                        );
+                    }
                 }
                 ast::ExportDecl::Function { .. } => {
                     self.check_export_function(stmt);

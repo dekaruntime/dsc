@@ -216,7 +216,7 @@ dependencies = [
  "swc_ecma_loader",
  "swc_ecma_minifier",
  "swc_ecma_parser 31.0.0",
- "swc_ecma_transforms_base 34.0.0",
+ "swc_ecma_transforms_base 35.0.0",
  "swc_ecma_transforms_typescript",
  "swc_ecma_visit",
  "tempfile",

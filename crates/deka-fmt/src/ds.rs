@@ -35,11 +35,18 @@ struct Formatter<'src> {
     /// Tracks whether the last character written was a newline so we can emit
     /// indentation before the next non-whitespace token.
     at_line_start: bool,
-    /// `//` line comments as (line, text), sorted by source line. The parser
-    /// discards comment tokens, so the formatter re-lexes the source and
-    /// reattaches comments positionally (deka#484).
-    comments: Vec<(usize, String)>,
+    /// Comments, sorted by source line. The parser discards comment tokens,
+    /// so the formatter re-lexes the source and reattaches trivia positionally
+    /// (deka#484, dsc#137).
+    comments: Vec<Comment>,
     comment_cursor: usize,
+}
+
+#[derive(Clone)]
+struct Comment {
+    line: usize,
+    byte_start: usize,
+    text: String,
 }
 
 impl<'src> Formatter<'src> {
@@ -49,7 +56,7 @@ impl<'src> Formatter<'src> {
             out: String::new(),
             indent: 0,
             at_line_start: true,
-            comments: collect_line_comments(source),
+            comments: collect_comments(source),
             comment_cursor: 0,
         }
     }
@@ -59,11 +66,53 @@ impl<'src> Formatter<'src> {
     /// in source order, so a single forward cursor stays consistent.
     fn emit_comments_before(&mut self, line: usize) {
         while self.comment_cursor < self.comments.len()
-            && self.comments[self.comment_cursor].0 < line
+            && self.comments[self.comment_cursor].line < line
         {
-            let text = self.comments[self.comment_cursor].1.clone();
+            let text = self.comments[self.comment_cursor].text.clone();
             self.write(&text);
             self.newline();
+            self.comment_cursor += 1;
+        }
+    }
+
+    /// Emit comments that shared a source line with the expression about to
+    /// be formatted. Keeping this separate from `emit_comments_before` lets
+    /// block comments remain inline rather than being deferred until the next
+    /// statement.
+    fn emit_inline_comments_before(&mut self, span: Span) {
+        while self.comment_cursor < self.comments.len()
+            && self.comments[self.comment_cursor].line == span.start.line
+            && self.comments[self.comment_cursor].byte_start < span.byte_start
+        {
+            let text = self.comments[self.comment_cursor].text.clone();
+            if !self.at_line_start && !self.out.ends_with(char::is_whitespace) {
+                self.write(" ");
+            }
+            self.write(&text);
+            if text.starts_with("//") {
+                self.newline();
+            } else {
+                self.write(" ");
+            }
+            self.comment_cursor += 1;
+        }
+    }
+
+    /// Emit comments that followed a statement on its source line. This is
+    /// the same trivia stream as leading and inline comments, so block
+    /// comments do not need position-specific lexer handling.
+    fn emit_trailing_comments(&mut self, line: usize) {
+        while self.comment_cursor < self.comments.len()
+            && self.comments[self.comment_cursor].line == line
+        {
+            let text = self.comments[self.comment_cursor].text.clone();
+            if !self.at_line_start && !self.out.ends_with(char::is_whitespace) {
+                self.write(" ");
+            }
+            self.write(&text);
+            if text.starts_with("//") {
+                self.newline();
+            }
             self.comment_cursor += 1;
         }
     }
@@ -75,13 +124,13 @@ impl<'src> Formatter<'src> {
     fn take_comments_before(&mut self, line: usize) -> Vec<String> {
         let first = self.comment_cursor;
         while self.comment_cursor < self.comments.len()
-            && self.comments[self.comment_cursor].0 < line
+            && self.comments[self.comment_cursor].line < line
         {
             self.comment_cursor += 1;
         }
         self.comments[first..self.comment_cursor]
             .iter()
-            .map(|(_, text)| text.clone())
+            .map(|comment| comment.text.clone())
             .collect()
     }
 
@@ -92,7 +141,7 @@ impl<'src> Formatter<'src> {
     fn pending_comment_line(&self, before_line: usize) -> Option<usize> {
         self.comments
             .get(self.comment_cursor)
-            .map(|(line, _)| *line)
+            .map(|comment| comment.line)
             .filter(|line| *line < before_line)
     }
 
@@ -574,6 +623,7 @@ impl<'src> Formatter<'src> {
             Stmt::Continue { .. } => self.write("continue"),
             Stmt::Empty { .. } => {}
         }
+        self.emit_trailing_comments(stmt_end_line);
     }
 
     fn fmt_block(&mut self, stmts: &[Stmt<'_>], end_line: usize) {
@@ -877,6 +927,7 @@ impl<'src> Formatter<'src> {
     // --- expressions -------------------------------------------------------
 
     fn fmt_expr(&mut self, expr: &Expr<'_>) {
+        self.emit_inline_comments_before(expr.span());
         if let Expr::Build { body, span } = expr {
             self.write("build ");
             self.fmt_block(body, span.end.line);
@@ -1603,17 +1654,20 @@ fn format_number(value: f64) -> String {
     }
 }
 
-/// Re-lex the source and collect `//` line comments as (line, text) pairs.
+/// Re-lex the source and collect comment trivia with source anchors.
 /// Comments inside `unsafe { }` bodies are part of the raw JS passthrough
 /// and never surface as Comment tokens, so they are untouched by design.
-/// Block comments (`/* */`) are not DekaScript and are not preserved.
-fn collect_line_comments(source: &str) -> Vec<(usize, String)> {
+fn collect_comments(source: &str) -> Vec<Comment> {
     let mut lexer = deka_syntax::Lexer::new(source);
     let mut comments = Vec::new();
     loop {
         let token = lexer.next_token();
-        if token.kind == deka_syntax::lexer::TokenKind::Comment && token.text.starts_with("//") {
-            comments.push((token.span.start.line, token.text.to_string()));
+        if token.kind == deka_syntax::lexer::TokenKind::Comment {
+            comments.push(Comment {
+                line: token.span.start.line,
+                byte_start: token.span.byte_start,
+                text: token.text.to_string(),
+            });
         }
         if token.kind == deka_syntax::lexer::TokenKind::Eof {
             break;

@@ -68,6 +68,12 @@ jobs:
           sccache --show-stats
           aws s3 ls "s3://${SCCACHE_BUCKET}/" --endpoint-url="${SCCACHE_ENDPOINT}"
 
+      - name: Fetch pinned testsuite corpus
+        run: scripts/ci-fetch-testsuite-corpus.sh "$GITHUB_WORKSPACE/.cache/testsuite-corpus"
+
+      - name: Fetch pinned tour
+        run: scripts/ci-fetch-tour.sh "$GITHUB_WORKSPACE/.cache/tour"
+
       - name: Test workspace
         env:
           RUSTC_WRAPPER: sccache

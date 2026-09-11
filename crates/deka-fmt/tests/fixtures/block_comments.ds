@@ -1,0 +1,7 @@
+/* leading */
+const greeting = /* inline */ "hello" /* trailing */
+
+fn greet() {
+  /* inside block */
+  echo(greeting)
+}

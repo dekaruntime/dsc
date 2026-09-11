@@ -97,6 +97,10 @@ jobs:
         uses: dtolnay/rust-toolchain@1.96.0
         with:
           targets: wasm32-unknown-unknown
+          # rust-toolchain.toml pins 1.96.0 for every cargo invocation in this
+          # directory, overriding the rustup default — so clippy must be added
+          # to the pinned toolchain, not to a separately installed stable.
+          components: clippy
 
       - name: Install sccache
         if: ${{ env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != '' && env.SCCACHE_ENDPOINT != '' }}
@@ -234,15 +238,9 @@ jobs:
             exit 1
           fi
 
-      # Folded in from the standalone rust-clippy analyze workflow: same
-      # toolchain (stable) and same flags (--all-features). Runs last because
-      # it switches the default toolchain away from the pinned 1.96.0.
-      - name: Setup Rust (stable) for clippy
-        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-
+      # Folded in from the standalone rust-clippy analyze workflow: same flags
+      # (--all-features), same pinned 1.96.0 toolchain as the rest of the job
+      # (the clippy component is installed by the job's Setup Rust step).
       - name: Run clippy
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
         run: cargo clippy --all-features

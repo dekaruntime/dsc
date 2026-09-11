@@ -10,7 +10,7 @@ dest=${1:-"$root/.cache/testsuite-corpus"}
 
 version=$(sed -n '1p' "$pin")
 expected=$(sed -n '2p' "$pin")
-[[ "$version" =~ ^corpus-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "invalid corpus version: $version" >&2; exit 2; }
+[[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "invalid corpus version: $version" >&2; exit 2; }
 [[ "$expected" =~ ^[a-f0-9]{64}$ ]] || { echo "invalid corpus SHA-256 in $pin" >&2; exit 2; }
 
 sha256_file() {

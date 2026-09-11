@@ -162,12 +162,21 @@ fn program_contains_jsx(program: &Program<'_>) -> bool {
     program.statements.iter().any(stmt_has_jsx)
 }
 
+/// The closed, compiler-provided math module. It is emitted as local bindings
+/// rather than a host import, so its single constant is available anywhere
+/// DekaScript runs without making `Math` ambient.
+pub fn is_math_module_spec(spec: &str) -> bool {
+    let bare = spec.trim().strip_prefix("@deka/").unwrap_or(spec.trim());
+    bare == "math"
+}
+
 pub(crate) fn is_stdlib_module_spec(spec: &str) -> bool {
     if spec.starts_with("@user/") {
         return false;
     }
     let bare = spec.strip_prefix("@deka/").unwrap_or(spec);
-    matches!(
+    is_math_module_spec(spec)
+        || matches!(
         bare,
         "json"
             | "postgres"
@@ -226,6 +235,16 @@ pub fn infer_stdlib_imports_for_source<'a>(
             continue;
         }
         let exports = exports_by_spec.entry(spec).or_default();
+        if is_math_module_spec(spec) {
+            // `math` is deliberately closed: unlike the package-backed
+            // virtual stdlib surface below, only the agreed constant exists.
+            // Rejecting a typo at the import is preferable to recreating the
+            // unchecked ambient-global hole this module replaces.
+            exports
+                .values
+                .insert("PI", Type::Named { name: "number" });
+            continue;
+        }
         for spec_item in specifiers.iter() {
             exports.values.insert(spec_item.imported, Type::Infer);
         }
@@ -1769,6 +1788,39 @@ const arrow = unsafe { () => User { name: "Bob" } }
         .expect("ui/form remains a documented virtual stdlib import pending dsc#129");
         assert!(result.js.contains("from \"ui/form\""), "got: {}", result.js);
         assert!(result.js.contains("Form"), "got: {}", result.js);
+    }
+
+    #[test]
+    fn math_module_exposes_only_typed_pi_as_a_local_runtime_binding() {
+        let result = compile_to_js(
+            "import { PI } from \"math\";\nconst circumference: number = PI * 2;",
+            "test.ds",
+        )
+        .expect("the compiler-provided math module must typecheck");
+        assert!(
+            result.js.contains("const PI = Math.PI;"),
+            "math PI was not lowered to its local binding: {}",
+            result.js
+        );
+        assert!(
+            result.js.contains("const circumference = PI * 2;"),
+            "PI did not retain its number type: {}",
+            result.js
+        );
+        assert!(
+            !result.js.contains("from \"math\""),
+            "math must not require a host package: {}",
+            result.js
+        );
+
+        let errors = compile_to_js("import { E } from \"math\";", "test.ds")
+            .expect_err("the closed math module must not gain unapproved constants");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message.contains("cannot resolve imported name `E` from `math`")),
+            "unexpected closed-module diagnostic: {errors:?}"
+        );
     }
 
     #[test]

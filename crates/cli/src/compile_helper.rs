@@ -532,7 +532,8 @@ fn skip_bare_package_check(spec: &str, specs_empty: bool) -> bool {
         return true;
     }
     let bare = trimmed.strip_prefix("@deka/").unwrap_or(trimmed);
-    bare == "ui"
+    deka_compile::is_math_module_spec(trimmed)
+        || bare == "ui"
         || bare.starts_with("ui/")
         || deka_compile::shake::normalize_ui_specifier(trimmed).is_some()
 }

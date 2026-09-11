@@ -454,7 +454,13 @@ impl<'a> Checker<'a> {
             ast::Expr::Identifier { name, span } => match self.lookup_var(name) {
                 Some(ty) => ty,
                 None => {
-                    self.error_span(*span, format!("unknown identifier `{name}`"));
+                    let message = if *name == "Math" {
+                        "`Math` is not available in DekaScript; import { PI } from \"math\" instead for PI, or use number methods such as `x.sqrt()`"
+                            .to_string()
+                    } else {
+                        format!("unknown identifier `{name}`")
+                    };
+                    self.error_span(*span, message);
                     Type::Error
                 }
             },

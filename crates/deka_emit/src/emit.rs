@@ -2779,6 +2779,28 @@ impl<'a> Emitter<'a> {
                     // Keep specifier imports (CSS modules) so the bundler can resolve them.
                     return Ok(());
                 }
+                // `math` is a compiler-owned, closed stdlib module. Its
+                // bindings lower locally, keeping `Math` out of DekaScript's
+                // value namespace while still using the JavaScript constant
+                // as the implementation detail.
+                if source_is_math(source) {
+                    let kept: Vec<_> = specifiers
+                        .iter()
+                        .filter(|spec| {
+                            self.is_live(spec.local) || self.is_build_factory_import(spec)
+                        })
+                        .collect();
+                    for (index, spec) in kept.iter().enumerate() {
+                        if index > 0 {
+                            self.out.push('\n');
+                        }
+                        write_indent(&mut self.out, 0);
+                        self.out.push_str("const ");
+                        self.out.push_str(spec.local);
+                        self.out.push_str(" = Math.PI;");
+                    }
+                    return Ok(());
+                }
                 write_indent(&mut self.out, 0);
                 let resolved_source = self.resolve_module_source(source);
                 if specifiers.is_empty() {
@@ -5421,6 +5443,12 @@ fn source_is_css(source: &str) -> bool {
     let trimmed = source.trim().trim_matches('"').trim_matches('\'');
     let lower = trimmed.to_ascii_lowercase();
     lower.ends_with(".css")
+}
+
+fn source_is_math(source: &str) -> bool {
+    let trimmed = source.trim().trim_matches('"').trim_matches('\'');
+    let bare = trimmed.strip_prefix("@deka/").unwrap_or(trimmed);
+    bare == "math"
 }
 
 fn expr_contains_jsx(expr: &Expr) -> bool {

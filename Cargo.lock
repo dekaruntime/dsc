@@ -515,7 +515,9 @@ dependencies = [
 
 [[package]]
 name = "deka-validation"
-version = "0.48.1"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60f5ba90afc9de293ed21a733f42c6315f542b64242f2a1a6edf5329a3e72d53"
 
 [[package]]
 name = "deka_compile"

@@ -308,7 +308,7 @@ fn transpile_directory(
     Ok(())
 }
 
-fn directory_entry(root: &Path, sources: &[PathBuf]) -> Result<PathBuf, String> {
+pub(crate) fn directory_entry(root: &Path, sources: &[PathBuf]) -> Result<PathBuf, String> {
     for name in ["main.ds", "index.ds", "app.ds"] {
         let candidate = root.join(name);
         if candidate.is_file() {
@@ -344,7 +344,12 @@ pub(crate) fn build_module(
     Ok(format!("{GENERATED_MARKER}{js}"))
 }
 
-fn build_bundle(input: &Path, cwd: &Path, treeshake: bool, client: bool) -> Result<String, String> {
+pub(crate) fn build_bundle(
+    input: &Path,
+    cwd: &Path,
+    treeshake: bool,
+    client: bool,
+) -> Result<String, String> {
     let entry = fs::canonicalize(input)
         .map_err(|err| format!("failed to resolve {}: {err}", input.display()))?;
     let project_root = find_project_root(cwd, &entry)
@@ -360,6 +365,7 @@ fn build_bundle(input: &Path, cwd: &Path, treeshake: bool, client: bool) -> Resu
         },
     )
     .map_err(|diagnostics| format_diagnostics(&diagnostics))?;
+    let prelude = graph.prelude.clone();
     let provider = Arc::new(GraphSourceProvider {
         modules: graph.modules,
     });
@@ -370,6 +376,7 @@ fn build_bundle(input: &Path, cwd: &Path, treeshake: bool, client: bool) -> Resu
             minify: treeshake,
             iife: false,
             client,
+            prelude: Some(prelude),
         },
         provider,
     )?;
@@ -411,7 +418,7 @@ pub(crate) fn write_generated_js(path: &Path, js: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn collect_ds_sources(root: &Path) -> Result<Vec<PathBuf>, String> {
+pub(crate) fn collect_ds_sources(root: &Path) -> Result<Vec<PathBuf>, String> {
     let mut out = Vec::new();
     collect_ds_sources_inner(root, &mut out)?;
     out.sort();

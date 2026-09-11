@@ -239,17 +239,12 @@ fn default_browsers() -> Browsers {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn make_temp_dir() -> PathBuf {
-        let mut dir = std::env::temp_dir();
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        dir.push(format!("deka-css-test-{}-{}", std::process::id(), nanos));
-        std::fs::create_dir_all(&dir).expect("create temp dir");
-        dir
+    fn make_temp_dir() -> tempfile::TempDir {
+        tempfile::Builder::new()
+            .prefix("deka_css_test_")
+            .tempdir()
+            .expect("create unique temp dir")
     }
 
     #[test]
@@ -272,21 +267,20 @@ mod tests {
     #[test]
     fn test_build_asset_ignores_data_and_http() {
         let dir = make_temp_dir();
-        let asset = build_asset("data:image/png;base64,abc", "url:0", &dir).unwrap();
+        let asset = build_asset("data:image/png;base64,abc", "url:0", dir.path()).unwrap();
         assert!(asset.is_none());
-        let asset = build_asset("https://example.com/logo.png", "url:1", &dir).unwrap();
+        let asset = build_asset("https://example.com/logo.png", "url:1", dir.path()).unwrap();
         assert!(asset.is_none());
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn test_build_asset_reads_file() {
         let dir = make_temp_dir();
-        let file_path = dir.join("logo.png");
+        let file_path = dir.path().join("logo.png");
         let bytes = vec![0_u8, 1, 2, 3];
         std::fs::write(&file_path, &bytes).expect("write asset");
 
-        let asset = build_asset("logo.png?x=1#hash", "url:0", &dir)
+        let asset = build_asset("logo.png?x=1#hash", "url:0", dir.path())
             .unwrap()
             .expect("expected asset");
         let expected_hash = hash_bytes(&bytes);
@@ -300,6 +294,5 @@ mod tests {
             base64::engine::general_purpose::STANDARD.encode(bytes)
         );
 
-        std::fs::remove_dir_all(&dir).ok();
     }
 }

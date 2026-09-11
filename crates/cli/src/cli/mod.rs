@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use core::{Context, FlagSpec, ParamSpec, ParseError, ParseErrorKind, Registry};
 use stdio::{ascii, error as stdio_error, raw};
 
+pub mod bundle;
 pub mod check;
 pub mod emit;
 pub mod fmt;

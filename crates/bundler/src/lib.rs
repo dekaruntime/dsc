@@ -4,7 +4,9 @@ pub mod bundler;
 pub mod cache;
 mod cached;
 pub mod css_bundler;
+pub mod optimizer;
 
 pub use bundler::*;
 pub use cache::*;
 pub use css_bundler::*;
+pub use optimizer::*;

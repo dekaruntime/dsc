@@ -5,7 +5,6 @@
 use bundler::{BundleOptions, VirtualSource, bundle_virtual_entry};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 struct SimpleVirtualSource {
     entry: PathBuf,
@@ -22,21 +21,17 @@ impl VirtualSource for SimpleVirtualSource {
     }
 }
 
-fn make_tmp_dir(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let dir = std::env::temp_dir().join(format!("deka_bundler_test_{}_{}", name, nanos));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("create test dir");
-    dir
+fn make_tmp_dir(name: &str) -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .prefix(&format!("deka_bundler_test_{name}_"))
+        .tempdir()
+        .expect("create unique test dir")
 }
 
 #[test]
 fn bundle_output_is_valid_js() {
     let tmp = make_tmp_dir("valid_js_parse");
-    let entry = tmp.join("main.js");
+    let entry = tmp.path().join("main.js");
     let source = r#"
 export function greet(name) {
     return "Hello, " + name + "!";
@@ -52,10 +47,11 @@ export const version = 1;
     let result = bundle_virtual_entry(
         &entry,
         BundleOptions {
-            project_root: tmp.clone(),
+            project_root: tmp.path().to_path_buf(),
             minify: false,
             iife: false,
             client: false,
+            prelude: None,
         },
         provider,
     )
@@ -99,13 +95,12 @@ export const version = 1;
         &result[..result.len().min(500)]
     );
 
-    let _ = std::fs::remove_dir_all(&tmp);
 }
 
 #[test]
 fn bundle_minified_output_is_valid_js() {
     let tmp = make_tmp_dir("minified_js_parse");
-    let entry = tmp.join("main.js");
+    let entry = tmp.path().join("main.js");
     let source = "export const x = 42;\nexport function add(a, b) { return a + b; }\n";
     std::fs::write(&entry, source).expect("write entry");
 
@@ -116,10 +111,11 @@ fn bundle_minified_output_is_valid_js() {
     let result = bundle_virtual_entry(
         &entry,
         BundleOptions {
-            project_root: tmp.clone(),
+            project_root: tmp.path().to_path_buf(),
             minify: true,
             iife: false,
             client: false,
+            prelude: None,
         },
         provider,
     )
@@ -154,5 +150,4 @@ fn bundle_minified_output_is_valid_js() {
         &result[..result.len().min(500)]
     );
 
-    let _ = std::fs::remove_dir_all(&tmp);
 }

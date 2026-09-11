@@ -1098,12 +1098,12 @@ impl<'a> Checker<'a> {
             }
             // Empty embedded structs (no fields and only empty embeds) are
             // auto-filled by the emitter, so they need not be supplied literally.
-            if self.is_empty_embed_struct(embed.name) {
+            if self.is_empty_embed_struct(name, embed.name) {
                 continue;
             }
             // An embedded struct may also be supplied piecemeal through its
             // promoted fields (`Employee { name: ... }`).
-            if self.embed_satisfied_by_promoted_fields(embed.name, &seen_fields) {
+            if self.embed_satisfied_by_promoted_fields(name, embed.name, &seen_fields) {
                 continue;
             }
             self.error_span(
@@ -1134,18 +1134,27 @@ impl<'a> Checker<'a> {
         field: &str,
         path: &mut Vec<&'a str>,
     ) -> bool {
-        let info = match self.structs.get(struct_name) {
+        self.find_promoted_field_path_from(struct_name, struct_name, field, path)
+    }
+
+    fn find_promoted_field_path_from(
+        &self,
+        root: &'a str,
+        struct_name: &'a str,
+        field: &str,
+        path: &mut Vec<&'a str>,
+    ) -> bool {
+        let info = match self.struct_info_for_promotion(root, struct_name) {
             Some(i) => i,
             None => return false,
         };
         for embed in info.embeds {
             path.push(embed.name);
             let declares = self
-                .structs
-                .get(embed.name)
+                .struct_info_for_promotion(root, embed.name)
                 .map(|i| i.fields.iter().any(|f| f.name == field))
                 .unwrap_or(false);
-            if declares || self.find_promoted_field_path(embed.name, field, path) {
+            if declares || self.find_promoted_field_path_from(root, embed.name, field, path) {
                 return true;
             }
             path.pop();
@@ -1153,11 +1162,30 @@ impl<'a> Checker<'a> {
         false
     }
 
+    /// Return a struct visible while promoting fields of `root`. Private
+    /// closure entries deliberately win over unrelated consumer declarations
+    /// with the same spelling, but are never inserted into `self.structs`.
+    fn struct_info_for_promotion(
+        &self,
+        root: &'a str,
+        name: &'a str,
+    ) -> Option<&super::StructInfo<'a>> {
+        self.promotion_structs
+            .get(root)
+            .and_then(|closure| closure.get(name))
+            .or_else(|| self.structs.get(name))
+    }
+
     /// An embedded struct counts as supplied when every required field it
     /// owns — directly or through its own embeds — appears in the literal as
     /// a promoted field.
-    fn embed_satisfied_by_promoted_fields(&self, name: &'a str, supplied: &HashSet<&str>) -> bool {
-        let info = match self.structs.get(name) {
+    fn embed_satisfied_by_promoted_fields(
+        &self,
+        root: &'a str,
+        name: &'a str,
+        supplied: &HashSet<&str>,
+    ) -> bool {
+        let info = match self.struct_info_for_promotion(root, name) {
             Some(i) => i,
             None => return false,
         };
@@ -1168,13 +1196,13 @@ impl<'a> Checker<'a> {
         }
         info.embeds.iter().all(|e| {
             supplied.contains(e.name)
-                || self.is_empty_embed_struct(e.name)
-                || self.embed_satisfied_by_promoted_fields(e.name, supplied)
+                || self.is_empty_embed_struct(root, e.name)
+                || self.embed_satisfied_by_promoted_fields(root, e.name, supplied)
         })
     }
 
-    fn is_empty_embed_struct(&self, name: &'a str) -> bool {
-        let info = match self.structs.get(name) {
+    fn is_empty_embed_struct(&self, root: &'a str, name: &'a str) -> bool {
+        let info = match self.struct_info_for_promotion(root, name) {
             Some(i) => i,
             None => return false,
         };
@@ -1183,7 +1211,7 @@ impl<'a> Checker<'a> {
         }
         info.embeds
             .iter()
-            .all(|e| self.is_empty_embed_struct(e.name))
+            .all(|e| self.is_empty_embed_struct(root, e.name))
     }
 
     /// The rfd#56 phase-1 capability rule for an unbounded type parameter,
@@ -1643,12 +1671,21 @@ impl<'a> Checker<'a> {
 
     /// Resolve a field's type, recursively searching embedded structs.
     fn resolve_field_type(&mut self, struct_name: &'a str, field: &'a str) -> Option<Type<'a>> {
-        let info = self.structs.get(struct_name)?;
+        self.resolve_field_type_from(struct_name, struct_name, field)
+    }
+
+    fn resolve_field_type_from(
+        &mut self,
+        root: &'a str,
+        struct_name: &'a str,
+        field: &'a str,
+    ) -> Option<Type<'a>> {
+        let info = self.struct_info_for_promotion(root, struct_name)?.clone();
         if let Some(f) = info.fields.iter().find(|f| f.name == field) {
             return Some(self.resolve_ast_type(&f.ty));
         }
         for embed in info.embeds {
-            if let Some(ty) = self.resolve_field_type(embed.name, field) {
+            if let Some(ty) = self.resolve_field_type_from(root, embed.name, field) {
                 return Some(ty);
             }
         }

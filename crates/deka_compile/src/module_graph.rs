@@ -1056,6 +1056,15 @@ fn copy_export<'a>(
     if let Some(info) = source.structs.get(imported) {
         changed |= dest.structs.insert(external, info.clone()).is_none();
     }
+    if let Some(closure) = source.promotion_structs.get(imported) {
+        // The closure is compiler metadata for promoted-field lookup, not a
+        // language export. Preserve it under the re-exported name just as we
+        // preserve descriptor fragments for their compiler-only consumer.
+        changed |= dest
+            .promotion_structs
+            .insert(external, closure.clone())
+            .is_none();
+    }
     if let Some(info) = source.enums.get(imported) {
         changed |= dest.enums.insert(external, info.clone()).is_none();
     }
@@ -2435,6 +2444,96 @@ mod tests {
         );
         assert!(main_js.contains("Robot({ Legs: Legs({"), "got: {}", main_js);
         assert!(main_js.contains("r.move()"), "got: {}", main_js);
+    }
+
+    #[test]
+    fn graph_promotes_private_cross_module_embed_fields() {
+        let root = PathBuf::from("/project");
+        let types = root.join("types.ds");
+        let main = root.join("main.ds");
+        let mut files = HashMap::new();
+        files.insert(
+            types.clone(),
+            "struct Base { name: string }\nstruct Robot { Base }\nexport { Robot }".to_string(),
+        );
+        files.insert(
+            main.clone(),
+            "import { Robot } from \"./types.ds\";\nconst r = Robot { name: \"Ada\" };\nconst name: string = r.name;".to_string(),
+        );
+        let aliases = HashMap::from([((main.clone(), "./types.ds".to_string()), types.clone())]);
+
+        let result = compile_module_graph(&main, &InMemoryLoader { files, aliases })
+            .expect("private embed promotion compiles");
+        let main_js = &result.modules[&main];
+        assert!(
+            main_js.contains("__deka_embed_factory(Robot, [\"Base\"])("),
+            "private embed factory must remain encapsulated by Robot:\n{main_js}"
+        );
+        assert!(
+            !main_js.contains("Base({"),
+            "consumer must not emit an unbound private Base factory:\n{main_js}"
+        );
+    }
+
+    #[test]
+    fn graph_promotes_nested_private_cross_module_embed_fields() {
+        let root = PathBuf::from("/project");
+        let types = root.join("types.ds");
+        let main = root.join("main.ds");
+        let mut files = HashMap::new();
+        files.insert(
+            types.clone(),
+            "struct Core { serial: string }\nstruct Chassis { Core }\nstruct Robot { Chassis }\nexport { Robot }".to_string(),
+        );
+        files.insert(
+            main.clone(),
+            "import { Robot } from \"./types.ds\";\nconst r = Robot { serial: \"R2\" };\nconst serial: string = r.serial;".to_string(),
+        );
+        let aliases = HashMap::from([((main.clone(), "./types.ds".to_string()), types.clone())]);
+
+        let result = compile_module_graph(&main, &InMemoryLoader { files, aliases })
+            .expect("nested private embed promotion compiles");
+        let main_js = &result.modules[&main];
+        assert!(
+            main_js.contains("__deka_embed_factory(Robot, [\"Chassis\", \"Core\"])("),
+            "nested private embed path missing from emitted consumer:\n{main_js}"
+        );
+    }
+
+    #[test]
+    fn graph_private_embed_stays_unimportable_and_absent_fields_still_error() {
+        let root = PathBuf::from("/project");
+        let types = root.join("types.ds");
+        let main = root.join("main.ds");
+        let mut files = HashMap::new();
+        files.insert(
+            types.clone(),
+            "struct Base { name: string }\nstruct Robot { Base }\nexport { Robot }".to_string(),
+        );
+        files.insert(main.clone(), "import { Base, Robot } from \"./types.ds\";".to_string());
+        let aliases = HashMap::from([((main.clone(), "./types.ds".to_string()), types.clone())]);
+
+        let import_errors = compile_module_graph(
+            &main,
+            &InMemoryLoader { files: files.clone(), aliases: aliases.clone() },
+        )
+        .expect_err("private Base import must fail");
+        let import_messages: Vec<&str> = import_errors.iter().map(|error| error.message.as_str()).collect();
+        assert!(
+            import_messages.iter().any(|message| message.contains("Missing export 'Base'")),
+            "private Base leaked into the import surface: {import_messages:?}"
+        );
+
+        files.insert(
+            main.clone(),
+            "import { Robot } from \"./types.ds\";\nconst b = Base { name: \"Ada\" };\nconst hidden = Robot.__deka_embeds;\nconst r = Robot { missing: \"no\" };".to_string(),
+        );
+        let errors = compile_module_graph(&main, &InMemoryLoader { files, aliases })
+            .expect_err("private Base name and absent Robot field must fail");
+        let messages: Vec<&str> = errors.iter().map(|error| error.message.as_str()).collect();
+        assert!(messages.iter().any(|message| message.contains("unknown struct `Base`")), "private Base became nameable in the consumer: {messages:?}");
+        assert!(messages.iter().any(|message| message.contains("unknown identifier `Robot`")), "private embed closure became reachable in DekaScript: {messages:?}");
+        assert!(messages.iter().any(|message| message.contains("struct `Robot` has no field or embed `missing`")), "genuinely absent promoted field lost its diagnostic: {messages:?}");
     }
 
     #[test]

@@ -170,11 +170,15 @@ impl PreludeDemand {
 /// Fragment shared by every spelling of the `__deka_struct` helper: the
 /// factory closure, brand tag, and prototype wiring. The optional members
 /// (`impl` / `implMut` / embeds) are spliced between this and [`STRUCT_TAIL`].
-const STRUCT_HEAD: &str = "function __deka_struct(id,embeds){function f(fields){return Object.assign({__proto__:f.prototype},fields);}f.id=id;Object.defineProperty(f,'name',{value:id,configurable:true});f.prototype=Object.create(null);Object.defineProperty(f.prototype,'__deka_struct',{value:id,enumerable:false,writable:false,configurable:false});f.prototype.constructor=f;";
+const STRUCT_HEAD: &str = "function __deka_struct(id,embeds){function f(fields){return Object.assign({__proto__:f.prototype},fields);}f.id=id;Object.defineProperty(f,'name',{value:id,configurable:true});if(embeds)Object.defineProperty(f,'__deka_embeds',{value:embeds,enumerable:false,writable:false,configurable:false});f.prototype=Object.create(null);Object.defineProperty(f.prototype,'__deka_struct',{value:id,enumerable:false,writable:false,configurable:false});f.prototype.constructor=f;";
 const STRUCT_IMPL: &str = "f.impl=(a,b)=>{if(typeof a==='string'){const k=a;f.prototype[k]=function(...x){return b.apply(this,x);};}else{for(const k in a)f.prototype[k]=a[k];}return f;};";
 const STRUCT_IMPL_MUT: &str = "f.implMut=(a,b)=>{if(typeof a==='string'){const k=a;f.prototype[k]=function(...x){if(Object.isFrozen(this))throw new __deka_MutationError(`cannot call mutable method '${k}' on immutable ${id}`);return b.apply(this,x);};}else{for(const k in a){const fn=a[k];f.prototype[k]=function(...x){if(Object.isFrozen(this))throw new __deka_MutationError(`cannot call mutable method '${k}' on immutable ${id}`);return fn.apply(this,x);};}}return f;};";
 const STRUCT_EMBEDS: &str = "if(embeds){for(const [embedName,embedFactory] of Object.entries(embeds)){for(const key of Object.keys(embedFactory.prototype)){f.prototype[key]=function(...args){return this[embedName][key](...args);};}}}";
 const STRUCT_TAIL: &str = "return f;}";
+/// Compiler-generated promoted literals use this to reach an embed factory
+/// retained by an exported factory. It never creates a DekaScript binding for
+/// that private embed (dsc#86).
+const STRUCT_EMBED_FACTORY: &str = "function __deka_embed_factory(root,path){let factory=root;for(const name of path)factory=factory.__deka_embeds[name];return factory;}";
 
 /// The ONE definition of the `__deka_struct` factory helper (deka#582's
 /// single-spelling rule applies to bodies too — deka#622). The shape is
@@ -194,6 +198,9 @@ pub fn struct_helper(demand: &StructDemand) -> String {
         out.push_str(STRUCT_EMBEDS);
     }
     out.push_str(STRUCT_TAIL);
+    if demand.embeds {
+        out.push_str(STRUCT_EMBED_FACTORY);
+    }
     out
 }
 
@@ -360,7 +367,10 @@ mod demand_tests {
         assert_eq!(all.matches("f.implMut=").count(), 1, "{all}");
         assert_eq!(all.matches("Object.entries(embeds)").count(), 1, "{all}");
         assert!(all.starts_with("function __deka_struct(id,embeds){"), "{all}");
-        assert!(all.ends_with("return f;}"), "{all}");
+        assert!(
+            all.ends_with("return f;}function __deka_embed_factory(root,path){let factory=root;for(const name of path)factory=factory.__deka_embeds[name];return factory;}"),
+            "{all}"
+        );
 
         // No demand: the bare factory, none of the optional machinery.
         let bare = struct_helper(&StructDemand::default());
@@ -369,6 +379,7 @@ mod demand_tests {
         assert!(!bare.contains("f.impl"), "{bare}");
         assert!(!bare.contains("implMut"), "{bare}");
         assert!(!bare.contains("Object.entries(embeds)"), "{bare}");
+        assert!(!bare.contains("__deka_embed_factory"), "{bare}");
 
         // Each member is independent of the others.
         let only_mut = struct_helper(&StructDemand {

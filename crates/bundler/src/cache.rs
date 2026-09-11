@@ -104,24 +104,12 @@ pub struct ModuleCache {
 }
 
 impl ModuleCache {
-    /// Create a new module cache
-    pub fn new(cache_dir: Option<PathBuf>) -> Self {
-        // Cache is enabled by default
-        // Set DEKA_BUNDLER_CACHE=0 or DEKA_BUNDLER_CACHE=false to disable
-        let enabled = std::env::var("DEKA_BUNDLER_CACHE")
-            .map(|v| v != "0" && v != "false")
-            .unwrap_or(true);
-
-        let cache_dir = cache_dir.unwrap_or_else(|| {
-            let home = std::env::var("HOME")
-                .or_else(|_| std::env::var("USERPROFILE"))
-                .unwrap_or_else(|_| ".".to_string());
-            PathBuf::from(home)
-                .join(".config")
-                .join("deka")
-                .join("bundler")
-                .join("cache")
-        });
+    /// Create a module cache at a location selected by the caller.
+    ///
+    /// The cache location is an explicit build input; this crate never
+    /// consults process configuration or a user's home directory.
+    pub fn new(cache_dir: PathBuf) -> Self {
+        let enabled = true;
 
         // Load dependency graph from disk if it exists
         let graph = if enabled {
@@ -382,8 +370,7 @@ mod tests {
         let temp_dir = std::env::temp_dir().join("deka-bundler-test");
         let _ = fs::remove_dir_all(&temp_dir);
 
-        let mut cache = ModuleCache::new(Some(temp_dir.clone()));
-        cache.enabled = true; // Force enable for testing
+        let mut cache = ModuleCache::new(temp_dir.clone());
 
         // Create a test file
         let test_file = temp_dir.join("test.js");
@@ -419,8 +406,7 @@ mod tests {
         let temp_dir = std::env::temp_dir().join("deka-bundler-test-invalidation");
         let _ = fs::remove_dir_all(&temp_dir);
 
-        let mut cache = ModuleCache::new(Some(temp_dir.clone()));
-        cache.enabled = true;
+        let mut cache = ModuleCache::new(temp_dir.clone());
 
         // Create a test file
         let test_file = temp_dir.join("test.js");

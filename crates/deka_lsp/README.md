@@ -32,6 +32,5 @@ The server accepts an optional initialization setting:
 }
 ```
 
-`DEKA_MODULE_ROOT` can override the project root used for `php_modules`
-resolution. Workspace roots come from `workspaceFolders` or `rootUri`, falling
-back to the current directory.
+Workspace roots come from `workspaceFolders` or `rootUri`, falling back to the
+current directory.

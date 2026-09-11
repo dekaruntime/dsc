@@ -258,18 +258,7 @@ fn format_error_impl(
 }
 
 fn use_color_output() -> bool {
-    if cfg!(test) {
-        return false;
-    }
-    if std::env::var("NO_COLOR").is_ok() || std::env::var("DEKA_NO_COLOR").is_ok() {
-        return false;
-    }
-    if let Ok(term) = std::env::var("TERM") {
-        if term == "dumb" {
-            return false;
-        }
-    }
-    true
+    !cfg!(test)
 }
 
 fn colorize(text: &str, color: &str, enabled: bool) -> String {

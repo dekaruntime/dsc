@@ -84,24 +84,14 @@ pub fn compile_source_js(
         .ok_or_else(|| "module graph did not emit entry module".to_string())
 }
 
-/// Root that build slot ids are relativized against (dsc#61). The deka host
-/// runs dsc with cwd = project root and `DEKA_MODULE_ROOT` set; otherwise use
-/// `deka.json`/`deka.lock` detection. When neither identifies a project, keep
-/// the compiler's historical absolute-path identity by returning no root.
+/// Root that build slot ids are relativized against (dsc#61). Project markers
+/// in the source tree (`deka.json` or `deka.lock`) are the only root input.
+/// When neither identifies a project, keep the compiler's historical
+/// absolute-path identity by returning no root.
 /// `compile_dev_plan` and `compile_graph_modules` share this so plan ids and
 /// graph-emitted `deka:dev/<id>` imports agree.
 pub fn slot_id_root(cwd: &Path, input: &Path) -> Option<PathBuf> {
-    slot_id_root_from(
-        std::env::var_os("DEKA_MODULE_ROOT").map(PathBuf::from),
-        cwd,
-        input,
-    )
-}
-
-fn slot_id_root_from(env_root: Option<PathBuf>, cwd: &Path, input: &Path) -> Option<PathBuf> {
-    env_root
-        .filter(|root| !root.as_os_str().is_empty())
-        .or_else(|| find_project_root(cwd, input))
+    find_project_root(cwd, input)
 }
 
 /// Compile an entry and return only the build-time materialization contract.
@@ -607,28 +597,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn slot_id_root_prefers_env_over_markers() {
-        let cwd = Path::new("/repo");
-        let input = Path::new("/repo/app/page.ds");
-        let root = slot_id_root_from(Some(PathBuf::from("/env/root")), cwd, input);
-        assert_eq!(root, Some(PathBuf::from("/env/root")));
-    }
-
-    #[test]
-    fn slot_id_root_ignores_empty_env() {
-        let cwd = Path::new("/repo");
-        let input = Path::new("/repo/app/page.ds");
-        let root = slot_id_root_from(Some(PathBuf::new()), cwd, input);
-        assert_eq!(root, None);
-    }
-
-    #[test]
     fn slot_id_root_keeps_no_root_without_markers() {
         // No deka.json/deka.lock exists under /no-such-project on the test
         // machine, so callers retain the compiler's absolute-path identity.
         let cwd = Path::new("/no-such-project");
         let input = Path::new("/no-such-project/app/page.ds");
-        let root = slot_id_root_from(None, cwd, input);
+        let root = slot_id_root(cwd, input);
         assert_eq!(root, None);
     }
 }

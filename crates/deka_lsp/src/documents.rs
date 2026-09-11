@@ -395,11 +395,6 @@ fn modules_dir_if_present(root: &Path) -> Option<PathBuf> {
 }
 
 pub(crate) fn find_php_modules_root(start: &Path, workspace_roots: &[PathBuf]) -> Option<PathBuf> {
-    if let Ok(root) = std::env::var("DEKA_MODULE_ROOT") {
-        if let Some(candidate) = modules_dir_if_present(Path::new(&root)) {
-            return Some(candidate);
-        }
-    }
     let mut current = start.to_path_buf();
     if current.is_file() {
         current.pop();
@@ -659,5 +654,4 @@ pub(crate) fn should_skip_dir(path: &Path) -> bool {
         || name == "build"
         || name == "vendor"
 }
-
 

@@ -527,6 +527,38 @@ pub fn compile_module_graph_with_options(
         );
     }
 
+    // Local inference is available during collection. Refresh the existing
+    // `ModuleExports::values` surface in dependency order once graph imports
+    // are known, so imported initializers retain their real type too. As with
+    // dsc#86's private embed closure, do not introduce a second mechanism.
+    for path in order.iter().rev() {
+        let Some(program) = programs.get(path) else {
+            continue;
+        };
+        let module = modules.get(path).expect("module in graph");
+        let inferred = crate::infer_stdlib_imports_for_source(&module.source, &arena);
+        // Keep independent snapshots while updating this module's export map.
+        let dependency_exports: Vec<(&str, deka_syntax::ModuleExports)> = module
+            .dependencies
+            .iter()
+            .filter_map(|(specifier, dependency)| {
+                exports
+                    .get(dependency)
+                    .cloned()
+                    .map(|module_exports| (specifier.as_str(), module_exports))
+            })
+            .collect();
+        let mut combined: HashMap<&str, &deka_syntax::ModuleExports> = HashMap::new();
+        for (specifier, module_exports) in &inferred {
+            combined.insert(*specifier, module_exports);
+        }
+        for (specifier, module_exports) in &dependency_exports {
+            combined.insert(specifier, module_exports);
+        }
+        let module_exports = exports.get_mut(path).expect("module exports collected");
+        deka_syntax::refresh_module_export_values(program, &combined, module_exports);
+    }
+
     // ------------------------------------------------------------------
     // Compiler-private build fragments (dsc#52). Each module's exported
     // factories get a descriptor computed in the declaring module's own
@@ -1052,6 +1084,12 @@ fn copy_export<'a>(
     let mut changed = false;
     if let Some(value) = source.values.get(imported) {
         changed |= dest.values.insert(external, value.clone()) != Some(value.clone());
+        // dsc#119 values can name a private struct. These are the same
+        // compiler-private closures used for promoted-field lookup, not
+        // public type exports, so carry them with the value through a barrel.
+        for (name, closure) in &source.promotion_structs {
+            changed |= dest.promotion_structs.insert(name, closure.clone()).is_none();
+        }
     }
     if let Some(info) = source.structs.get(imported) {
         changed |= dest.structs.insert(external, info.clone()).is_none();
@@ -1270,6 +1308,85 @@ mod tests {
         let result =
             compile_module_graph(&c, &InMemoryLoader { files, aliases }).expect("barrel compiles");
         assert_eq!(result.modules.len(), 3);
+    }
+
+    #[test]
+    fn graph_propagates_inferred_exported_const_types() {
+        let root = PathBuf::from("/project");
+        let lib = root.join("lib.ds");
+        let barrel = root.join("barrel.ds");
+        let main = root.join("main.ds");
+        let mut files = HashMap::new();
+        files.insert(
+            lib.clone(),
+            "const base = 21\n\
+             fn double(value: number) number { return value * 2 }\n\
+             export const PI = 3.14159\n\
+             export const answer = double(base)".to_string(),
+        );
+        files.insert(
+            barrel.clone(),
+            "import { PI, answer } from \"./lib.ds\"\nexport { PI, answer }".to_string(),
+        );
+        files.insert(
+            main.clone(),
+            "import { PI, answer } from \"./barrel.ds\"\n\
+             const circumference: number = PI * 2\n\
+             const checked_answer: number = answer".to_string(),
+        );
+        let aliases = HashMap::from([
+            ((barrel.clone(), "./lib.ds".to_string()), lib),
+            ((main.clone(), "./barrel.ds".to_string()), barrel),
+        ]);
+        compile_module_graph(&main, &InMemoryLoader { files, aliases })
+            .expect("inferred exported const types cross the graph");
+    }
+
+    /// dsc#119: the issue reproducer must fail because PI crosses as number.
+    #[test]
+    fn graph_rejects_wrong_type_for_inferred_exported_const() {
+        let root = PathBuf::from("/project");
+        let lib = root.join("lib.ds");
+        let main = root.join("main.ds");
+        let mut files = HashMap::new();
+        files.insert(lib.clone(), "export const PI = 3.14159".to_string());
+        files.insert(
+            main.clone(),
+            "import { PI } from \"./lib.ds\"\n\
+             fn needs_string(value: string) string { return value }\n\
+             const value = needs_string(PI)".to_string(),
+        );
+        let aliases = HashMap::from([((main.clone(), "./lib.ds".to_string()), lib)]);
+        let errors = compile_module_graph(&main, &InMemoryLoader { files, aliases })
+            .expect_err("number must not flow into string through an import");
+        assert!(
+            errors.iter().any(|error| error
+                .message
+                .contains("expected argument type `string`, found type `number`")),
+            "expected imported PI to remain number, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn graph_requires_annotation_for_uninferable_exported_const() {
+        let root = PathBuf::from("/project");
+        let lib = root.join("lib.ds");
+        let mut files = HashMap::new();
+        files.insert(
+            lib.clone(),
+            "export const opaque = unsafe { process.env.VALUE }".to_string(),
+        );
+        let errors = compile_module_graph(
+            &lib,
+            &InMemoryLoader { files, aliases: HashMap::new() },
+        )
+        .expect_err("opaque exported values require a public annotation");
+        assert!(
+            errors.iter().any(|error| error.message.contains(
+                "could not infer a type for exported constant `opaque`; add an explicit type annotation"
+            )),
+            "expected an annotation diagnostic, got: {errors:?}"
+        );
     }
 
     /// Regression for the testsuite fixture `cross-module-struct-identity-001`:

@@ -19,5 +19,5 @@ pub use parse::{parse, ParseResult};
 pub use typeck::{
     build_module_build_fragments, check_program, check_program_with_imports,
     collect_exported_interactive_components, collect_interactive_components, collect_module_exports,
-    EnumInfo, MethodInfo, ModuleExports, StructInfo, TypeError,
+    refresh_module_export_values, EnumInfo, MethodInfo, ModuleExports, StructInfo, TypeError,
 };

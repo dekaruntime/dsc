@@ -233,3 +233,16 @@ jobs:
             echo "::error::dsc must not depend on V8 / deno_core"
             exit 1
           fi
+
+      # Folded in from the standalone rust-clippy analyze workflow: same
+      # toolchain (stable) and same flags (--all-features). Runs last because
+      # it switches the default toolchain away from the pinned 1.96.0.
+      - name: Setup Rust (stable) for clippy
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Run clippy
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
+        run: cargo clippy --all-features

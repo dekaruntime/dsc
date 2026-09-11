@@ -1732,54 +1732,11 @@ impl<'a> Checker<'a> {
     }
 
     fn seed_builtins(&mut self) {
-        // Host-provided JavaScript globals still reachable from plain DekaScript.
-        // They are typed opaquely as Infer; field/method access on Infer is
-        // allowed and returns Infer, so anything flowing through one of these
-        // stops being typechecked (deka#252). Console is excluded per RFD 32.
-        //
-        // RFD 21 and RFD 13's "imports over ambient globals" corollary say
-        // ordinary DekaScript does not reach host globals at all. Removing a
-        // name is only possible once a DekaScript replacement exists, so this
-        // list shrinks as those land (deka#378):
-        //
-        //   removed: JSON    -> @deka/json
-        //            crypto  -> @deka/crypto
-        //            Date    -> @deka/time
-        //
-        //   remaining: Math      prelude methods on `number` landed (#378
-        //                        step 2); the registration is deleted in
-        //                        step 5, and `PI` still wants a home
-        //              Object    Promise    parseInt    process    undecided
-        //              isset     removed by #416
-        //
-        // `unsafe { }` bodies are raw JavaScript and are not checked against
-        // this list, so a removed name is still reachable there — which is the
-        // form the stdlib packages already use.
-        // `process` is deliberately absent: it is behind the `env` capability
-        // and reachable only from `unsafe { }` (deka#378). Naming it in plain
-        // DekaScript is now `unknown identifier`, which is the diagnostic RFD
-        // 13 P10 asks for.
-        // `isset` is gone with deka#416: it existed only to test presence on an
-        // interface `?:` field, which is now an `Option` like everywhere else.
-        // Only `Math` is left. Its replacement exists as of deka#378 step 2 —
-        // `sqrt`/`floor` and friends are prelude methods on `number` — but
-        // the ambient registration stays until step 5 deletes it, and `PI`
-        // still wants a home.
-        //
-        // `Object`, `Promise` and `parseInt` are gone. `Promise` stays a
-        // *type* -- 63 annotations across the corpora are unaffected, because
-        // types resolve through `resolve_ast_type` and never consulted this
-        // list. `parseInt`'s replacement is `parseNumber(s)`, which yields
-        // `Option<number>` rather than `NaN`, so removing it is a net
-        // improvement rather than a subtraction.
-        //
         // `deka` is the host-capability global (`deka.ui.State.create`, …),
         // settled by DS decision #6: host capabilities hang off the `deka`
         // global, language and stdlib stay imports. It is declared here so
         // the native and browser (wasm) compilers agree on it (deka#481).
-        for name in ["Math", "deka"] {
-            self.globals.insert(name, Type::Infer);
-        }
+        self.globals.insert("deka", Type::Infer);
     }
 
     fn seed_imports(&mut self, imports: &HashMap<&str, &ModuleExports<'a>>) {
@@ -4801,6 +4758,16 @@ mod tests {
         assert_eq!(
             errors[0].message,
             "expected return type `string`, found type `number | string`; narrow it with a match before use"
+        );
+    }
+
+    #[test]
+    fn math_global_diagnostic_teaches_the_module_import() {
+        let errors = typeck("const circumference: number = Math.PI * 2;");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(
+            errors[0].message,
+            "`Math` is not available in DekaScript; import { PI } from \"math\" instead for PI, or use number methods such as `x.sqrt()`"
         );
     }
 

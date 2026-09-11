@@ -491,6 +491,52 @@ fn run_node(dir: &Path, script: &str) -> std::process::Output {
 }
 
 #[test]
+fn math_module_pi_runs_and_math_global_teaches_the_import() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    write(
+        &root.join("circle.ds"),
+        "import { PI } from \"math\"\nexport const circumference: number = PI * 2\n",
+    );
+
+    let output = run_in(root, &["transpile", "circle.ds"]);
+    assert!(output.status.success(), "{}", combined(&output));
+    let emitted = fs::read_to_string(root.join("circle.js")).expect("emitted circle module");
+    assert!(
+        emitted.contains("const PI = Math.PI;"),
+        "PI must lower through the math module: {emitted}"
+    );
+    assert!(
+        !emitted.contains("from \"math\""),
+        "math must not rely on a host package: {emitted}"
+    );
+    write(
+        &root.join("run-circle.mjs"),
+        "import { circumference } from \"./circle.js\";\nconsole.log(circumference);\n",
+    );
+    let run = run_node(root, "run-circle.mjs");
+    assert!(run.status.success(), "{}", combined(&run));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "6.283185307179586"
+    );
+
+    write(
+        &root.join("old-math.ds"),
+        "const circumference: number = Math.PI * 2\n",
+    );
+    let old = run_in(root, &["check", "--single-file", "old-math.ds"]);
+    assert!(!old.status.success(), "{}", combined(&old));
+    assert!(
+        combined(&old).contains(
+            "`Math` is not available in DekaScript; import { PI } from \"math\" instead for PI"
+        ),
+        "old Math diagnostic must teach the replacement: {}",
+        combined(&old)
+    );
+}
+
+#[test]
 fn plan_entry_referencing_unsafe_only_helper_executes() {
     // dsc#59: a helper reachable only from inside an `unsafe` arrow body was
     // omitted from the build plan's entry, so build-entry execution failed

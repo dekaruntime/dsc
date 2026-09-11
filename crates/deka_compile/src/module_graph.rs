@@ -393,6 +393,14 @@ pub fn compile_module_graph_with_options(
             if is_compiler_ui_spec(&import.path) {
                 continue;
             }
+            // `math` is a closed compiler module, emitted as local bindings
+            // instead of an import. Do not ask a filesystem/package loader
+            // for it: that would make the replacement for `Math.PI` depend
+            // on an ambient host package.
+            if crate::is_math_module_spec(&import.path) {
+                virtual_imports.push("math".to_string());
+                continue;
+            }
             // Side-effect CSS imports (`import "./x.css"`) are not JS modules:
             // emit drops them and the per-route CSS collector rewrites their
             // selectors with the component's scope stamp (RFD 24 §10.6).
@@ -753,6 +761,10 @@ pub fn compile_module_graph_with_options(
     }
 
     // Build per-module import maps pointing to dependency exports.
+    let mut math_exports = deka_syntax::ModuleExports::default();
+    math_exports
+        .values
+        .insert("PI", deka_syntax::typeck::Type::Named { name: "number" });
     let mut imports: HashMap<PathBuf, HashMap<&str, &deka_syntax::ModuleExports>> =
         HashMap::with_capacity(modules.len());
     for module in modules.values() {
@@ -760,6 +772,16 @@ pub fn compile_module_graph_with_options(
         for (spec, dep) in module.dependencies.iter() {
             if let Some(dep_exports) = exports.get(dep) {
                 module_imports.insert(spec.as_str(), dep_exports);
+            }
+        }
+        if let Some(program) = programs.get(&module.path) {
+            for stmt in program.statements.iter() {
+                let deka_syntax::Stmt::Import { source, .. } = stmt else {
+                    continue;
+                };
+                if crate::is_math_module_spec(source) {
+                    module_imports.insert(source, &math_exports);
+                }
             }
         }
         imports.insert(module.path.clone(), module_imports);

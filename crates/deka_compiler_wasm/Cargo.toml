@@ -14,4 +14,4 @@ deka_compile = { path = "../deka_compile" }
 deka_syntax = { path = "../deka_syntax" }
 deka_project = { path = "../deka_project" }
 deka-fmt = { path = "../deka-fmt" }
-deka-validation = { path = "../deka-validation", default-features = false }
+deka-validation = { version = "0.2", default-features = false }

@@ -253,7 +253,7 @@ pub(crate) struct Diagnostic {
     end_column: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     help: Option<String>,
-    /// Pre-formatted error string produced by the same `deka_validation` crate
+    /// Pre-formatted error string produced by the same shared formatter crate
     /// used by the native runtime, so the browser can display diagnostics
     /// without re-implementing the formatter.
     rendered: String,

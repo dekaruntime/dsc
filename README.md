@@ -30,7 +30,8 @@ PR CI runs on GitHub-hosted runners with a read-only token and no secrets. The r
 
 ## Versioning
 
-Vercioning of dsc is independent of deka. There is no pinning in place. Deka is designed to be indifferent to which version of dsc is being used.
+dsc versions in lockstep with deka, testsuite, and tour — one shared version
+number across all four repos per RFD 59 (see [VERSIONING.md](VERSIONING.md)).
 
 Bump on a branch (`scripts/bump-version.sh minor`), merge the PR, then push an annotated `v*` tag from `main`. That tag is the release. See [VERSIONING.md](VERSIONING.md) and [PUBLISH.md](PUBLISH.md).
 

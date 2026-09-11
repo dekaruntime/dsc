@@ -1,3 +1,0 @@
-// A missing pipe target used to become `Infer`, so this assignment silently
-// passed even though emitted JavaScript would call an undefined name.
-const answer: number = 21 |> missing

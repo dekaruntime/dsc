@@ -1,3 +1,0 @@
-import { echo } from "io"
-const status = "This is DekaScript";
-echo(status);

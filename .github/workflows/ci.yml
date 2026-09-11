@@ -122,6 +122,34 @@ jobs:
         with:
           cache-on-failure: true
 
+      # Both fixture sets are owned outside this repo: the Hats corpus by
+      # dekaruntime/testsuite and the tour (lessons, manifest, runner) by
+      # dekaruntime/tour. Each is fetched through a reviewed checksum pin;
+      # workspace tests below read them from .cache/.
+      - name: Forbid vendored testsuite corpus
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
+        run: |
+          if find tests -type d -name testsuite -print -quit | grep -q .; then
+            echo "::error::testsuite corpus must not be vendored; use scripts/ci-fetch-testsuite-corpus.sh"
+            exit 1
+          fi
+
+      - name: Forbid vendored tour
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
+        run: |
+          if find tests -type d -name tour -print -quit | grep -q .; then
+            echo "::error::tour must not be vendored; it is owned by dekaruntime/tour. Use scripts/ci-fetch-tour.sh"
+            exit 1
+          fi
+
+      - name: Fetch pinned testsuite corpus
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
+        run: scripts/ci-fetch-testsuite-corpus.sh "$GITHUB_WORKSPACE/.cache/testsuite-corpus"
+
+      - name: Fetch pinned tour
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
+        run: scripts/ci-fetch-tour.sh "$GITHUB_WORKSPACE/.cache/tour"
+
       - name: Verify lockfile
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
         run: cargo update --workspace --locked
@@ -138,28 +166,12 @@ jobs:
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != '' && env.SCCACHE_ENDPOINT != '' }}
         run: sccache --show-stats
 
-      # Tour remains local. The shared Hats corpus is downloaded from its
-      # owner, dekaruntime/testsuite, through a reviewed checksum pin.
-      - name: Forbid vendored testsuite corpus
-        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
-        run: |
-          if find tests -type d -name testsuite -print -quit | grep -q .; then
-            echo "::error::testsuite corpus must not be vendored; use scripts/ci-fetch-testsuite-corpus.sh"
-            exit 1
-          fi
-
-      - name: Fetch pinned testsuite corpus
-        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
-        run: scripts/ci-fetch-testsuite-corpus.sh "$GITHUB_WORKSPACE/.cache/testsuite-corpus"
-
       - name: Language fixtures
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
-        env:
-          DEKA_TESTSUITE_ROOT: ${{ github.workspace }}/.cache/testsuite-corpus
         run: |
-          test -f tests/tour/manifest.json
-          n=$(find "$DEKA_TESTSUITE_ROOT" \( -name '*.pass.ds' -o -name '*.pass.dsx' \) | wc -l)
-          test "$n" -gt 100
+          test -f .cache/tour/manifest.json
+          n=$(find .cache/tour \( -name '*.ds' -o -name '*.dsx' \) | wc -l)
+          test "$n" -gt 80
           cargo test --locked -p deka-fmt --test corpus_roundtrip
           cargo test --locked -p deka_compiler_wasm all_website_tour_sources_match_the_native_abi_contract
 
@@ -182,6 +194,22 @@ jobs:
       - name: Build dsc for the testsuite gate
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
         run: cargo build --release -p cli
+
+      # The wasm tour test above cannot resolve stdlib packages like `io`, so
+      # it skips those lessons. This gate has no such excuse: seed the shared
+      # package cache with the pinned deka CLI, then compile every tour
+      # lesson — io importers included — with the dsc built from this tree,
+      # through the tour owner's own runner. A language change that breaks a
+      # lesson fails here.
+      - name: Seed tour io package cache
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
+        run: scripts/ci-seed-tour-io.sh "$GITHUB_WORKSPACE/.cache/deka-runtime/deka"
+
+      - name: Run the pinned tour against dsc (native)
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
+        env:
+          DSC: ${{ github.workspace }}/target/release/dsc
+        run: bun "$GITHUB_WORKSPACE/.cache/tour/run.mjs"
 
       - name: Testsuite fixtures against the pinned runtime
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}

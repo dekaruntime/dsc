@@ -25,15 +25,18 @@ use std::path::{Path, PathBuf};
 /// Both .ds and .dsx pass fixtures are collected: matching "pass.ds" alone
 /// misses every "pass.dsx" (deka#493 — the same .ds-only assumption that made
 /// `cli fmt <dir>` silently skip .dsx).
+///
+/// The tour is owned by dekaruntime/tour and fetched into `.cache/tour` by
+/// scripts/ci-fetch-tour.sh; it is never vendored under tests/.
 fn corpus_files() -> Vec<PathBuf> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests");
     let testsuite =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.cache/testsuite-corpus");
+    let tour = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.cache/tour");
     let mut files = Vec::new();
     collect(&testsuite, "pass.ds", &mut files);
     collect(&testsuite, "pass.dsx", &mut files);
-    collect(&root.join("tour"), "ds", &mut files);
-    collect(&root.join("tour"), "dsx", &mut files);
+    collect(&tour, "ds", &mut files);
+    collect(&tour, "dsx", &mut files);
     files.sort();
     files
 }
@@ -60,7 +63,9 @@ fn collect(dir: &Path, suffix: &str, out: &mut Vec<PathBuf>) {
 fn fmt_output_parses_and_is_idempotent_across_corpus() {
     let files = corpus_files();
     if files.is_empty() {
-        panic!("tests/tour is missing");
+        panic!(
+            "no fixtures found; run scripts/ci-fetch-testsuite-corpus.sh and scripts/ci-fetch-tour.sh"
+        );
     }
     assert!(
         files.len() > 50,

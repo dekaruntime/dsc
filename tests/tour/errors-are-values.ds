@@ -1,3 +1,0 @@
-import { echo } from "io"
-const result = { ok: false, error: "title is required" };
-echo(result.error);

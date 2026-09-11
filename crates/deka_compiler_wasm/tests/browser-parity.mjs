@@ -60,19 +60,21 @@ if (failure.ok || diagnostic?.severity !== "error" || diagnostic.filename !== "b
   throw new Error(`diagnostic compile did not match the ABI contract: ${JSON.stringify(failure)}`);
 }
 
-const tourDir = join(dirname(fileURLToPath(import.meta.url)), "../../../tests/tour");
+// The tour is owned by dekaruntime/tour and fetched by
+// scripts/ci-fetch-tour.sh; it is never vendored under tests/.
+const tourDir = join(dirname(fileURLToPath(import.meta.url)), "../../../.cache/tour");
 const tourManifest = JSON.parse(await readFile(join(tourDir, "manifest.json"), "utf-8"));
 const tourFiles = (await readdir(tourDir)).filter((name) => name.endsWith(".ds") || name.endsWith(".dsx"));
 const manifestIds = new Set(tourManifest.map((lesson) => lesson.id));
 const fileIds = new Set(tourFiles.map((name) => name.replace(/\.dsx?$/, "")));
 for (const id of manifestIds) {
-  if (!fileIds.has(id)) throw new Error(`tests/tour/manifest.json lists ${id} but ${id}.ds/.dsx is missing`);
+  if (!fileIds.has(id)) throw new Error(`.cache/tour/manifest.json lists ${id} but ${id}.ds/.dsx is missing`);
 }
 for (const id of fileIds) {
-  if (!manifestIds.has(id)) throw new Error(`tests/tour/${id}.ds/.dsx is not listed in manifest.json`);
+  if (!manifestIds.has(id)) throw new Error(`.cache/tour/${id}.ds/.dsx is not listed in manifest.json`);
 }
 if (tourManifest.length === 0) {
-  throw new Error("tests/tour must contain at least one lesson");
+  throw new Error(".cache/tour must contain at least one lesson");
 }
 for (const lesson of tourManifest) {
   const extension = existsSync(join(tourDir, `${lesson.id}.dsx`)) ? "dsx" : "ds";

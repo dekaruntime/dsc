@@ -21,6 +21,7 @@ use swc_ecma_transforms_typescript::strip;
 
 pub use crate::cached::bundle_browser_assets_cached;
 use crate::css_bundler::{self, CssAsset};
+use crate::optimizer;
 
 const CLIENT_SERVER_IMPORT_ERROR: &str = "client bundle cannot import ui/server";
 
@@ -36,86 +37,19 @@ pub struct BundleOptions {
     pub iife: bool,
     /// When true, a reachable `ui/server` import is a build failure.
     pub client: bool,
+    /// Shared runtime prelude synthesized once for the whole program
+    /// (deka#595). Module bodies reference its helpers as free identifiers;
+    /// the single-file bundle is the one place those resolve. For ES-module
+    /// output the prelude is prepended to the bundle text; for IIFE output
+    /// it is injected at the head of the wrapper body so the output still
+    /// starts with `(async function` (the pool's pre-bundled IIFE
+    /// detection depends on it). Minified bundles get the prelude minified
+    /// with the same restricted configuration.
+    pub prelude: Option<String>,
 }
 
 pub type BuildOptions = BundleOptions;
 
-/// Optimize already-emitted ESM without resolving or bundling imports.
-///
-/// Contract: source and output are ESM; relative specifiers are preserved.
-/// This is the same safe SWC configuration used for `BundleOptions::minify`
-/// and exists for the CLI's module-preserving `--treeshake` mode.
-pub fn optimize_emitted_module(source: &str, path: &Path) -> Result<String, String> {
-    let cm: Lrc<SourceMap> = Default::default();
-    let fm = cm.new_source_file(
-        FileName::Real(path.to_path_buf()).into(),
-        source.to_string(),
-    );
-    let syntax = Syntax::Es(EsSyntax {
-        jsx: false,
-        export_default_from: true,
-        import_attributes: true,
-        ..Default::default()
-    });
-    let lexer = Lexer::new(syntax, EsVersion::Es2022, StringInput::from(&*fm), None);
-    let mut parser = Parser::new_from(lexer);
-    let module = parser
-        .parse_module()
-        .map_err(|err| format!("failed to parse emitted JavaScript: {err:?}"))?;
-    let globals = Globals::new();
-    let module = GLOBALS.set(&globals, || minify_module(module, cm.clone()));
-    emit_module(&module, cm)
-}
-
-fn minify_module(module: Module, cm: Lrc<SourceMap>) -> Module {
-    let top_level_mark = Mark::new();
-    let unresolved_mark = Mark::new();
-    // These restrictions guard known SWC output bugs: conditionals/bools can
-    // emit invalid assignment expressions, sequences can corrupt for-of heads,
-    // inline can merge module-local bindings, and if_return can lose ternary
-    // parentheses. Keep this shared configuration in sync for bundling and
-    // module-preserving transpile optimization.
-    let mut compress = CompressOptions::default();
-    compress.conditionals = false;
-    compress.bools = false;
-    compress.sequences = 0;
-    compress.inline = 0;
-    compress.if_return = false;
-    let minify_options = MinifyOptions {
-        compress: Some(compress),
-        mangle: None,
-        ..Default::default()
-    };
-    match optimize(
-        Program::Module(module),
-        cm,
-        None,
-        None,
-        &minify_options,
-        &swc_ecma_minifier::option::ExtraOptions {
-            unresolved_mark,
-            top_level_mark,
-            mangle_name_cache: Default::default(),
-        },
-    ) {
-        Program::Module(module) => module,
-        Program::Script(_) => unreachable!("module optimization returned a script"),
-    }
-}
-
-fn emit_module(module: &Module, cm: Lrc<SourceMap>) -> Result<String, String> {
-    let mut buf = Vec::new();
-    let mut emitter = Emitter {
-        cfg: swc_ecma_codegen::Config::default(),
-        comments: None,
-        cm: cm.clone(),
-        wr: JsWriter::new(cm, "\n", &mut buf, None),
-    };
-    emitter
-        .emit_module(module)
-        .map_err(|err| format!("failed to emit optimized JavaScript: {err}"))?;
-    String::from_utf8(buf).map_err(|err| format!("optimized JavaScript was not UTF-8: {err}"))
-}
 
 pub trait VirtualSource: Send + Sync {
     fn load_virtual(&self, path: &Path) -> Result<Option<String>, String>;
@@ -133,7 +67,7 @@ pub fn bundle_virtual_entry(
         css_collector: Arc::new(Mutex::new(CssCollector::default())),
         provider,
     };
-    let resolver = DekaResolver::new(options.project_root, options.client)?;
+    let resolver = DekaResolver::new(options.project_root.clone(), options.client)?;
 
     let mut bundler = Bundler::new(
         &globals,
@@ -171,7 +105,9 @@ pub fn bundle_virtual_entry(
         .ok_or_else(|| "Failed to find bundled output".to_string())?;
 
     let module = if options.minify {
-        GLOBALS.set(&globals, || minify_module(bundle.module, cm.clone()))
+        GLOBALS.set(&globals, || {
+            optimizer::minify_module(bundle.module, cm.clone(), false, Mark::new(), Mark::new())
+        })
     } else {
         bundle.module
     };
@@ -189,7 +125,59 @@ pub fn bundle_virtual_entry(
             .map_err(|err| err.to_string())?;
     }
 
-    String::from_utf8(buf).map_err(|err| err.to_string())
+    let out = String::from_utf8(buf).map_err(|err| err.to_string())?;
+    attach_prelude(out, &options)
+}
+
+/// Place the program prelude in the final bundle (deka#595): prepended for
+/// ES-module output, injected at the head of the IIFE wrapper body for IIFE
+/// output so the `(async function` prefix the pool sniffs for stays intact.
+fn attach_prelude(out: String, options: &BundleOptions) -> Result<String, String> {
+    let Some(prelude) = &options.prelude else {
+        return Ok(out);
+    };
+    let prelude = if options.minify {
+        let minified = optimizer::minify_source_text("__deka_prelude__.js", prelude)?;
+        format!("{minified}\n")
+    } else {
+        prelude.clone()
+    };
+    if !options.iife {
+        return Ok(format!("{prelude}{out}"));
+    }
+    // IIFE bundles must keep starting with `(async function` (the isolate
+    // pool detects pre-bundled handlers by that prefix), so the prelude goes
+    // INSIDE the wrapper: immediately after its opening brace, which is the
+    // first `{` in the output.
+    let Some(brace) = out.find('{') else {
+        return Err("IIFE bundle has no wrapper body to inject the prelude into".to_string());
+    };
+    if !out[..brace].contains("function") {
+        return Err(format!(
+            "IIFE bundle wrapper prefix looks unexpected: {:?}",
+            &out[..brace.min(out.len())]
+        ));
+    }
+    // Keep a leading `"use strict";` directive prologue first in the wrapper
+    // body: the prelude must not degrade it to a dead string expression.
+    let mut insert_at = brace + 1;
+    let after_brace = &out[insert_at..];
+    let leading_ws = after_brace
+        .find(|c: char| !c.is_whitespace())
+        .unwrap_or(after_brace.len());
+    insert_at += leading_ws;
+    const USE_STRICT: &str = "\"use strict\";";
+    if out[insert_at..].starts_with(USE_STRICT) {
+        insert_at += USE_STRICT.len();
+    }
+    let mut injected = String::with_capacity(out.len() + prelude.len());
+    injected.push_str(&out[..insert_at]);
+    if !injected.ends_with('\n') {
+        injected.push('\n');
+    }
+    injected.push_str(&prelude);
+    injected.push_str(&out[insert_at..]);
+    Ok(injected)
 }
 
 pub fn bundle_browser(entry: &str) -> Result<String, String> {
@@ -827,9 +815,9 @@ impl DekaResolver {
         }
     }
 
-    fn resolve_php_module(&self, specifier: &str) -> Option<PathBuf> {
-        if let Some(path) = self.resolve_linked_module(specifier) {
-            return Some(path);
+    fn resolve_php_module(&self, specifier: &str) -> Result<Option<PathBuf>, String> {
+        if let Some(path) = self.resolve_linked_module(specifier)? {
+            return Ok(Some(path));
         }
         for modules in self.module_roots() {
             for alias in module_spec_aliases(specifier) {
@@ -842,15 +830,15 @@ impl DekaResolver {
                 };
                 if let Some(path) = resolve_with_candidates(&base) {
                     if guard_path_traversal(&path, &modules).is_some() {
-                        return Some(path);
+                        return Ok(Some(path));
                     }
                 }
             }
         }
-        None
+        Ok(None)
     }
 
-    fn resolve_linked_module(&self, specifier: &str) -> Option<PathBuf> {
+    fn resolve_linked_module(&self, specifier: &str) -> Result<Option<PathBuf>, String> {
         for (package, root) in &self.linked_modules {
             for alias in module_spec_aliases(package) {
                 let suffix = if specifier == alias {
@@ -865,14 +853,22 @@ impl DekaResolver {
                 } else {
                     root.join(suffix)
                 };
-                if let Some(candidate) = resolve_with_candidates(&target)
-                    && guard_path_traversal(&candidate, root).is_some()
-                {
-                    return Some(candidate);
+                let candidate = resolve_with_candidates(&target).ok_or_else(|| {
+                    format!(
+                        "unable to resolve linked module '{specifier}' under {}",
+                        root.display()
+                    )
+                })?;
+                if guard_path_traversal(&candidate, root).is_none() {
+                    return Err(format!(
+                        "linked module '{specifier}' escapes linked package root {}",
+                        root.display()
+                    ));
                 }
+                return Ok(Some(candidate));
             }
         }
-        None
+        Ok(None)
     }
 }
 
@@ -921,7 +917,10 @@ impl Resolve for DekaResolver {
         // Local development links intentionally win over installed packages.
         // Check before built-in aliases so a link for @deka/component also
         // wins for the shorthand component/* form.
-        if let Some(candidate) = self.resolve_linked_module(specifier) {
+        if let Some(candidate) = self
+            .resolve_linked_module(specifier)
+            .map_err(anyhow::Error::msg)?
+        {
             return Ok(Resolution {
                 filename: FileName::Real(candidate),
                 slug: None,
@@ -955,7 +954,10 @@ impl Resolve for DekaResolver {
             }
         }
 
-        if let Some(candidate) = self.resolve_php_module(specifier) {
+        if let Some(candidate) = self
+            .resolve_php_module(specifier)
+            .map_err(anyhow::Error::msg)?
+        {
             return Ok(Resolution {
                 filename: FileName::Real(candidate),
                 slug: None,
@@ -1127,5 +1129,7 @@ fn to_camel_case(input: &str) -> String {
     out
 }
 
+#[cfg(test)]
+mod prelude_tests;
 #[cfg(test)]
 mod tests;

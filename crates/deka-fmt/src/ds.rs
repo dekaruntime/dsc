@@ -68,6 +68,23 @@ impl<'src> Formatter<'src> {
         }
     }
 
+    /// Remove every pending comment before `line` and return it as a bundle.
+    /// Import declarations are formatted out of source order, so their
+    /// leading comments must be collected before the imports are sorted rather
+    /// than emitted through the normal forward-only comment cursor.
+    fn take_comments_before(&mut self, line: usize) -> Vec<String> {
+        let first = self.comment_cursor;
+        while self.comment_cursor < self.comments.len()
+            && self.comments[self.comment_cursor].0 < line
+        {
+            self.comment_cursor += 1;
+        }
+        self.comments[first..self.comment_cursor]
+            .iter()
+            .map(|(_, text)| text.clone())
+            .collect()
+    }
+
     /// Line of the first pending comment before `line`, if any. The
     /// blank-line separator measures the gap to this rather than to the next
     /// statement, because a statement span swallows trailing comments and
@@ -172,12 +189,69 @@ impl<'src> Formatter<'src> {
     // --- program & statements ----------------------------------------------
 
     fn fmt_program(&mut self, program: Program<'_>) {
+        let statements: Vec<&Stmt<'_>> = program
+            .statements
+            .iter()
+            .filter(|stmt| !matches!(stmt, Stmt::Empty { .. }))
+            .collect();
+        let import_count = statements
+            .iter()
+            .take_while(|stmt| matches!(stmt, Stmt::Import { .. }))
+            .count();
         let mut first = true;
         let mut prev_end_line: Option<usize> = None;
-        for stmt in program.statements {
-            if matches!(stmt, Stmt::Empty { .. }) {
-                continue;
+
+        if import_count > 0 {
+            let mut imports: Vec<(&Stmt<'_>, Vec<String>)> = statements[..import_count]
+                .iter()
+                .map(|&stmt| {
+                    let comments = self.take_comments_before(self.stmt_start_line(stmt));
+                    (stmt, comments)
+                })
+                .collect();
+
+            // This ordering deliberately treats every non-relative specifier
+            // as external. Deka has a closed bare-package universe today, but
+            // a future URL or absolute specifier is still not a local module
+            // and should remain in the dependency-visible group.
+            //
+            // Import declaration order can affect ESM evaluation order. This
+            // formatter rule therefore relies on Deka modules treating imports
+            // as declarations, not ordered side-effect execution.
+            imports.sort_by(|(left, _), (right, _)| {
+                let left_source = import_source(left);
+                let right_source = import_source(right);
+                is_local_import(left_source)
+                    .cmp(&is_local_import(right_source))
+                    .then_with(|| left_source.cmp(right_source))
+                    .then_with(|| import_to_string(left).cmp(&import_to_string(right)))
+            });
+
+            let mut previous_group = None;
+            for (import, comments) in imports {
+                let group = is_local_import(import_source(import));
+                if let Some(previous_group) = previous_group {
+                    if previous_group == group {
+                        self.newline();
+                    } else {
+                        // The required visual boundary between dependencies
+                        // outside this module and local implementation files.
+                        self.write("\n\n");
+                    }
+                }
+                for comment in comments {
+                    self.write(&comment);
+                    self.newline();
+                }
+                self.fmt_stmt(import);
+                previous_group = Some(group);
             }
+
+            first = false;
+            prev_end_line = Some(self.stmt_end_line(statements[import_count - 1]));
+        }
+
+        for &stmt in &statements[import_count..] {
             let next_line = self.stmt_start_line(stmt);
             if !first {
                 let gap_to = self.pending_comment_line(next_line).unwrap_or(next_line);
@@ -196,26 +270,7 @@ impl<'src> Formatter<'src> {
         let stmt_end_line = self.stmt_end_line(stmt);
         match stmt {
             Stmt::Export { decl, .. } => self.fmt_export_decl(decl, stmt_end_line),
-            Stmt::Import {
-                specifiers, source, ..
-            } => {
-                self.write("import ");
-                if specifiers.is_empty() {
-                    self.write("\"");
-                    self.write(source);
-                    self.write("\"");
-                } else {
-                    self.write("{ ");
-                    let parts: Vec<String> = specifiers
-                        .iter()
-                        .map(|s| import_spec_to_string(s))
-                        .collect();
-                    self.write(&parts.join(", "));
-                    self.write(" } from \"");
-                    self.write(source);
-                    self.write("\"");
-                }
-            }
+            Stmt::Import { .. } => self.write(&import_to_string(stmt)),
             Stmt::Const {
                 name, ty, value, ..
             } => {
@@ -1296,6 +1351,33 @@ fn import_spec_to_string(spec: &ImportSpec<'_>) -> String {
     }
 }
 
+fn import_source<'src>(stmt: &Stmt<'src>) -> &'src str {
+    match stmt {
+        Stmt::Import { source, .. } => source,
+        _ => unreachable!("import ordering only receives imports"),
+    }
+}
+
+fn is_local_import(source: &str) -> bool {
+    source.starts_with('.')
+}
+
+fn import_to_string(stmt: &Stmt<'_>) -> String {
+    let Stmt::Import {
+        specifiers, source, ..
+    } = stmt
+    else {
+        unreachable!("import ordering only receives imports");
+    };
+
+    if specifiers.is_empty() {
+        format!("import \"{source}\"")
+    } else {
+        let parts: Vec<String> = specifiers.iter().map(import_spec_to_string).collect();
+        format!("import {{ {} }} from \"{source}\"", parts.join(", "))
+    }
+}
+
 fn export_name_to_string(name: &ExportName<'_>) -> String {
     if let Some(alias) = name.alias {
         format!("{} as {}", name.name, alias)
@@ -1993,6 +2075,84 @@ mod tests {
         let input = "// hello\nlet x = 1\n";
         let output = format_ds(input).unwrap();
         assert!(output.starts_with("// hello\n"), "got: {output:?}");
+    }
+
+    #[test]
+    fn sorts_mixed_import_groups_alphabetically() {
+        let input = r#"import { session } from "./session.ds"
+import { echo } from "io"
+import { CookieOptions } from "../types.ds"
+import { sha256 } from "crypto"
+const result = sha256("value")"#;
+        let expected = r#"import { sha256 } from "crypto"
+import { echo } from "io"
+
+import { CookieOptions } from "../types.ds"
+import { session } from "./session.ds"
+const result = sha256("value")
+"#;
+
+        let once = format_ds(input).unwrap();
+        assert_eq!(once, expected);
+        assert_eq!(format_ds(&once).unwrap(), once);
+    }
+
+    #[test]
+    fn leaves_already_sorted_import_groups_unchanged() {
+        let input = r#"import { sha256 } from "crypto"
+import { echo } from "io"
+
+import { CookieOptions } from "../types.ds"
+import { session } from "./session.ds"
+const result = sha256("value")
+"#;
+        assert_eq!(format_ds(input).unwrap(), input);
+    }
+
+    #[test]
+    fn import_comments_travel_with_their_imports() {
+        let input = r#"// session state
+import { session } from "./session.ds"
+// hashing dependency
+import { sha256 } from "crypto"
+// authentication dependency
+import { authenticate } from "@deka/auth"
+// shared local type
+import { CookieOptions } from "../types.ds"
+"#;
+        let expected = r#"// authentication dependency
+import { authenticate } from "@deka/auth"
+// hashing dependency
+import { sha256 } from "crypto"
+
+// shared local type
+import { CookieOptions } from "../types.ds"
+// session state
+import { session } from "./session.ds"
+"#;
+
+        let once = format_ds(input).unwrap();
+        assert_eq!(once, expected);
+        assert_eq!(format_ds(&once).unwrap(), once);
+    }
+
+    #[test]
+    fn sorts_single_import_groups_without_inserting_a_separator() {
+        let external = r#"import { echo } from "io"
+import { sha256 } from "crypto"
+"#;
+        assert_eq!(
+            format_ds(external).unwrap(),
+            "import { sha256 } from \"crypto\"\nimport { echo } from \"io\"\n"
+        );
+
+        let local = r#"import { session } from "./session.ds"
+import { CookieOptions } from "../types.ds"
+"#;
+        assert_eq!(
+            format_ds(local).unwrap(),
+            "import { CookieOptions } from \"../types.ds\"\nimport { session } from \"./session.ds\"\n"
+        );
     }
 
     #[test]

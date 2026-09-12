@@ -1,0 +1,6 @@
+{
+  "title": "Await invalidates an established indexing proof",
+  "stage": "typecheck",
+  "notes": "Await a Promise parameter after a proven read so suspension is the only invalidator.",
+  "expectedDiagnosticContains": "index not proven in bounds — test it first: `a.has(i) ? a[i] : fallback`"
+}

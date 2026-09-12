@@ -329,6 +329,21 @@ mod tests {
         }
     }
     #[test]
+    fn indexing_await_invalidates_established_proof() {
+        // Await a parameter so no call or assignment can invalidate the proof.
+        let source = "async fn f(a: Array<number>, i: number, pending: Promise<number>) Promise<number> { if (a.has(i)) { const before = a[i]; await pending; return a[i]; } return 0; }";
+        assert!(typeck(&source.replace("await pending;", "")).is_empty());
+        let errors = typeck(source);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(
+            errors[0].message,
+            "index not proven in bounds — test it first: `a.has(i) ? a[i] : fallback`"
+        );
+        let refreshed = source.replace("return a[i];", "return a.has(i) ? a[i] : 0;");
+        assert!(typeck(&refreshed).is_empty(), "{:?}", typeck(&refreshed));
+    }
+
+    #[test]
     fn indexing_has_signature_is_checked() {
         for source in [
             "const a = [1]; const x = a.has();",

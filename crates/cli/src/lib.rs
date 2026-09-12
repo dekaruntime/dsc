@@ -13,6 +13,7 @@ pub fn build_registry() -> Registry {
     cli::lsp::register(&mut registry);
     cli::plan::register(&mut registry);
     cli::bundle::register(&mut registry);
+    cli::summon::register(&mut registry);
     registry
 }
 
@@ -31,11 +32,24 @@ mod tests {
     #[test]
     fn registry_has_compiler_commands() {
         let registry = build_registry();
-        for name in ["check", "fmt", "transpile", "lsp", "plan", "bundle"] {
+        for name in [
+            "check",
+            "fmt",
+            "transpile",
+            "lsp",
+            "plan",
+            "bundle",
+            "summon",
+        ] {
             assert!(
                 registry.command_named(name).is_some(),
                 "missing command {name}"
             );
         }
+        let summon = registry.command_named("summon").unwrap();
+        assert!(
+            registry.subcommand_named(summon, "infer").is_some(),
+            "missing summon infer"
+        );
     }
 }

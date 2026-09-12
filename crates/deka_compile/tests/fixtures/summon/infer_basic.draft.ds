@@ -1,0 +1,36 @@
+// DRAFT — review before committing
+//
+// Rule: `total` is emitted only where visible analysis of this module proves
+// there are no throw sites and no calls into unseen code. Uncaught `throw`,
+// known-throwing intrinsics (JSON.parse, decodeURI*), and calls the walker
+// cannot see all force the pessimistic default Exception<T, JsError>.
+// `total` is a claim the author must own; the draft never emits it silently.
+//
+// opaque-candidates:
+//   A — parameter `a` of add has no visible JS type
+//   Add — return of add has no visible JS type
+//   B — parameter `b` of add has no visible JS type
+//   Handle — parameter `handle` of secret has no visible JS type
+//   Scene — object returned by scene
+//   Secret — return of secret has no visible JS type
+//   Values — parameter `values` of count has no visible JS type
+//
+// skipped (not a statically verifiable function): scalar
+
+opaque type A
+opaque type Add
+opaque type B
+opaque type Handle
+opaque type Scene
+opaque type Secret
+opaque type Values
+
+summon {
+  total add(a: A, b: B): Add,
+  total noop(): void,
+  total secret(handle: Handle): Secret,
+  total scene(): Scene,
+  total count(values: Array<Values>): number,
+  total withDefault(n: number): number,
+  total later(): Promise<number>
+} from "./infer_basic.mjs"

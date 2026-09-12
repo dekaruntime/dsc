@@ -58,8 +58,20 @@ DS field representations.
 
 This stage supports the existing concrete DS types and opaque handles. `JsValue`
 and checked narrowing are deferred, rather than exposing an untyped usable box.
-The summon fetch/js_modules CLI, scaffolding, transitive module acquisition, and
-tier-2 throw analysis are not part of this core change.
+The summon fetch/js_modules CLI and transitive module acquisition are not part
+of this change.
+
+**Draft scaffolder (`dsc summon infer`, rfd#39 authoring tier-3):** point the
+tier-1 SWC walk at generation. The command takes a vendored `.mjs` path and
+emits a `.d.ds`-style summon block to stdout or `--out`, marked
+`DRAFT — review before committing`. Unknown parameter types become
+opaque-candidate placeholders (never `JsValue`). Returns use the pessimistic
+`Exception<T, JsError>` default. `total` is emitted only where visible analysis
+of that module proves there are no throw sites: no uncaught `throw`, no
+known-throwing intrinsics (`JSON.parse`, `decodeURI*`), and no calls into
+unseen code. Same-module callees are followed. A contained `throw` inside
+`try`/`catch` does not count. `total` is still a claim the author must own;
+the draft never emits it silently. The summon fetch door remains a later stage.
 
 Paired conformance corpus: dekaruntime/testsuite#84. Its release owner must merge
 and tag the corpus before this PR's compiler pin can be bumped and verified.

@@ -1,8 +1,15 @@
-//! Tier-1 verification for rfd#39. No fetching and no totality inference.
+//! Tier-1 verification for rfd#39, plus the tier-3 draft scaffolder.
+//! Fetching is still out of scope. Totality in a committed declaration remains
+//! an author claim; the scaffolder emits `total` only where visible analysis
+//! of the vendored module proves there are no throw sites.
 use deka_syntax::{Diagnostic, Program, Stmt};
 use std::{collections::HashMap, path::Path};
 use swc_ecma_ast as js;
 use swc_ecma_visit::{Visit, VisitWith};
+
+#[path = "summon_infer.rs"]
+mod infer;
+pub use infer::{infer_draft, infer_draft_from_path};
 
 pub fn module_spec(source: &str) -> Result<String, String> {
     if !(source.starts_with("./") || source.starts_with("../"))
@@ -15,11 +22,29 @@ pub fn module_spec(source: &str) -> Result<String, String> {
 }
 
 #[derive(Clone, Copy)]
-struct Arity {
-    min: usize,
-    max: Option<usize>,
-    asynchronous: bool,
+pub(super) struct Arity {
+    pub min: usize,
+    pub max: Option<usize>,
+    pub asynchronous: bool,
 }
+
+#[derive(Clone, Copy)]
+pub(super) enum Callable<'a> {
+    Fn(&'a js::Function),
+    Arrow(&'a js::ArrowExpr),
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct ExportFunction<'a> {
+    pub arity: Arity,
+    pub callable: Callable<'a>,
+}
+
+pub(super) struct Collected<'a> {
+    pub bindings: HashMap<String, Option<ExportFunction<'a>>>,
+    pub exports: Vec<(String, Option<ExportFunction<'a>>)>,
+}
+
 fn arity<'a>(params: impl Iterator<Item = &'a js::Pat>, asynchronous: bool) -> Arity {
     let params: Vec<_> = params.collect();
     let min = params
@@ -33,44 +58,60 @@ fn arity<'a>(params: impl Iterator<Item = &'a js::Pat>, asynchronous: bool) -> A
         asynchronous,
     }
 }
-fn function(f: &js::Function) -> Option<Arity> {
+fn function(f: &js::Function) -> Option<ExportFunction<'_>> {
     if f.is_generator {
         return None;
     }
-    Some(arity(f.params.iter().map(|p| &p.pat), f.is_async))
+    Some(ExportFunction {
+        arity: arity(f.params.iter().map(|p| &p.pat), f.is_async),
+        callable: Callable::Fn(f),
+    })
 }
-fn expr_function(expr: &js::Expr) -> Option<Arity> {
+fn expr_function(expr: &js::Expr) -> Option<ExportFunction<'_>> {
     match expr {
         js::Expr::Fn(f) => function(&f.function),
-        js::Expr::Arrow(f) => Some(arity(f.params.iter(), f.is_async)),
+        js::Expr::Arrow(f) => {
+            if f.is_generator {
+                return None;
+            }
+            Some(ExportFunction {
+                arity: arity(f.params.iter(), f.is_async),
+                callable: Callable::Arrow(f),
+            })
+        }
         js::Expr::Paren(p) => expr_function(&p.expr),
         _ => None,
     }
 }
-fn declared(decl: &js::Decl, bindings: &mut HashMap<String, Option<Arity>>) {
+fn declared_entries<'a>(decl: &'a js::Decl) -> Vec<(String, Option<ExportFunction<'a>>)> {
     match decl {
-        js::Decl::Fn(f) => {
-            bindings.insert(f.ident.sym.to_string(), function(&f.function));
-        }
-        js::Decl::Var(v) => {
-            for d in &v.decls {
-                if let js::Pat::Ident(i) = &d.name {
-                    // Mutable aliases cannot prove a stable callable export in tier 1.
-                    bindings.insert(
-                        i.id.sym.to_string(),
-                        if v.kind == js::VarDeclKind::Const {
-                            d.init.as_deref().and_then(expr_function)
-                        } else {
-                            None
-                        },
-                    );
-                }
-            }
-        }
-        js::Decl::Class(c) => {
-            bindings.insert(c.ident.sym.to_string(), None);
-        }
-        _ => {}
+        js::Decl::Fn(f) => vec![(f.ident.sym.to_string(), function(&f.function))],
+        js::Decl::Var(v) => v
+            .decls
+            .iter()
+            .filter_map(|d| {
+                let js::Pat::Ident(i) = &d.name else {
+                    return None;
+                };
+                // Mutable aliases cannot prove a stable callable export in tier 1.
+                Some((
+                    i.id.sym.to_string(),
+                    if v.kind == js::VarDeclKind::Const {
+                        d.init.as_deref().and_then(expr_function)
+                    } else {
+                        None
+                    },
+                ))
+            })
+            .collect(),
+        js::Decl::Class(c) => vec![(c.ident.sym.to_string(), None)],
+        _ => Vec::new(),
+    }
+}
+
+fn declared<'a>(decl: &'a js::Decl, bindings: &mut HashMap<String, Option<ExportFunction<'a>>>) {
+    for (name, value) in declared_entries(decl) {
+        bindings.insert(name, value);
     }
 }
 fn export_name(name: &js::ModuleExportName) -> String {
@@ -79,7 +120,20 @@ fn export_name(name: &js::ModuleExportName) -> String {
         js::ModuleExportName::Str(s) => s.value.to_string_lossy().into_owned(),
     }
 }
-fn exports(module: &js::Module) -> HashMap<String, Option<Arity>> {
+
+fn upsert_export<'a>(
+    exports: &mut Vec<(String, Option<ExportFunction<'a>>)>,
+    name: String,
+    value: Option<ExportFunction<'a>>,
+) {
+    if let Some((_, slot)) = exports.iter_mut().find(|(existing, _)| existing == &name) {
+        *slot = value;
+    } else {
+        exports.push((name, value));
+    }
+}
+
+pub(super) fn collect(module: &js::Module) -> Collected<'_> {
     let mut bindings = HashMap::new();
     for item in &module.body {
         match item {
@@ -90,11 +144,13 @@ fn exports(module: &js::Module) -> HashMap<String, Option<Arity>> {
             _ => {}
         }
     }
-    let mut exports = HashMap::new();
+    let mut exports = Vec::new();
     for item in &module.body {
         match item {
             js::ModuleItem::ModuleDecl(js::ModuleDecl::ExportDecl(d)) => {
-                declared(&d.decl, &mut exports)
+                for (name, value) in declared_entries(&d.decl) {
+                    upsert_export(&mut exports, name, value);
+                }
             }
             js::ModuleItem::ModuleDecl(js::ModuleDecl::ExportNamed(e)) if e.src.is_none() => {
                 for spec in &e.specifiers {
@@ -105,7 +161,11 @@ fn exports(module: &js::Module) -> HashMap<String, Option<Arity>> {
                             .as_ref()
                             .map(export_name)
                             .unwrap_or_else(|| original.clone());
-                        exports.insert(external, bindings.get(&original).copied().flatten());
+                        upsert_export(
+                            &mut exports,
+                            external,
+                            bindings.get(&original).copied().flatten(),
+                        );
                     }
                 }
             }
@@ -144,6 +204,11 @@ fn exports(module: &js::Module) -> HashMap<String, Option<Arity>> {
     }
     let mut writes = Writes::default();
     module.visit_with(&mut writes);
+    for (name, value) in &mut bindings {
+        if writes.0.contains(name) {
+            *value = None;
+        }
+    }
     for (name, value) in &mut exports {
         if writes.0.contains(name) {
             *value = None;
@@ -154,7 +219,8 @@ fn exports(module: &js::Module) -> HashMap<String, Option<Arity>> {
             for spec in &e.specifiers {
                 if let js::ExportSpecifier::Named(n) = spec {
                     if writes.0.contains(&export_name(&n.orig)) {
-                        exports.insert(
+                        upsert_export(
+                            &mut exports,
                             n.exported
                                 .as_ref()
                                 .map(export_name)
@@ -166,7 +232,15 @@ fn exports(module: &js::Module) -> HashMap<String, Option<Arity>> {
             }
         }
     }
-    exports
+    Collected { bindings, exports }
+}
+
+fn exports(module: &js::Module) -> HashMap<String, Option<Arity>> {
+    collect(module)
+        .exports
+        .into_iter()
+        .map(|(name, value)| (name, value.map(|f| f.arity)))
+        .collect()
 }
 
 fn is_promise(

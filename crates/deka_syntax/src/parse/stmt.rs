@@ -334,7 +334,7 @@ impl<'a> Parser<'a> {
         let is_async = self.eat(TokenKind::Async);
         self.advance(); // `fn`
 
-        // Receiver method: `fn (p Point) distance<T>(...): Ret { ... }`
+        // Receiver method: `fn (p Point) distance<T>(...) Ret { ... }`
         if self.at(TokenKind::LParen) {
             self.advance(); // `(`
             let receiver_name = self.expect_identifier()?;
@@ -750,6 +750,7 @@ impl<'a> Parser<'a> {
                     && !self.at(TokenKind::RBrace)
                     && !self.at(TokenKind::Comma)
                 {
+                    self.reject_return_type_colon();
                     Some(self.parse_type()?)
                 } else {
                     None

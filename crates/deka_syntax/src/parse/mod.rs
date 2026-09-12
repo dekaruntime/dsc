@@ -305,17 +305,11 @@ impl<'a> Parser<'a> {
             .push(Diagnostic::error(pos.line, pos.column, message));
     }
 
-    /// Rejects `fn f() T` -- the colon before a return type.
-    ///
-    /// DekaScript writes the return type directly after the parameter list:
-    /// `fn f() T`. The colon form is TypeScript's and was silently tolerated
-    /// here, so both spellings parsed to the same AST and the corpus drifted
-    /// into a mix of the two. Reporting it keeps one spelling (deka#511).
+    /// Diagnose the colon at its position, then consume it so the rest of the
+    /// signature can still be parsed without cascading errors (dsc#169).
     fn reject_return_type_colon(&mut self) {
         if self.at(TokenKind::Colon) {
-            self.error(
-                "unexpected `:` before the return type -- remove it. DekaScript writes `fn f() T`, not `fn f()` followed by `:`",
-            );
+            self.error("return types take no colon; remove `:`");
             self.advance();
         }
     }
@@ -427,36 +421,58 @@ mod tests {
         }
     }
 
-    // deka#511: the return-type colon is TypeScript's, not DekaScript's. Both
-    // spellings used to parse to the same AST, so the corpus drifted into a mix.
-
     #[test]
-    fn return_type_colon_is_rejected() {
-        let arena = Bump::new();
-        let result = parse("fn f(): boolean { return true }", &arena);
-        assert!(!result.errors.is_empty(), "colon form must not parse");
-        assert!(
-            result.errors[0].message.contains("remove it"),
-            "diagnostic must say what to do: {}",
-            result.errors[0].message
-        );
+    fn return_type_colon_is_rejected_at_the_colon() {
+        for source in [
+            "fn f(): number {}",
+            "fn f() : number {}",
+            "fn (p P) get(): number { return p.x }",
+            "fn (p P) get() : number { return p.x }",
+            "super struct P { x: number }\nfn (p P) get(): number { return p.x }",
+            "super struct P { x: number }\nfn (p P) get() : number { return p.x }",
+            "export async fn f(): number { return 1 }",
+            "const f = fn (): number { return 1 }",
+            "const f = fn () : number { return 1 }",
+            "interface P { fn get(): number }",
+            "interface P { fn get() : number }",
+        ] {
+            let arena = Bump::new();
+            let result = parse(source, &arena);
+            assert!(result.program.is_none(), "{source}");
+            assert_eq!(result.errors.len(), 1, "{source}: {:?}", result.errors);
+            let error = &result.errors[0];
+            assert_eq!(error.message, "return types take no colon; remove `:`");
+            let colon = source.rfind(':').unwrap();
+            let prefix = &source[..colon];
+            assert_eq!(
+                error.line,
+                prefix.bytes().filter(|&b| b == b'\n').count() + 1
+            );
+            assert_eq!(error.column, prefix.rsplit('\n').next().unwrap().len() + 1);
+
+            // Removing exactly the diagnosed colon must make the signature valid.
+            let corrected = format!("{}{}", &source[..colon], &source[colon + 1..]);
+            let result = parse(&corrected, &arena);
+            assert!(result.errors.is_empty(), "{corrected}: {:?}", result.errors);
+            assert!(result.program.is_some(), "{corrected}");
+        }
     }
 
     #[test]
-    fn return_type_colon_rejected_on_receiver_method() {
-        let arena = Bump::new();
-        let result = parse("fn (p P) get(): number { return p.x }", &arena);
-        assert!(
-            !result.errors.is_empty(),
-            "colon form must not parse on methods"
+    fn return_type_colon_diagnostics_fixture() {
+        let source = include_str!(
+            "../../../../tests/fixtures/diagnostics/return_type_colon/return_type_colon.fail.ds"
         );
-    }
-
-    #[test]
-    fn return_type_without_colon_parses() {
         let arena = Bump::new();
-        let result = parse("fn f() boolean { return true }", &arena);
-        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let result = parse(source, &arena);
+        assert!(result.program.is_none());
+        assert_eq!(result.errors.len(), 2, "{:?}", result.errors);
+        for (error, column) in result.errors.iter().zip([7, 8]) {
+            assert_eq!(error.message, "return types take no colon; remove `:`");
+            assert_eq!(error.column, column);
+        }
+        assert_eq!(result.errors[0].line, 1);
+        assert_eq!(result.errors[1].line, 2);
     }
 
     #[test]

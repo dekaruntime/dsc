@@ -870,6 +870,13 @@ impl<'a> Checker<'a> {
 
     pub(super) fn check_statement(&mut self, stmt: &ast::Stmt<'a>) {
         match stmt {
+            ast::Stmt::Try {
+                body,
+                catch_name,
+                catch_type,
+                catch_body,
+                span,
+            } => self.check_try(body, catch_name, catch_type.as_ref(), catch_body, *span),
             ast::Stmt::Const {
                 name,
                 ty,
@@ -950,7 +957,7 @@ impl<'a> Checker<'a> {
                 }
             },
             ast::Stmt::Expr { expr, .. } => {
-                self.check_expr(expr);
+                self.check_exception_use(expr, super::exceptions::Use::Statement, None);
             }
             ast::Stmt::Return { value, span } => {
                 self.check_return(value.as_ref(), *span);
@@ -1410,6 +1417,7 @@ impl<'a> Checker<'a> {
         let saved_in_function = self.in_function;
         let saved_in_async = self.in_async_function;
         let saved_return_type = self.return_type.clone();
+        let saved_catches = std::mem::take(&mut self.exception_catches);
         self.in_function = true;
         // Dev entries may await build-only bridge operations. The DS contract
         // is still Result<T, string>; JavaScript wraps it in a Promise.
@@ -1425,6 +1433,7 @@ impl<'a> Checker<'a> {
         self.in_function = saved_in_function;
         self.in_async_function = saved_in_async;
         self.return_type = saved_return_type;
+        self.exception_catches = saved_catches;
 
         if !body_always_returns(body) {
             self.error_at_expr(
@@ -1519,6 +1528,7 @@ impl<'a> Checker<'a> {
         let saved_in_function = self.in_function;
         let saved_in_async = self.in_async_function;
         let saved_return_type = self.return_type.clone();
+        let saved_catches = std::mem::take(&mut self.exception_catches);
         let is_interactive_component = self.interactive_components.contains(name);
         self.in_function = true;
         self.in_async_function = is_async;
@@ -1582,6 +1592,7 @@ impl<'a> Checker<'a> {
 
         self.in_function = saved_in_function;
         self.return_type = saved_return_type;
+        self.exception_catches = saved_catches;
         self.scopes.pop();
         self.mutables.pop();
 
@@ -1759,6 +1770,7 @@ impl<'a> Checker<'a> {
         let saved_in_function = self.in_function;
         let saved_in_async = self.in_async_function;
         let saved_return_type = self.return_type.clone();
+        let saved_catches = std::mem::take(&mut self.exception_catches);
         self.in_function = true;
         self.in_async_function = is_async;
         self.return_type = body_expected_ret.clone();
@@ -1770,6 +1782,7 @@ impl<'a> Checker<'a> {
         self.in_function = saved_in_function;
         self.in_async_function = saved_in_async;
         self.return_type = saved_return_type;
+        self.exception_catches = saved_catches;
         self.scopes.pop();
         self.mutables.pop();
 
@@ -1801,7 +1814,11 @@ impl<'a> Checker<'a> {
         }
 
         let value_type = match value {
-            Some(expr) => self.check_expr(expr),
+            Some(expr) => self.check_exception_use(
+                expr,
+                super::exceptions::Use::Return,
+                self.return_type.clone(),
+            ),
             None => Type::Generic {
                 base: "Option",
                 args: vec![Type::Never],
@@ -1859,6 +1876,18 @@ fn body_always_returns(body: &[ast::Stmt<'_>]) -> bool {
 fn stmt_always_returns(stmt: &ast::Stmt<'_>) -> bool {
     match stmt {
         ast::Stmt::Return { .. } => true,
+        ast::Stmt::Expr {
+            expr:
+                ast::Expr::EnumConstructor {
+                    enum_name: "Exception",
+                    case_name: "Throw",
+                    ..
+                },
+            ..
+        } => true,
+        ast::Stmt::Try {
+            body, catch_body, ..
+        } => body_always_returns(body) && body_always_returns(catch_body),
         ast::Stmt::Block { body, .. } => body_always_returns(body),
         // Only an `if` with an `else` where *both* sides return is a
         // guaranteed return; an `if` with no `else` always leaves a path that

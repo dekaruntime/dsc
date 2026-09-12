@@ -165,6 +165,14 @@ pub enum Stmt<'a> {
         else_body: &'a [Stmt<'a>],
         span: Span,
     },
+    /// Frame-local checked exception handling (rfd#62).
+    Try {
+        body: &'a [Stmt<'a>],
+        catch_name: &'a str,
+        catch_type: Option<Type<'a>>,
+        catch_body: &'a [Stmt<'a>],
+        span: Span,
+    },
     /// `{ ... }` block statement introducing a new scope.
     Block { body: &'a [Stmt<'a>], span: Span },
     /// An empty statement: just `;`.
@@ -412,6 +420,8 @@ pub enum Expr<'a> {
         span: Span,
     },
     EnumConstructor {
+        /// Only the bare prelude Ok constructor is target-typed across channels.
+        shared_ok: bool,
         enum_name: &'a str,
         case_name: &'a str,
         payload: Option<&'a Expr<'a>>,
@@ -551,6 +561,7 @@ pub struct StructLiteralField<'a> {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct MatchArm<'a> {
+    pub bodyless: bool,
     pub pattern: Pattern<'a>,
     pub guard: Option<Expr<'a>>,
     pub body: Expr<'a>,

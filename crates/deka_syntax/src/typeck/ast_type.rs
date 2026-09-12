@@ -5,8 +5,8 @@ use std::collections::HashSet;
 use crate::ast;
 use crate::diagnostics::Diagnostic;
 
-use super::types::Type;
 use super::Checker;
+use super::types::Type;
 
 impl<'a> Checker<'a> {
     pub(super) fn resolve_ast_type(&mut self, ty: &ast::Type<'a>) -> Type<'a> {
@@ -20,7 +20,8 @@ impl<'a> Checker<'a> {
     ) -> Type<'a> {
         match ty {
             ast::Type::Named { name, span } => match *name {
-                "number" | "string" | "boolean" | "never" | "void" | "bytes" | "Component" | "JsError" | "Type" => {
+                "number" | "string" | "boolean" | "never" | "void" | "bytes" | "Component"
+                | "JsError" | "SyntaxError" | "TypeError" | "RangeError" | "Error" | "Type" => {
                     Type::Named { name }
                 }
                 "Option" => {
@@ -92,17 +93,20 @@ impl<'a> Checker<'a> {
                         self.error_span(*span, "Array requires exactly one type argument");
                         Type::Error
                     }
-                } else if base == &"Result" {
+                } else if base == &"Result" || base == &"Exception" {
                     if args.len() == 2 {
                         Type::Generic {
-                            base: "Result",
+                            base,
                             args: args
                                 .iter()
                                 .map(|arg| self.resolve_ast_type_rec(arg, seen))
                                 .collect(),
                         }
                     } else {
-                        self.error_span(*span, "Result requires exactly two type arguments");
+                        self.error_span(
+                            *span,
+                            format!("{base} requires exactly two type arguments"),
+                        );
                         Type::Error
                     }
                 } else if self.enums.contains_key(base) || self.structs.contains_key(base) {
@@ -176,7 +180,9 @@ impl<'a> Checker<'a> {
             }
             let allowed = match member {
                 Type::Named { name } => {
-                    Self::is_union_primitive(name) || self.enums.contains_key(name)
+                    Self::is_union_primitive(name)
+                        || matches!(*name, "SyntaxError" | "TypeError" | "RangeError" | "Error")
+                        || self.enums.contains_key(name)
                 }
                 Type::Struct { .. } | Type::Interface { .. } => true,
                 _ => false,
@@ -221,6 +227,18 @@ impl<'a> Checker<'a> {
         match (a, b) {
             // Identical members always overlap (`string | string`).
             _ if a == b => true,
+            (
+                Type::Named { name: "Error" },
+                Type::Named {
+                    name: "SyntaxError" | "TypeError" | "RangeError",
+                },
+            )
+            | (
+                Type::Named {
+                    name: "SyntaxError" | "TypeError" | "RangeError",
+                },
+                Type::Named { name: "Error" },
+            ) => true,
             (Type::Named { .. }, Type::Named { .. }) => {
                 // Distinct primitives never overlap; enum-vs-enum overlaps
                 // only for the same enum, which equality above caught.

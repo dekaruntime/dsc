@@ -71,6 +71,13 @@ pub fn walk_stmt(stmt: &Stmt<'_>, visit: &mut dyn FnMut(&Expr<'_>)) {
                 walk_stmt(s, visit);
             }
         }
+        Stmt::Try {
+            body, catch_body, ..
+        } => {
+            for s in body.iter().chain(catch_body.iter()) {
+                walk_stmt(s, visit);
+            }
+        }
         Stmt::Block { body, .. } => {
             for s in body.iter() {
                 walk_stmt(s, visit);

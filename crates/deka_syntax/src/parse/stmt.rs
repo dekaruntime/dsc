@@ -52,6 +52,36 @@ impl<'a> Parser<'a> {
             });
         }
 
+        if self.current_kind() == TokenKind::Identifier && self.current_text() == "throw" {
+            self.error("there is no lowercase `throw` statement; use `Throw(e)` to raise into the exception channel");
+            return None;
+        }
+        if self.current_kind() == TokenKind::Identifier && self.current_text() == "try" {
+            self.advance();
+            let body = self.parse_block()?;
+            self.skip_newlines();
+            if self.current_kind() != TokenKind::Identifier || self.current_text() != "catch" {
+                self.error("expected `catch` after `try` block");
+                return None;
+            }
+            self.advance();
+            self.expect(TokenKind::LParen)?;
+            let catch_name = self.expect_identifier()?;
+            let catch_type = if self.eat(TokenKind::Colon) {
+                Some(self.parse_type()?)
+            } else {
+                None
+            };
+            self.expect(TokenKind::RParen)?;
+            let catch_body = self.parse_block()?;
+            return Some(Stmt::Try {
+                body,
+                catch_name,
+                catch_type,
+                catch_body,
+                span: self.span_from(start, start_byte),
+            });
+        }
         match self.current_kind() {
             TokenKind::Const | TokenKind::Let => {
                 let is_const = self.current_kind() == TokenKind::Const;
@@ -1182,6 +1212,12 @@ fn stmt_has_top_level_await(stmt: &Stmt<'_>) -> bool {
                     }
                 }
         }
+        Stmt::Try {
+            body, catch_body, ..
+        } => body
+            .iter()
+            .chain(catch_body.iter())
+            .any(stmt_has_top_level_await),
         Stmt::Return {
             value: Some(value), ..
         } => expr_has_top_level_await(value),
@@ -1234,7 +1270,8 @@ fn stmt_has_top_level_await(stmt: &Stmt<'_>) -> bool {
     }
 }
 
-fn expr_has_top_level_await(expr: &Expr<'_>) -> bool {
+/// Whether evaluation in this frame contains await, excluding closure bodies.
+pub fn expr_has_top_level_await(expr: &Expr<'_>) -> bool {
     match expr {
         Expr::Await { .. } => true,
         // Closures are function boundaries.
@@ -1247,10 +1284,10 @@ fn expr_has_top_level_await(expr: &Expr<'_>) -> bool {
             expr_has_top_level_await(callee) || args.iter().any(|a| expr_has_top_level_await(a))
         }
         Expr::FieldAccess { object, .. }
-        | Expr::IndexAccess { object, .. }
         | Expr::Safe { expr: object, .. }
         | Expr::Paren { expr: object, .. }
         | Expr::Spread { expr: object, .. } => expr_has_top_level_await(object),
+        Expr::IndexAccess { object, index, .. } => expr_has_top_level_await(object) || expr_has_top_level_await(index),
         Expr::StructLiteral { fields, .. } => {
             fields.iter().any(|f| expr_has_top_level_await(&f.value))
         }

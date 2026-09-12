@@ -338,6 +338,7 @@ pub fn emit_js(program: &Program, _source: &str) -> Result<String, String> {
         _source,
         &HashMap::new(),
         None,
+        &Default::default(),
         &HashMap::new(),
         &HashMap::new(),
         &HashMap::new(),
@@ -368,6 +369,7 @@ pub fn emit_js_with_imports<'a>(
     program: &'a Program<'a>,
     _source: &str,
     imports: &HashMap<&str, &deka_syntax::ModuleExports<'a>>,
+    exception_forms: &deka_syntax::typeck::ExceptionLowering<'a>,
     unwrap_calls: &HashMap<*const Expr<'a>, deka_syntax::typeck::UnwrapKind>,
     operator_rewrites: &HashMap<*const Expr<'a>, deka_syntax::typeck::OperatorRewrite<'a>>,
     method_calls: &HashMap<*const Expr<'a>, deka_syntax::MethodTarget<'a>>,
@@ -377,6 +379,7 @@ pub fn emit_js_with_imports<'a>(
         _source,
         imports,
         None,
+        exception_forms,
         unwrap_calls,
         operator_rewrites,
         method_calls,
@@ -408,6 +411,7 @@ pub fn emit_js_with_options<'a>(
     source: &str,
     imports: &HashMap<&str, &deka_syntax::ModuleExports<'a>>,
     module_base: Option<String>,
+    exception_forms: &deka_syntax::typeck::ExceptionLowering<'a>,
     unwrap_calls: &HashMap<*const Expr<'a>, deka_syntax::typeck::UnwrapKind>,
     operator_rewrites: &HashMap<*const Expr<'a>, deka_syntax::typeck::OperatorRewrite<'a>>,
     // Primitive extension call sites (`s.slugify()`) to rewrite to
@@ -461,6 +465,7 @@ pub fn emit_js_with_options<'a>(
         source,
         imports,
         module_base,
+        exception_forms,
         unwrap_calls,
         operator_rewrites,
         method_calls,
@@ -505,6 +510,7 @@ pub fn emit_js_module_with_options<'a>(
     source: &str,
     imports: &HashMap<&str, &deka_syntax::ModuleExports<'a>>,
     module_base: Option<String>,
+    exception_forms: &deka_syntax::typeck::ExceptionLowering<'a>,
     unwrap_calls: &HashMap<*const Expr<'a>, deka_syntax::typeck::UnwrapKind>,
     operator_rewrites: &HashMap<*const Expr<'a>, deka_syntax::typeck::OperatorRewrite<'a>>,
     method_calls: &HashMap<*const Expr<'a>, deka_syntax::MethodTarget<'a>>,
@@ -542,6 +548,7 @@ pub fn emit_js_module_with_options<'a>(
     emitter.file_stem = file_stem_from_path(file_path);
     emitter.module_root = module_root;
     emitter.seed_imports(imports);
+    emitter.exception_forms = exception_forms.clone();
     emitter.unwrap_calls = unwrap_calls.clone();
     emitter.operator_rewrites = operator_rewrites.clone();
     emitter.method_calls = method_calls.clone();
@@ -596,6 +603,7 @@ pub fn emit_dev_entry<'a>(
     emitter.file_stem = file_stem_from_path(file_path);
     emitter.module_root = module_root;
     emitter.seed_imports(imports);
+    emitter.exception_forms = typeck.exception_forms.clone();
     emitter.unwrap_calls = typeck.unwrap_calls.clone();
     emitter.operator_rewrites = typeck.operator_rewrites.clone();
     emitter.method_calls = typeck.method_calls.clone();
@@ -1280,6 +1288,7 @@ struct Emitter<'a> {
     /// Base URL for rewriting bare import specifiers.
     module_base: Option<String>,
     /// Primitive conversion calls lowered by the typechecker.
+    exception_forms: deka_syntax::typeck::ExceptionLowering<'a>,
     unwrap_calls: HashMap<*const Expr<'a>, deka_syntax::typeck::UnwrapKind>,
     jsx_optional_props:
         HashMap<*const deka_syntax::JsxElement<'a>, deka_syntax::typeck::JsxOptionalProps<'a>>,
@@ -1380,6 +1389,7 @@ impl<'a> Emitter<'a> {
             newtypes: HashMap::new(),
             receiver_methods: HashMap::new(),
             module_base: None,
+            exception_forms: Default::default(),
             unwrap_calls: HashMap::new(),
             jsx_optional_props: HashMap::new(),
             enum_case_patterns: HashMap::new(),
@@ -1840,6 +1850,7 @@ impl<'a> Emitter<'a> {
             | Stmt::Return { .. }
             | Stmt::Break { .. }
             | Stmt::Continue { .. }
+            | Stmt::Try { .. }
             | Stmt::Empty { .. } => true,
         }
     }
@@ -1858,6 +1869,7 @@ impl<'a> Emitter<'a> {
                 | Stmt::Expr { .. }
                 | Stmt::Return { .. }
                 | Stmt::If { .. }
+                | Stmt::Try { .. }
                 | Stmt::Block { .. }
                 | Stmt::For { .. }
                 | Stmt::ForOf { .. }
@@ -2435,11 +2447,19 @@ impl<'a> Emitter<'a> {
     }
 
     fn needs_prelude_enums(&self) -> bool {
+        if self
+            .exception_forms
+            .values()
+            .any(|form| *form == deka_syntax::typeck::ExceptionEmit::ToResult)
+        {
+            return true;
+        }
         self.program.statements.iter().any(|stmt| {
             let mut found = false;
             deka_syntax::visit::walk_stmt(stmt, &mut |expr| {
                 if let Expr::EnumConstructor { enum_name, .. } = expr {
-                    if *enum_name == "Option" || *enum_name == "Result" {
+                    if (*enum_name == "Option" || *enum_name == "Result")
+                        && !matches!(self.exception_forms.get(&(expr as *const _)), Some(deka_syntax::typeck::ExceptionEmit::Ok | deka_syntax::typeck::ExceptionEmit::Throw)) {
                         found = true;
                     }
                 }
@@ -2520,10 +2540,43 @@ impl<'a> Emitter<'a> {
     // ------------------------------------------------------------------
     fn emit_stmt(&mut self, stmt: &Stmt<'a>) -> Result<(), String> {
         match stmt {
+            Stmt::Try {
+                body,
+                catch_name,
+                catch_type,
+                catch_body,
+                ..
+            } => {
+                self.out.push_str("try {\n");
+                for stmt in *body {
+                    self.emit_stmt(stmt)?;
+                    self.out.push('\n');
+                }
+                self.out.push_str(&format!("}} catch ({catch_name}) {{\n"));
+                if let Some(annotation) = catch_type {
+                    let constructor = self
+                        .exception_forms
+                        .catches
+                        .get(&(annotation as *const _))
+                        .copied()
+                        .ok_or(
+                            "typed catch emission requires checker-resolved constructor metadata",
+                        )?;
+                    self.out.push_str(&format!(
+                        "if (!({catch_name} instanceof {constructor})) {{ throw {catch_name}; }}\n"
+                    ));
+                }
+                for stmt in *catch_body {
+                    self.emit_stmt(stmt)?;
+                    self.out.push('\n');
+                }
+                self.out.push('}');
+            }
+
             Stmt::Const { name, value, .. } => {
                 if let Expr::Match {
                     scrutinee, arms, ..
-                } = value
+                } = peel_exception_parens(value)
                 {
                     let result = self.emit_match_value_statements(scrutinee, arms)?;
                     write_indent(&mut self.out, 0);
@@ -2549,7 +2602,7 @@ impl<'a> Emitter<'a> {
             Stmt::Let { name, value, .. } => {
                 if let Expr::Match {
                     scrutinee, arms, ..
-                } = value
+                } = peel_exception_parens(value)
                 {
                     let result = self.emit_match_value_statements(scrutinee, arms)?;
                     write_indent(&mut self.out, 0);
@@ -2665,10 +2718,13 @@ impl<'a> Emitter<'a> {
                 self.out.push('}');
             }
             Stmt::Expr { expr, .. } => {
+                if self.exception_form(expr) == Some(deka_syntax::typeck::ExceptionEmit::Throw) {
+                    return self.emit_raise(expr);
+                }
                 write_indent(&mut self.out, 0);
                 if let Expr::Match {
                     scrutinee, arms, ..
-                } = expr
+                } = peel_exception_parens(expr)
                 {
                     self.emit_match_statements(scrutinee, arms, None)?;
                 } else {
@@ -2677,9 +2733,16 @@ impl<'a> Emitter<'a> {
                 }
             }
             Stmt::Return { value, .. } => {
+                if let Some(value) = value {
+                    if self.exception_form(value) == Some(deka_syntax::typeck::ExceptionEmit::Throw)
+                    {
+                        self.emit_raise(value)?;
+                        return Ok(());
+                    }
+                }
                 if let Some(Expr::Match {
                     scrutinee, arms, ..
-                }) = value
+                }) = value.as_ref().map(peel_exception_parens)
                 {
                     let result = self.emit_match_value_statements(scrutinee, arms)?;
                     write_indent(&mut self.out, 0);
@@ -3361,6 +3424,53 @@ impl<'a> Emitter<'a> {
     }
 
     fn emit_expr(&mut self, expr: &Expr<'a>) -> Result<(), String> {
+        use deka_syntax::typeck::ExceptionEmit;
+        match self.exception_forms.get(&(expr as *const _)).copied() {
+            Some(ExceptionEmit::Ok) => {
+                if let Expr::EnumConstructor {
+                    payload: Some(payload),
+                    ..
+                } = expr
+                {
+                    return self.emit_expr(payload);
+                }
+            }
+            Some(ExceptionEmit::Throw) => {
+                self.out.push_str("(() => { ");
+                self.emit_raise(expr)?;
+                self.out.push_str(" })()");
+                return Ok(());
+            }
+            Some(ExceptionEmit::ToResult) => {
+                if let Expr::Call {
+                    callee: Expr::FieldAccess { object, .. },
+                    ..
+                } = expr
+                {
+                    let asynchronous = expr_contains_await(object);
+                    self.out.push_str(if asynchronous {
+                        "(await (async () => { try { return Ok("
+                    } else {
+                        "(() => { try { return Ok("
+                    });
+                    self.emit_expr(object)?;
+                    self.out.push_str("); } catch (e) { return Err(e); } })()");
+                    if asynchronous {
+                        self.out.push(')');
+                    }
+                    return Ok(());
+                }
+            }
+            Some(ExceptionEmit::FromResult) => {
+                if let Expr::Call { args, .. } = expr {
+                    self.out.push_str("((r) => { if (r.__case === \"Err\") { throw r.error; } return r.value; })(");
+                    self.emit_expr(&args[0])?;
+                    self.out.push(')');
+                    return Ok(());
+                }
+            }
+            _ => {}
+        }
         match expr {
             Expr::Number { value, .. } => {
                 if value.is_nan() {
@@ -4159,9 +4269,8 @@ impl<'a> Emitter<'a> {
         let trimmed = if self.structs.is_empty() || !trimmed.contains('{') {
             trimmed
         } else {
-            rewritten = rewrite_struct_literals_in_js(trimmed, 0, &|name| {
-                self.structs.contains_key(name)
-            });
+            rewritten =
+                rewrite_struct_literals_in_js(trimmed, 0, &|name| self.structs.contains_key(name));
             rewritten.as_str()
         };
 
@@ -4237,6 +4346,119 @@ impl<'a> Emitter<'a> {
         Ok(())
     }
 
+    fn exception_form(&self, expr: &Expr<'a>) -> Option<deka_syntax::typeck::ExceptionEmit> {
+        match expr {
+            Expr::Paren { expr, .. } | Expr::Safe { expr, .. } => self.exception_form(expr),
+            _ => self.exception_forms.get(&(expr as *const _)).copied(),
+        }
+    }
+
+    fn emit_raise(&mut self, expr: &Expr<'a>) -> Result<(), String> {
+        match expr {
+            Expr::Paren { expr, .. } | Expr::Safe { expr, .. } => self.emit_raise(expr),
+            Expr::EnumConstructor {
+                payload: Some(payload),
+                ..
+            } => {
+                self.out.push_str("throw ");
+                self.emit_expr(payload)?;
+                self.out.push_str(";\n");
+                Ok(())
+            }
+            _ => Err("invalid checked Throw lowering".into()),
+        }
+    }
+
+    fn emit_passthrough_binding(&mut self, arm: &deka_syntax::MatchArm<'a>, payload: &str) {
+        if arm.bodyless {
+            if let Expr::EnumConstructor { payload: Some(Expr::Identifier { name, .. }), .. } = &arm.body {
+                if name.starts_with("$__deka_passthrough_") { self.out.push_str(&format!("const {name} = {payload};\n")); }
+            }
+        }
+    }
+
+    fn emit_handling_arm(
+        &mut self,
+        arm: &deka_syntax::MatchArm<'a>,
+        result: Option<&str>,
+        passthrough: Option<&str>,
+    ) -> Result<(), String> {
+        if self.exception_form(&arm.body) == Some(deka_syntax::typeck::ExceptionEmit::Throw) {
+            return self.emit_raise(&arm.body);
+        }
+        if arm.bodyless && self.exception_form(&arm.body).is_none() {
+            if let Some(scrutinee) = passthrough {
+                self.out.push_str(&format!("return {scrutinee};\n"));
+                return Ok(());
+            }
+        }
+        if arm.bodyless {
+            self.out.push_str("return ");
+        } else if let Some(result) = result {
+            self.out.push_str(result);
+            self.out.push_str(" = ");
+        }
+        self.emit_expr(&arm.body)?;
+        self.out.push_str(";\n");
+        Ok(())
+    }
+
+    fn emit_exception_match(
+        &mut self,
+        scrutinee: &Expr<'a>,
+        arms: &[deka_syntax::MatchArm<'a>],
+        result: Option<&str>,
+    ) -> Result<(), String> {
+        let id = self.next_match_id();
+        let label = format!("__deka_exception_{id}");
+        let value = format!("__deka_ok_{id}");
+        let error = format!("__deka_throw_{id}");
+        // The protected region contains only the invocation. A handler that
+        // throws is observed by its caller, never by its sibling handler.
+        self.out
+            .push_str(&format!("{label}: {{\nlet {value};\ntry {{ {value} = "));
+        self.emit_expr(scrutinee)?;
+        self.out.push_str(&format!("; }} catch ({error}) {{\n"));
+        self.emit_exception_arms(arms, "Throw", &error, &label, result)?;
+        self.out.push_str(&format!("throw {error};\n}}\n"));
+        self.emit_exception_arms(arms, "Ok", &value, &label, result)?;
+        self.out.push_str("}\n");
+        Ok(())
+    }
+
+    fn emit_exception_arms(
+        &mut self,
+        arms: &[deka_syntax::MatchArm<'a>],
+        case: &str,
+        value: &str,
+        label: &str,
+        result: Option<&str>,
+    ) -> Result<(), String> {
+        for arm in arms {
+            let payload = match &arm.pattern {
+                Pattern::Constructor {
+                    name,
+                    payload: Some(payload),
+                    ..
+                } if *name == case => *payload,
+                Pattern::Constructor { .. } => continue,
+                other => other,
+            };
+            let condition = self.match_condition(payload, value);
+            self.out.push_str(&format!("if ({condition}) {{\n"));
+            self.emit_pattern_bindings(payload, value, 0)?;
+            self.emit_passthrough_binding(arm, value);
+            self.emit_handling_arm(arm, result, None)?;
+            if !arm.bodyless
+                && self.exception_form(&arm.body) != Some(deka_syntax::typeck::ExceptionEmit::Throw)
+            {
+                self.out.push_str(&format!("break {label};\n"));
+            }
+            self.out.push_str("}\n");
+        }
+        Ok(())
+    }
+
     /// Emit a match in statement position. A match expression is only
     /// statement-shaped at its enclosing statement boundary; lowering it
     /// here avoids allocating a closure for the common case.
@@ -4246,6 +4468,15 @@ impl<'a> Emitter<'a> {
         arms: &[deka_syntax::MatchArm<'a>],
         result: Option<&str>,
     ) -> Result<(), String> {
+        if matches!(
+            self.exception_form(scrutinee),
+            Some(
+                deka_syntax::typeck::ExceptionEmit::Match
+                    | deka_syntax::typeck::ExceptionEmit::FromResult
+            )
+        ) {
+            return self.emit_exception_match(scrutinee, arms, result);
+        }
         let id = self.next_match_id();
         let scrutinee_var = format!("__deka_match_scrutinee_{id}");
         write_indent(&mut self.out, 0);
@@ -4264,13 +4495,10 @@ impl<'a> Emitter<'a> {
             if condition == "true" {
                 self.out.push_str("{\n");
                 self.emit_pattern_bindings(&arm.pattern, &scrutinee_var, 1)?;
+                let field = if matches!(arm.pattern, Pattern::Constructor { name: "Err", .. }) { "error" } else { "value" };
+                self.emit_passthrough_binding(arm, &format!("{scrutinee_var}.{field}"));
                 write_indent(&mut self.out, 1);
-                if let Some(result) = result {
-                    self.out.push_str(result);
-                    self.out.push_str(" = ");
-                }
-                self.emit_expr(&arm.body)?;
-                self.out.push_str(";\n");
+                self.emit_handling_arm(arm, result, Some(&scrutinee_var))?;
                 write_indent(&mut self.out, 0);
                 self.out.push_str("}\n");
                 continue;
@@ -4279,13 +4507,10 @@ impl<'a> Emitter<'a> {
             self.out.push_str(&condition);
             self.out.push_str(") {\n");
             self.emit_pattern_bindings(&arm.pattern, &scrutinee_var, 1)?;
+                let field = if matches!(arm.pattern, Pattern::Constructor { name: "Err", .. }) { "error" } else { "value" };
+                self.emit_passthrough_binding(arm, &format!("{scrutinee_var}.{field}"));
             write_indent(&mut self.out, 1);
-            if let Some(result) = result {
-                self.out.push_str(result);
-                self.out.push_str(" = ");
-            }
-            self.emit_expr(&arm.body)?;
-            self.out.push_str(";\n");
+            self.emit_handling_arm(arm, result, Some(&scrutinee_var))?;
             write_indent(&mut self.out, 0);
             self.out.push_str("}\n");
         }
@@ -4320,6 +4545,29 @@ impl<'a> Emitter<'a> {
         scrutinee: &Expr<'a>,
         arms: &[deka_syntax::MatchArm<'a>],
     ) -> Result<(), String> {
+        if arms.iter().any(|arm| arm.bodyless) {
+            return Err("rfd#62: bodyless match nested in an expression needs statement lifting; use a statement-level match in this stage".into());
+        }
+        if matches!(
+            self.exception_form(scrutinee),
+            Some(
+                deka_syntax::typeck::ExceptionEmit::Match
+                    | deka_syntax::typeck::ExceptionEmit::FromResult
+            )
+        ) {
+            let asynchronous = expr_contains_await(scrutinee);
+            self.out.push_str(if asynchronous {
+                "(await (async () => {\n"
+            } else {
+                "(() => {\n"
+            });
+            let result = self.emit_match_value_statements(scrutinee, arms)?;
+            self.out.push_str(&format!("return {result};\n}})()"));
+            if asynchronous {
+                self.out.push(')');
+            }
+            return Ok(());
+        }
         let scrutinee_var = "__deka_scrutinee";
         self.out.push_str("((");
         self.out.push_str(scrutinee_var);
@@ -4402,6 +4650,7 @@ impl<'a> Emitter<'a> {
                     receiver_methods: HashMap::new(),
                     module_base: self.module_base.clone(),
                     module_root: self.module_root.clone(),
+                    exception_forms: Default::default(),
                     unwrap_calls: HashMap::new(),
                     jsx_optional_props: HashMap::new(),
                     enum_case_patterns: HashMap::new(),
@@ -4541,6 +4790,9 @@ impl<'a> Emitter<'a> {
                 let js_type = if *name == "void" { "undefined" } else { name };
                 format!("typeof {} === \"{}\"", scrutinee_var, js_type)
             }
+            deka_syntax::typeck::UnionMemberTest::ErrorClass(name) => {
+                format!("{scrutinee_var} instanceof {name}")
+            }
             deka_syntax::typeck::UnionMemberTest::Bytes => {
                 format!("{} instanceof Uint8Array", scrutinee_var)
             }
@@ -4590,7 +4842,9 @@ impl<'a> Emitter<'a> {
                 if self
                     .union_type_patterns
                     .get(&(pattern as *const Pattern<'a>))
-                    .is_some_and(|test| !matches!(test, deka_syntax::typeck::UnionMemberTest::EnumCase(_)))
+                    .is_some_and(|test| {
+                        !matches!(test, deka_syntax::typeck::UnionMemberTest::EnumCase(_))
+                    })
                 {
                     if let Some(payload) = payload {
                         self.emit_pattern_bindings(payload, scrutinee_var, indent)?;
@@ -5514,6 +5768,13 @@ fn visit_stmt_exprs(stmt: &Stmt, visitor: &mut dyn FnMut(&Expr)) {
                 visit_stmt_exprs(s, visitor);
             }
         }
+        Stmt::Try {
+            body, catch_body, ..
+        } => {
+            for s in body.iter().chain(catch_body.iter()) {
+                visit_stmt_exprs(s, visitor);
+            }
+        }
         Stmt::Block { body, .. } => {
             for s in body.iter() {
                 visit_stmt_exprs(s, visitor);
@@ -5605,5 +5866,16 @@ fn visit_expr(expr: &Expr, visitor: &mut dyn FnMut(&Expr)) {
             }
         }
         _ => {}
+    }
+}
+
+fn expr_contains_await(expr: &Expr<'_>) -> bool {
+    deka_syntax::parse::expr_has_top_level_await(expr)
+}
+
+fn peel_exception_parens<'e, 'a>(expr: &'e Expr<'a>) -> &'e Expr<'a> {
+    match expr {
+        Expr::Paren { expr, .. } | Expr::Safe { expr, .. } => peel_exception_parens(expr),
+        other => other,
     }
 }

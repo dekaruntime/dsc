@@ -44,6 +44,7 @@ pub fn resolve_enum_constructors<'a>(program: &mut Program<'a>, arena: &'a Bump)
     result.insert("Ok");
     result.insert("Err");
     enums.insert("Result", result);
+    enums.insert("Exception", HashSet::from(["Ok", "Throw"]));
 
     let transformed: Vec<Stmt<'a>> = program
         .statements
@@ -85,6 +86,7 @@ pub fn resolve_imported_enum_constructors<'a>(
     result.insert("Ok");
     result.insert("Err");
     enums.insert("Result", result);
+    enums.insert("Exception", HashSet::from(["Ok", "Throw"]));
 
     // Add enum names/cases re-exported by imported modules.
     for exports in imports.values() {
@@ -109,6 +111,30 @@ fn transform_stmt<'a>(
     enums: &HashMap<&'a str, HashSet<&'a str>>,
 ) -> Stmt<'a> {
     match stmt {
+        Stmt::Try {
+            body,
+            catch_name,
+            catch_type,
+            catch_body,
+            span,
+        } => Stmt::Try {
+            body: ast::alloc_slice(
+                arena,
+                body.iter()
+                    .map(|s| transform_stmt(s, arena, enums))
+                    .collect(),
+            ),
+            catch_name,
+            catch_type: catch_type.clone(),
+            catch_body: ast::alloc_slice(
+                arena,
+                catch_body
+                    .iter()
+                    .map(|s| transform_stmt(s, arena, enums))
+                    .collect(),
+            ),
+            span: *span,
+        },
         Stmt::UnwrapLet {
             name,
             ty,
@@ -136,6 +162,7 @@ fn transform_stmt<'a>(
                         arena,
                         arms.iter()
                             .map(|arm| ast::MatchArm {
+                                bodyless: arm.bodyless,
                                 pattern: arm.pattern.clone(),
                                 guard: arm.guard.clone(),
                                 body: transform_expr(&arm.body, arena, enums).clone(),
@@ -469,11 +496,13 @@ fn transform_expr<'a>(
             span: *span,
         },
         Expr::EnumConstructor {
+            shared_ok,
             enum_name,
             case_name,
             payload,
             span,
         } => Expr::EnumConstructor {
+            shared_ok: *shared_ok,
             enum_name,
             case_name,
             payload: payload
@@ -660,6 +689,7 @@ fn transform_match_arms<'a>(
     let transformed: Vec<ast::MatchArm<'a>> = arms
         .iter()
         .map(|arm| ast::MatchArm {
+            bodyless: arm.bodyless,
             pattern: arm.pattern.clone(),
             guard: arm
                 .guard
@@ -718,6 +748,7 @@ fn try_resolve_enum_expr<'a>(
                 return None;
             }
             Some(Expr::EnumConstructor {
+                shared_ok: false,
                 enum_name,
                 case_name: field,
                 payload: None,
@@ -746,6 +777,7 @@ fn try_resolve_enum_expr<'a>(
                 Some(args.first().unwrap() as &'a Expr<'a>)
             };
             Some(Expr::EnumConstructor {
+                shared_ok: false,
                 enum_name,
                 case_name: field,
                 payload,
@@ -786,6 +818,30 @@ fn lower_stmt<'a>(
     method_calls: &HashMap<*const Expr<'a>, MethodTarget<'a>>,
 ) -> Stmt<'a> {
     match stmt {
+        Stmt::Try {
+            body,
+            catch_name,
+            catch_type,
+            catch_body,
+            span,
+        } => Stmt::Try {
+            body: ast::alloc_slice(
+                arena,
+                body.iter()
+                    .map(|s| lower_stmt(s, arena, method_calls))
+                    .collect(),
+            ),
+            catch_name,
+            catch_type: catch_type.clone(),
+            catch_body: ast::alloc_slice(
+                arena,
+                catch_body
+                    .iter()
+                    .map(|s| lower_stmt(s, arena, method_calls))
+                    .collect(),
+            ),
+            span: *span,
+        },
         Stmt::UnwrapLet {
             name,
             ty,
@@ -813,6 +869,7 @@ fn lower_stmt<'a>(
                         arena,
                         arms.iter()
                             .map(|arm| ast::MatchArm {
+                                bodyless: arm.bodyless,
                                 pattern: arm.pattern.clone(),
                                 guard: arm.guard.clone(),
                                 body: lower_expr(&arm.body, arena, method_calls).clone(),
@@ -1177,11 +1234,13 @@ fn lower_expr<'a>(
             span: *span,
         },
         Expr::EnumConstructor {
+            shared_ok,
             enum_name,
             case_name,
             payload,
             span,
         } => Expr::EnumConstructor {
+            shared_ok: *shared_ok,
             enum_name,
             case_name,
             payload: payload
@@ -1368,6 +1427,7 @@ fn lower_match_arms<'a>(
     let transformed: Vec<ast::MatchArm<'a>> = arms
         .iter()
         .map(|arm| ast::MatchArm {
+            bodyless: arm.bodyless,
             pattern: arm.pattern.clone(),
             guard: arm
                 .guard

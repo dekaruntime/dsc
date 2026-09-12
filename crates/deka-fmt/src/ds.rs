@@ -382,8 +382,10 @@ impl<'src> Formatter<'src> {
                         self.indent += 1;
                         for arm in arms.iter() {
                             self.write(&pattern_to_string(&arm.pattern));
-                            self.write(" => ");
-                            self.fmt_expr(&arm.body);
+                            if !arm.bodyless {
+                                self.write(" => ");
+                                self.fmt_expr(&arm.body);
+                            }
                             self.write(",");
                             self.newline();
                         }
@@ -576,6 +578,24 @@ impl<'src> Formatter<'src> {
                         self.fmt_block(else_body, stmt_end_line);
                     }
                 }
+            }
+            Stmt::Try {
+                body,
+                catch_name,
+                catch_type,
+                catch_body,
+                ..
+            } => {
+                self.write("try ");
+                self.fmt_block(body, stmt_end_line);
+                self.write(" catch (");
+                self.write(catch_name);
+                if let Some(ty) = catch_type {
+                    self.write(": ");
+                    self.fmt_type(ty);
+                }
+                self.write(") ");
+                self.fmt_block(catch_body, stmt_end_line);
             }
             Stmt::Block { body, .. } => self.fmt_block(body, stmt_end_line),
             Stmt::For {
@@ -1052,12 +1072,17 @@ impl<'src> Formatter<'src> {
                 s
             }
             Expr::EnumConstructor {
+                shared_ok,
                 enum_name,
                 case_name,
                 payload,
                 ..
             } => {
-                let mut s = format!("{}.{}", enum_name, case_name);
+                let mut s = if *shared_ok {
+                    case_name.to_string()
+                } else {
+                    format!("{}.{}", enum_name, case_name)
+                };
                 if let Some(payload) = payload {
                     s.push('(');
                     s.push_str(&self.expr_to_string(payload));
@@ -1309,8 +1334,10 @@ impl<'src> Formatter<'src> {
             s.push_str(" if ");
             s.push_str(&self.expr_to_string(guard));
         }
-        s.push_str(" => ");
-        s.push_str(&self.expr_to_string(&arm.body));
+        if !arm.bodyless {
+            s.push_str(" => ");
+            s.push_str(&self.expr_to_string(&arm.body));
+        }
         s
     }
 
@@ -1703,7 +1730,7 @@ fn stmt_span(stmt: &Stmt<'_>) -> Span {
         Stmt::Expr { span, .. } => *span,
         Stmt::Return { span, .. } => *span,
         Stmt::If { span, .. } => *span,
-        Stmt::Block { span, .. } => *span,
+        Stmt::Try { span, .. } | Stmt::Block { span, .. } => *span,
         Stmt::For { span, .. } => *span,
         Stmt::ForOf { span, .. } => *span,
         Stmt::Break { span, .. } => *span,
@@ -1908,7 +1935,7 @@ mod tests {
         let output = format_ds(input).expect("formats");
         assert_eq!(
             output,
-            "const labels: Array<string> = build {\n  return Result.Ok([\"Ada\"])\n}\n"
+            "const labels: Array<string> = build {\n  return Ok([\"Ada\"])\n}\n"
         );
     }
 

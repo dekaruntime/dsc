@@ -89,9 +89,7 @@ fn program_contains_jsx(program: &Program<'_>) -> bool {
             Expr::Await { expr, .. }
             | Expr::Safe { expr, .. }
             | Expr::Paren { expr, .. }
-            | Expr::Spread { expr, .. } => {
-                expr_has_jsx(expr)
-            }
+            | Expr::Spread { expr, .. } => expr_has_jsx(expr),
             Expr::Array { elements, .. } => elements.iter().any(expr_has_jsx),
             Expr::Object { fields, .. } => fields.iter().any(|f| expr_has_jsx(&f.value)),
             Expr::FieldAccess { object, .. } => expr_has_jsx(object),
@@ -139,6 +137,9 @@ fn program_contains_jsx(program: &Program<'_>) -> bool {
                     || then_body.iter().any(stmt_has_jsx)
                     || else_body.iter().any(stmt_has_jsx)
             }
+            Stmt::Try {
+                body, catch_body, ..
+            } => body.iter().chain(catch_body.iter()).any(stmt_has_jsx),
             Stmt::Block { body, .. } => body.iter().any(stmt_has_jsx),
             Stmt::For {
                 init,
@@ -664,6 +665,7 @@ pub fn compile_to_js_with_imports_and_options<'a>(
         source,
         imports,
         options.module_base,
+        &typeck_result.exception_forms,
         &typeck_result.unwrap_calls,
         &typeck_result.operator_rewrites,
         &typeck_result.method_calls,

@@ -123,9 +123,10 @@ impl<'a> Coverage<'a> {
                 // already known to be that struct it is exhaustive precisely
                 // when every named field pattern is irrefutable. Fields left
                 // out of the pattern are deliberately ignored.
-                if fields.iter().all(|field| {
-                    Self::is_irrefutable(&field.pattern, cases)
-                }) {
+                if fields
+                    .iter()
+                    .all(|field| Self::is_irrefutable(&field.pattern, cases))
+                {
                     Coverage::All
                 } else {
                     Coverage::nothing()
@@ -448,7 +449,7 @@ impl<'a> Checker<'a> {
         callee: &ast::Expr<'a>,
         args: &[ast::Expr<'a>],
     ) -> Option<Type<'a>> {
-        use crate::deka_catalog::{find_method, ReturnShape, ValType};
+        use crate::deka_catalog::{ReturnShape, ValType, find_method};
         let ast::Expr::FieldAccess {
             object,
             field: method,
@@ -501,7 +502,7 @@ impl<'a> Checker<'a> {
         })
     }
 
-    pub(super) fn check_expr(&mut self, expr: &ast::Expr<'a>) -> Type<'a> {
+    pub(super) fn check_expr_inner(&mut self, expr: &ast::Expr<'a>) -> Type<'a> {
         match expr {
             ast::Expr::Number { .. } => Type::Named { name: "number" },
             ast::Expr::String { .. } => Type::Named { name: "string" },
@@ -565,6 +566,7 @@ impl<'a> Checker<'a> {
                 span,
             } => self.check_match(scrutinee, arms, *span),
             ast::Expr::EnumConstructor {
+                shared_ok: _,
                 enum_name,
                 case_name,
                 payload,
@@ -979,6 +981,7 @@ impl<'a> Checker<'a> {
         let saved_in_function = self.in_function;
         let saved_in_async = self.in_async_function;
         let saved_return_type = self.return_type.clone();
+        let saved_catches = std::mem::take(&mut self.exception_catches);
         self.in_function = true;
         self.in_async_function = is_async;
         self.return_type = body_expected_ret.clone();
@@ -1010,6 +1013,7 @@ impl<'a> Checker<'a> {
 
         self.in_function = saved_in_function;
         self.return_type = saved_return_type;
+        self.exception_catches = saved_catches;
         self.scopes.pop();
         self.mutables.pop();
 
@@ -1453,7 +1457,7 @@ impl<'a> Checker<'a> {
             // an Error. These two fields are always present because of that
             // guarantee; without it, declaring them would be a lie the type
             // system could not catch (deka#460, deka#469).
-            "JsError" => {
+            "JsError" | "SyntaxError" | "TypeError" | "RangeError" | "Error" => {
                 self.error_span(
                     span,
                     format!("`JsError` has no field `{field}` (available: `message`, `name`)"),
@@ -1937,7 +1941,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_match(
+    pub(super) fn check_match(
         &mut self,
         scrutinee: &ast::Expr<'a>,
         arms: &'a [ast::MatchArm<'a>],
@@ -1948,7 +1952,9 @@ impl<'a> Checker<'a> {
             return Type::Error;
         }
 
-        let scrutinee_type = self.check_expr(scrutinee);
+        let expected = self.exception_expected.take();
+        let scrutinee_type =
+            self.check_exception_use(scrutinee, super::exceptions::Use::Match, None);
         // rfd#56 phase 2: matching a value whose type is a bounded type
         // parameter checks the pattern — and later the exhaustiveness — as
         // the bound. `<T: A | B | C>` is matched exactly like `A | B | C`;
@@ -2032,7 +2038,12 @@ impl<'a> Checker<'a> {
                 _ => arm_coverage,
             };
             coverage = coverage.merge(arm_coverage);
-            let arm_type = self.check_expr(&arm.body);
+            let arm_type = if arm.bodyless {
+                self.check_bodyless_arm(arm, &scrutinee_type);
+                Type::Never
+            } else {
+                self.check_exception_use(&arm.body, super::exceptions::Use::Arm, expected.clone())
+            };
             self.scopes.pop();
             self.mutables.pop();
 
@@ -2122,13 +2133,16 @@ impl<'a> Checker<'a> {
                 vec![("Some", Some((**inner).clone())), ("None", None)],
             )),
             Type::Generic {
-                base: "Result",
+                base: base @ ("Result" | "Exception"),
                 args,
             } if args.len() == 2 => Some((
-                "Result".to_string(),
+                base.to_string(),
                 vec![
                     ("Ok", Some(args[0].clone())),
-                    ("Err", Some(args[1].clone())),
+                    (
+                        if *base == "Exception" { "Throw" } else { "Err" },
+                        Some(args[1].clone()),
+                    ),
                 ],
             )),
             Type::Named { name } => {
@@ -2604,6 +2618,9 @@ impl<'a> Checker<'a> {
     /// have none; membership validation already rejected everything else.
     fn union_member_test(&self, member: &Type<'a>) -> Option<super::types::UnionMemberTest<'a>> {
         match member {
+            Type::Named {
+                name: name @ ("SyntaxError" | "TypeError" | "RangeError" | "Error"),
+            } => Some(super::types::UnionMemberTest::ErrorClass(name)),
             Type::Named { name: "bytes" } => Some(super::types::UnionMemberTest::Bytes),
             Type::Named { name } if Self::is_union_primitive_name(name) => {
                 Some(super::types::UnionMemberTest::Primitive(name))
@@ -2650,12 +2667,14 @@ impl<'a> Checker<'a> {
         }
 
         // Built-in Result cases.
-        if name == "Ok" || name == "Err" {
+        if name == "Ok" || name == "Err" || name == "Throw" {
             match scrutinee_type {
                 Type::Generic {
-                    base: "Result",
+                    base: base @ ("Result" | "Exception"),
                     args,
-                } if args.len() == 2 => {
+                } if args.len() == 2
+                    && (name == "Ok" || (name == "Throw") == (*base == "Exception")) =>
+                {
                     let expected_payload = if name == "Ok" { &args[0] } else { &args[1] };
                     if let Some(p) = payload {
                         self.check_pattern(p, expected_payload);

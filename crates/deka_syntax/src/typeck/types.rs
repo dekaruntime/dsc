@@ -111,9 +111,10 @@ pub fn substitute_type<'a>(ty: &Type<'a>, subst: &std::collections::HashMap<&'a 
         // type parameters), so it must substitute exactly as `Param` does —
         // otherwise a receiver method's `T` would survive a cross-module
         // call as an opaque named type (dsc#101).
-        Type::Named { name } if subst.contains_key(name) => {
-            subst.get(name).cloned().unwrap_or_else(|| Type::Named { name })
-        }
+        Type::Named { name } if subst.contains_key(name) => subst
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| Type::Named { name }),
         Type::Option { inner } => Type::Option {
             inner: Box::new(substitute_type(inner, subst)),
         },
@@ -205,6 +206,8 @@ pub enum UnionMemberTest<'a> {
     /// Primitive scalar: `typeof x === "..."` (string/number/boolean;
     /// `void` tests `"undefined"`).
     Primitive(&'a str),
+    /// Native JavaScript error class.
+    ErrorClass(&'a str),
     /// `x instanceof Uint8Array`.
     Bytes,
     /// Named struct: `x?.__deka_struct === "<Name>"` (the brand tag is read

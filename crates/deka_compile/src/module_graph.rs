@@ -15,14 +15,6 @@ use deka_syntax::Diagnostic;
 use crate::shake::{self, ShakeModule, ShakePlan};
 use crate::{CompileOptions, compile_to_js_with_imports_and_options, parse_source_module_meta};
 
-/// Compiler-provided JS runtime (`ui/jsx`, `ui/form`, …). These are not
-/// DekaScript modules: hosts materialize the files, and the graph leaves the
-/// import specifier intact.
-pub(crate) fn is_compiler_ui_spec(spec: &str) -> bool {
-    let bare = spec.trim().strip_prefix("@deka/").unwrap_or(spec.trim());
-    bare == "ui" || bare.starts_with("ui/")
-}
-
 /// A module loader supplies source text and resolves specifiers for the
 /// graph compiler.
 ///
@@ -392,13 +384,6 @@ pub fn compile_module_graph_with_options(
             // Recorded before resolution so the set is complete even for
             // specifiers this loader cannot resolve.
             all_imports.insert(import.path.trim().to_string());
-            if let Some(ui) = shake::normalize_ui_specifier(&import.path) {
-                virtual_imports.push(ui);
-                continue;
-            }
-            if is_compiler_ui_spec(&import.path) {
-                continue;
-            }
             // `math` is a closed compiler module, emitted as local bindings
             // instead of an import. Do not ask a filesystem/package loader
             // for it: that would make the replacement for `Math.PI` depend
@@ -2840,23 +2825,31 @@ mod tests {
     }
 
     #[test]
-    fn graph_treats_ui_runtime_as_documented_virtual_stdlib() {
-        let main = PathBuf::from("/project/page.dsx");
-        let mut files = HashMap::new();
-        files.insert(
-            main.clone(),
-            "import { Form } from \"ui/form\";\nconst el = <Form action=\"/api/x\" method=\"post\">Go</Form>;\n"
-                .to_string(),
-        );
-        let loader = InMemoryLoader {
-            files,
-            aliases: HashMap::new(),
-        };
-        let result = compile_module_graph(&main, &loader)
-            .expect("ui/form should remain virtual pending dsc#129");
-        let js = &result.modules[&main];
-        assert!(js.contains("ui/form"), "got: {js}");
-        assert!(js.contains("Form"), "got: {js}");
+    fn graph_rejects_unknown_and_retired_ui_imports_even_with_module_base() {
+        let main = PathBuf::from("/project/page.ds");
+        for spec in ["@deka/anything", "ui", "ui/button", "ui/form"] {
+            for module_base in [None, Some("https://modules.example".to_string())] {
+                // Side-effect imports must also resolve; no imported binding is
+                // needed to expose a graph-level virtual-module bypass.
+                let loader = InMemoryLoader {
+                    files: HashMap::from([(main.clone(), format!("import \"{spec}\";"))]),
+                    aliases: HashMap::new(),
+                };
+                let errors = compile_module_graph_with_options(
+                    &main,
+                    &loader,
+                    GraphCompileOptions {
+                        module_base,
+                        ..Default::default()
+                    },
+                )
+                .expect_err("unknown imports must resolve through the loader");
+                assert!(
+                    errors.iter().any(|d| d.message.contains(spec)),
+                    "{errors:?}"
+                );
+            }
+        }
     }
 
     #[test]

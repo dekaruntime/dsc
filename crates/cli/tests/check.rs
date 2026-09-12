@@ -6,7 +6,7 @@ fn cli_bin() -> &'static str {
 }
 
 #[test]
-fn single_file_and_project_check_accept_documented_virtual_imports() {
+fn single_file_and_project_check_reject_retired_ui_imports() {
     let project = tempfile::tempdir().expect("tempdir");
     let source = project.path().join("page.dsx");
     fs::write(
@@ -30,8 +30,8 @@ fn single_file_and_project_check_accept_documented_virtual_imports() {
             .output()
             .expect("run dsc check");
         assert!(
-            output.status.success(),
-            "check failed:\nstdout: {}\nstderr: {}",
+            !output.status.success(),
+            "retired ui import unexpectedly passed:\nstdout: {}\nstderr: {}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );

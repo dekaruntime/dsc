@@ -218,7 +218,10 @@ fn src_is_one_to_one_compile_and_copy() {
 fn missing_bare_import_hard_fails_without_writing_lock() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
-    write(root.join("deka.json").as_path(), "{}\n");
+    write(
+        root.join("deka.json").as_path(),
+        r#"{"dependencies":{"@deka/json":"0.0.0"}}"#,
+    );
     write(
         &root.join("app/main.ds"),
         "import { parse } from \"json\"\nexport const value = parse\n",
@@ -227,14 +230,7 @@ fn missing_bare_import_hard_fails_without_writing_lock() {
     let output = run_in(root, &[]);
     assert!(!output.status.success(), "{}", combined(&output));
     let text = combined(&output);
-    assert!(
-        text.contains("deka install") && text.contains("deka add json"),
-        "missing install guidance: {text}"
-    );
-    assert!(
-        text.contains("ds_modules") || text.contains("Unresolved Import"),
-        "missing unresolved import framing: {text}"
-    );
+    assert!(text.contains("deka.lock"), "missing lock guidance: {text}");
     assert!(
         !root.join("deka.lock").exists(),
         "dsc must not write deka.lock"
@@ -289,7 +285,10 @@ fn write_json_package(root: &Path) {
 fn installed_bare_import_emits() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
-    write(root.join("deka.json").as_path(), "{}\n");
+    write(
+        root.join("deka.json").as_path(),
+        r#"{"dependencies":{"@deka/json":"0.0.0"}}"#,
+    );
     write(&root.join("deka.lock"), json_lock_without_hash());
     write_json_package(root);
     let lock_before = fs::read_to_string(root.join("deka.lock")).expect("lock");
@@ -309,16 +308,17 @@ fn installed_bare_import_emits() {
 fn installed_package_without_lock_entry_hard_fails() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
-    write(root.join("deka.json").as_path(), "{}\n");
+    write(
+        root.join("deka.json").as_path(),
+        r#"{"dependencies":{"@deka/json":"0.0.0"}}"#,
+    );
     write_json_package(root);
 
     let output = run_in(root, &[]);
     assert!(!output.status.success(), "{}", combined(&output));
     let text = combined(&output);
     assert!(
-        text.contains("deka.lock")
-            && text.contains("deka install")
-            && text.contains("deka add json"),
+        text.contains("deka.lock"),
         "missing lock-entry guidance: {text}"
     );
     assert!(
@@ -332,7 +332,10 @@ fn installed_package_without_lock_entry_hard_fails() {
 fn lock_entry_without_ds_modules_hard_fails() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
-    write(root.join("deka.json").as_path(), "{}\n");
+    write(
+        root.join("deka.json").as_path(),
+        r#"{"dependencies":{"@deka/json":"0.0.0"}}"#,
+    );
     write(&root.join("deka.lock"), json_lock_without_hash());
     write(
         &root.join("app/main.ds"),
@@ -343,9 +346,7 @@ fn lock_entry_without_ds_modules_hard_fails() {
     assert!(!output.status.success(), "{}", combined(&output));
     let text = combined(&output);
     assert!(
-        text.contains("ds_modules")
-            && text.contains("deka install")
-            && text.contains("deka add json"),
+        text.contains("ds_modules") && text.contains("deka install"),
         "missing ds_modules guidance: {text}"
     );
     assert!(!root.join("dist/app/main.js").exists());
@@ -355,7 +356,10 @@ fn lock_entry_without_ds_modules_hard_fails() {
 fn lock_integrity_mismatch_hard_fails() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
-    write(root.join("deka.json").as_path(), "{}\n");
+    write(
+        root.join("deka.json").as_path(),
+        r#"{"dependencies":{"@deka/json":"0.0.0"}}"#,
+    );
     write(
         &root.join("deka.lock"),
         &json_lock_with_fs_hash("0000000000000000000000000000000000000000000000000000000000000000"),
@@ -367,9 +371,7 @@ fn lock_integrity_mismatch_hard_fails() {
     assert!(!output.status.success(), "{}", combined(&output));
     let text = combined(&output);
     assert!(
-        text.contains("Integrity Mismatch")
-            && text.contains("deka install")
-            && text.contains("deka add json"),
+        text.contains("integrity mismatch") && text.contains("deka install"),
         "missing integrity guidance: {text}"
     );
     assert_eq!(
@@ -631,4 +633,39 @@ for (const k of ["r", "s", "o", "a"]) console.log(k + "=" + shape(eval(k).error)
         Some("string:[object Object]")
     );
     assert_eq!(lines.get("a").copied(), Some("error:typed"));
+}
+
+#[test]
+fn third_party_package_must_be_declared_even_when_installed_and_locked() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    write(&root.join("deka.json"), "{}");
+    write(
+        &root.join("deka.lock"),
+        r#"{"packages":{"@vendor/example":["0.1.0","local",{},""]}}"#,
+    );
+    write(
+        &root.join("ds_modules/@vendor/example/index.ds"),
+        "export const value = 42;",
+    );
+    write(
+        &root.join("app/main.ds"),
+        "import { value } from \"@vendor/example\"; export const answer = value;",
+    );
+    let rejected = run_in(root, &[]);
+    assert!(!rejected.status.success(), "{}", combined(&rejected));
+    assert!(
+        combined(&rejected).contains("not declared"),
+        "{}",
+        combined(&rejected)
+    );
+    assert!(!root.join("dist/app/main.js").exists());
+
+    write(
+        &root.join("deka.json"),
+        r#"{"dependencies":{"@vendor/example":"0.1.0"}}"#,
+    );
+    let accepted = run_in(root, &[]);
+    assert!(accepted.status.success(), "{}", combined(&accepted));
+    assert!(root.join("dist/app/main.js").is_file());
 }

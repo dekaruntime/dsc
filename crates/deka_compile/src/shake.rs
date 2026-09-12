@@ -458,6 +458,7 @@ fn walk_expr(expr: &Expr<'_>, visit: &mut dyn FnMut(&Expr<'_>)) {
         }
         Expr::FieldAccess { object, .. }
         | Expr::Await { expr: object, .. }
+        | Expr::Safe { expr: object, .. }
         | Expr::Paren { expr: object, .. }
         | Expr::Spread { expr: object, .. } => walk_expr(object, visit),
         Expr::IndexAccess { object, index, .. } => {

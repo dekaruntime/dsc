@@ -1,5 +1,6 @@
 //! DekaScript compiler orchestrator (Compiler v2).
 
+pub mod catalog;
 pub mod module_graph;
 pub mod shake;
 
@@ -85,7 +86,10 @@ fn program_contains_jsx(program: &Program<'_>) -> bool {
             }
             Expr::Binary { left, right, .. } => expr_has_jsx(left) || expr_has_jsx(right),
             Expr::Unary { operand, .. } => expr_has_jsx(operand),
-            Expr::Await { expr, .. } | Expr::Paren { expr, .. } | Expr::Spread { expr, .. } => {
+            Expr::Await { expr, .. }
+            | Expr::Safe { expr, .. }
+            | Expr::Paren { expr, .. }
+            | Expr::Spread { expr, .. } => {
                 expr_has_jsx(expr)
             }
             Expr::Array { elements, .. } => elements.iter().any(expr_has_jsx),
@@ -400,6 +404,9 @@ pub struct DevPlanSlot {
 /// Options controlling compiler emission and module resolution.
 #[derive(Debug, Default, Clone)]
 pub struct CompileOptions {
+    /// Package identity supplied by a trusted virtual loader; disk sources use
+    /// their nearest deka.json. None defaults to unprivileged for virtual files.
+    pub package_name: Option<String>,
     /// Base URL for bare module specifiers. When set, imports like
     /// `import { echo } from "io"` are emitted as
     /// `import { echo } from "<module_base>/io.mjs"`.
@@ -622,6 +629,19 @@ pub fn compile_to_js_with_imports_and_options<'a>(
         }
     }
 
+    let package = if Path::new(file_path).is_file() {
+        catalog::package_name(file_path)
+    } else {
+        options.package_name.clone()
+    };
+    let errors = catalog::validate(
+        &program,
+        source,
+        package.as_deref().is_some_and(|n| n.starts_with("@deka/")),
+    );
+    if !errors.is_empty() {
+        return Err(errors);
+    }
     resolve_imported_enum_constructors(&mut program, arena, imports);
 
     let typeck_result = check_program_with_imports(&program, source, imports);
@@ -629,7 +649,7 @@ pub fn compile_to_js_with_imports_and_options<'a>(
         return Err(typeck_result.errors);
     }
 
-    let dev_plan = build_dev_plan(
+    let mut dev_plan = build_dev_plan(
         &program,
         source,
         imports,
@@ -666,8 +686,12 @@ pub fn compile_to_js_with_imports_and_options<'a>(
     )
     .map_err(|message| vec![Diagnostic::error(0, 0, message)])?;
 
+    for slot in &mut dev_plan.slots {
+        slot.entry = catalog::bundle_helpers(std::mem::take(&mut slot.entry))
+            .map_err(|e| vec![Diagnostic::error(1, 1, e)])?;
+    }
     Ok(CompileResult {
-        js: emitted.js,
+        js: catalog::bundle_helpers(emitted.js).map_err(|e| vec![Diagnostic::error(1, 1, e)])?,
         diagnostics: typeck_result.warnings,
         demand: emitted.demand,
         dev_plan,
@@ -2242,7 +2266,7 @@ const arrow = unsafe { () => User { name: "Bob" } }
     #[test]
     fn deep_nesting_compiles_below_limit() {
         // 64 nested blocks, one statement frame per level: exactly the limit.
-        let source = "{".repeat(64) + &"}".repeat(64);
+        let source = format!("{}{}", "{".repeat(64), "}".repeat(64));
         compile_to_js(&source, "deep.ds").expect("nesting at the limit must compile");
 
         // Deep-but-legal expression nesting in a typed binding.

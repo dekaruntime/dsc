@@ -1138,6 +1138,7 @@ impl<'src> Formatter<'src> {
             Expr::Spread { expr, .. } => {
                 format!("...{}", self.expr_to_string(expr))
             }
+            Expr::Safe { expr, .. } => format!("safe {{ {} }}", self.expr_to_string(expr)),
             Expr::Paren { expr, .. } => {
                 format!("({})", self.expr_to_string(expr))
             }
@@ -1887,6 +1888,18 @@ mod tests {
     #[test]
     fn empty_source_stays_empty() {
         assert_eq!(format_ds("").unwrap(), "");
+    }
+
+    #[test]
+    fn safe_catalog_block_survives_format_roundtrip() {
+        for source in [
+            "const x = safe { deka.time.now() }",
+            "const x = match safe { deka.time.now() } { _ => 1 }",
+        ] {
+            let output = format_ds(source).unwrap();
+            assert!(output.contains("safe { deka.time.now() }"), "{output}");
+            assert_eq!(format_ds(&output).unwrap(), output);
+        }
     }
 
     #[test]

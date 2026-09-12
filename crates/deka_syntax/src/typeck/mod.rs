@@ -518,6 +518,7 @@ fn summarize_expr<'a>(
         ast::Expr::Unary { operand, .. }
         | ast::Expr::Await { expr: operand, .. }
         | ast::Expr::Spread { expr: operand, .. }
+        | ast::Expr::Safe { expr: operand, .. }
         | ast::Expr::Paren { expr: operand, .. } => {
             summarize_expr(operand, direct, references, inside_island)
         }

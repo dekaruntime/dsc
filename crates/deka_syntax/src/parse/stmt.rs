@@ -1248,6 +1248,7 @@ fn expr_has_top_level_await(expr: &Expr<'_>) -> bool {
         }
         Expr::FieldAccess { object, .. }
         | Expr::IndexAccess { object, .. }
+        | Expr::Safe { expr: object, .. }
         | Expr::Paren { expr: object, .. }
         | Expr::Spread { expr: object, .. } => expr_has_top_level_await(object),
         Expr::StructLiteral { fields, .. } => {

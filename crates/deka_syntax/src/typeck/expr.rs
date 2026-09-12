@@ -443,6 +443,64 @@ pub(super) fn number_math_kind(method: &str) -> Option<super::types::NumberMath>
 }
 
 impl<'a> Checker<'a> {
+    fn check_catalog_call(
+        &mut self,
+        callee: &ast::Expr<'a>,
+        args: &[ast::Expr<'a>],
+    ) -> Option<Type<'a>> {
+        use crate::deka_catalog::{find_method, ReturnShape, ValType};
+        let ast::Expr::FieldAccess {
+            object,
+            field: method,
+            ..
+        } = callee
+        else {
+            return None;
+        };
+        let ast::Expr::FieldAccess {
+            object,
+            field: kind,
+            ..
+        } = object
+        else {
+            return None;
+        };
+        if !matches!(object, ast::Expr::Identifier { name: "deka", .. }) {
+            return None;
+        }
+        let method = find_method(kind, method)?;
+        fn ty(value: ValType) -> Type<'static> {
+            match value {
+                ValType::NumList => Type::Array {
+                    elem: Box::new(Type::Named { name: "number" }),
+                },
+                ValType::Any => Type::Infer,
+                _ => Type::Named { name: value.name() },
+            }
+        }
+        for (index, arg) in args.iter().enumerate() {
+            let actual = self.check_expr(arg);
+            if let Some(param) = method.args.get(index) {
+                let expected = ty(param.ty);
+                if param.ty != ValType::Any && !self.is_assignable(&expected, &actual) {
+                    self.error_at_expr(
+                        arg,
+                        format!(
+                            "catalog argument `{}` expects `{expected}`, got `{actual}`",
+                            param.name
+                        ),
+                    );
+                }
+            }
+        }
+        Some(match method.ret {
+            ReturnShape::Value(value) | ReturnShape::ResultValue(value) => ty(value),
+            ReturnShape::OptionValue(value) => Type::Option {
+                inner: Box::new(ty(value)),
+            },
+        })
+    }
+
     pub(super) fn check_expr(&mut self, expr: &ast::Expr<'a>) -> Type<'a> {
         match expr {
             ast::Expr::Number { .. } => Type::Named { name: "number" },
@@ -480,7 +538,9 @@ impl<'a> Checker<'a> {
             } => {
                 // `deka.panic` must not go through method-call typeck: `deka`
                 // is not a typed object (RFD 21 lang item).
-                if is_panic_callee(callee) {
+                if let Some(ret) = self.check_catalog_call(callee, args) {
+                    ret
+                } else if is_panic_callee(callee) {
                     self.check_call(expr, callee, type_args, args, *span)
                 } else if let Some(ret) =
                     self.try_check_method_call(expr, callee, type_args, args, *span)
@@ -498,7 +558,7 @@ impl<'a> Checker<'a> {
             ast::Expr::StructLiteral { name, fields, span } => {
                 self.check_struct_literal(name, fields, *span)
             }
-            ast::Expr::Paren { expr, .. } => self.check_expr(expr),
+            ast::Expr::Safe { expr, .. } | ast::Expr::Paren { expr, .. } => self.check_expr(expr),
             ast::Expr::Match {
                 scrutinee,
                 arms,
@@ -1923,7 +1983,7 @@ impl<'a> Checker<'a> {
             // `match (v)` wraps the operand in `Expr::Paren`, so unwrap it.
             let scrutinee_ident = match scrutinee {
                 ast::Expr::Identifier { name, .. } => Some(name),
-                ast::Expr::Paren { expr, .. } => match &**expr {
+                ast::Expr::Safe { expr, .. } | ast::Expr::Paren { expr, .. } => match &**expr {
                     ast::Expr::Identifier { name, .. } => Some(name),
                     _ => None,
                 },
@@ -4075,6 +4135,7 @@ impl<'a> Checker<'a> {
             ast::Expr::Identifier { name, .. } => Some(*name),
             ast::Expr::FieldAccess { object, .. }
             | ast::Expr::IndexAccess { object, .. }
+            | ast::Expr::Safe { expr: object, .. }
             | ast::Expr::Paren { expr: object, .. } => self.immutable_binding_name(object),
             _ => None,
         }

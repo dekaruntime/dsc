@@ -273,6 +273,7 @@ fn compile_request(source: &str, filename: &str, options_json: &str) -> String {
     };
 
     let compile_options = deka_compile::CompileOptions {
+        package_name: None,
         module_base: options.module_base,
         module_root: None,
         used_exports: None,

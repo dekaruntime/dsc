@@ -328,6 +328,25 @@ impl<'a> Parser<'a> {
                     span: self.span_from(start, start_byte),
                 })
             }
+            TokenKind::Identifier
+                if self.current_text() == "safe"
+                    && self.tokens.get(self.pos + 1).map(|t| t.kind) == Some(TokenKind::LBrace) =>
+            {
+                self.advance();
+                self.advance();
+                self.skip_newlines();
+                let expr = alloc(self.arena, self.parse_expression()?);
+                self.skip_newlines();
+                if !self.at(TokenKind::RBrace) {
+                    self.error("expected `}` after safe catalog call");
+                    return None;
+                }
+                self.advance();
+                Some(Expr::Safe {
+                    expr,
+                    span: self.span_from(start, start_byte),
+                })
+            }
             TokenKind::Identifier => {
                 let name = self.bump_str(self.current_text());
                 self.advance();

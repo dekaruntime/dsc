@@ -9,6 +9,37 @@ use super::Checker;
 use super::types::Type;
 
 impl<'a> Checker<'a> {
+    pub(super) fn checked_option(&mut self, inner: Type<'a>, span: ast::Span) -> Type<'a> {
+        match &inner {
+            Type::Named { name: "void" } => self.error_span(span, "`Option<void>` is indistinguishable under erasure: Some(noop()) and None both become undefined; it is semantically a bool — use `boolean` or a purpose-built enum"),
+            Type::Option { .. } | Type::None => self.error_span(span, "`Option<Option<T>>` is ambiguous under erasure: Some(None) and None both become undefined; model the distinct states with a purpose-built enum"),
+            _ => {}
+        }
+        Type::Option { inner: Box::new(inner) }
+    }
+
+    /// Instantiation may put an unrepresentable Option below a container.
+    pub(super) fn validate_option_erasure(&mut self, ty: &Type<'a>, span: ast::Span) {
+        match ty {
+            Type::Option { inner } => {
+                self.checked_option((**inner).clone(), span);
+                self.validate_option_erasure(inner, span);
+            }
+            Type::Array { elem } => self.validate_option_erasure(elem, span),
+            Type::Generic { args, .. } | Type::Union { members: args } => {
+                for arg in args { self.validate_option_erasure(arg, span); }
+            }
+            Type::Function { params, ret, .. } => {
+                for param in params { self.validate_option_erasure(param, span); }
+                self.validate_option_erasure(ret, span);
+            }
+            Type::Object { fields } => {
+                for (_, ty) in fields { self.validate_option_erasure(ty, span); }
+            }
+            _ => {}
+        }
+    }
+
     pub(super) fn resolve_ast_type(&mut self, ty: &ast::Type<'a>) -> Type<'a> {
         self.resolve_ast_type_rec(ty, &mut HashSet::new())
     }
@@ -69,9 +100,8 @@ impl<'a> Checker<'a> {
             ast::Type::Generic { base, args, span } => {
                 if base == &"Option" {
                     if args.len() == 1 {
-                        Type::Option {
-                            inner: Box::new(self.resolve_ast_type_rec(&args[0], seen)),
-                        }
+                        let inner = self.resolve_ast_type_rec(&args[0], seen);
+                        self.checked_option(inner, *span)
                     } else {
                         self.error_span(*span, "Option requires exactly one type argument");
                         Type::Error
@@ -134,8 +164,9 @@ impl<'a> Checker<'a> {
                 optional: 0,
             },
 
-            ast::Type::Option { inner, .. } => Type::Option {
-                inner: Box::new(self.resolve_ast_type_rec(inner, seen)),
+            ast::Type::Option { inner, span } => {
+                let inner = self.resolve_ast_type_rec(inner, seen);
+                self.checked_option(inner, *span)
             },
 
             // Membership and overlap validation live in `check_union_members`

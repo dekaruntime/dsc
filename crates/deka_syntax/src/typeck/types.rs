@@ -155,6 +155,7 @@ pub enum UnwrapKind {
     /// Convert a string argument to `Option<number>` for `parseNumber`
     /// (`Number(x)` wrapped).
     StringToOptionNumber,
+    Isset,
 }
 
 /// Which operand of a mixed newtype/primitive operation is the newtype.

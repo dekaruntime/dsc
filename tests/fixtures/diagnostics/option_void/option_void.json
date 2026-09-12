@@ -1,0 +1,5 @@
+{
+  "title": "option void",
+  "stage": "parse",
+  "expectedDiagnosticContains": "`Option<void>` is indistinguishable under erasure"
+}

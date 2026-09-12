@@ -276,32 +276,32 @@ fn helper_js_behavior_via_node_when_available() {
     let script = format!(
         r#"
 const Option = {{
-  Some: (value) => ({{ __enum: "Option", __case: "Some", name: "Some", value }}),
-  None: {{ __enum: "Option", __case: "None", name: "None" }},
+  Some: (value) => value,
+  None: undefined,
 }};
 const c = {CATALOG_HELPERS_JS};
 const assert = require("node:assert/strict");
 // safe: total, declared types.
 assert.equal(c.bytes.len(c.bytes.from_string("abc")), 3);
-assert.equal(c.bytes.get(c.bytes.from_string("ab"), 5).__case, "None");
-assert.equal(c.bytes.get(c.bytes.from_string("ab"), 1).value, 98);
+assert.equal(c.bytes.get(c.bytes.from_string("ab"), 5), undefined);
+assert.equal(c.bytes.get(c.bytes.from_string("ab"), 1), 98);
 const sl = c.bytes.slice(c.bytes.from_string("abcd"), 1, 3);
 assert.deepEqual([...sl], [98, 99]);
 const cat = c.bytes.concat(c.bytes.from_string("ab"), c.bytes.from_string("cd"));
 assert.deepEqual([...cat], [97, 98, 99, 100]);
 // from_array is partial: valid input is Some, invalid is None.
-assert.deepEqual([...c.bytes.from_array([1, 2, 255]).value], [1, 2, 255]);
+assert.deepEqual([...c.bytes.from_array([1, 2, 255])], [1, 2, 255]);
 assert.equal(c.bytes.to_hex(c.bytes.from_string("ab")), "6162");
-assert.deepEqual([...c.bytes.from_hex("6162").value], [97, 98]);
-assert.deepEqual([...c.bytes.from_hex("616B").value], [97, 107]); // uppercase digits
+assert.deepEqual([...c.bytes.from_hex("6162")], [97, 98]);
+assert.deepEqual([...c.bytes.from_hex("616B")], [97, 107]); // uppercase digits
 // failure path: a value the caller must handle, never fabricated bytes.
-assert.equal(c.bytes.from_hex("zz").__case, "None");
-assert.equal(c.bytes.from_hex("abc").__case, "None");
+assert.equal(c.bytes.from_hex("zz"), undefined);
+assert.equal(c.bytes.from_hex("abc"), undefined);
 const b64 = c.bytes.to_base64(c.bytes.from_string("abc"));
 assert.equal(b64, "YWJj");
-assert.deepEqual([...c.bytes.from_base64(b64).value], [97, 98, 99]);
-assert.equal(c.bytes.from_base64("!!").__case, "None");
-assert.equal(c.bytes.from_base64("YQ").__case, "None"); // unpadded is invalid input
+assert.deepEqual([...c.bytes.from_base64(b64)], [97, 98, 99]);
+assert.equal(c.bytes.from_base64("!!"), undefined);
+assert.equal(c.bytes.from_base64("YQ"), undefined); // unpadded is invalid input
 // unsafe: strict decode throws on invalid UTF-8 (no lossy substitution).
 assert.throws(() => c.bytes.to_string(new Uint8Array([0xff])));
 assert.equal(c.bytes.to_string(c.bytes.from_string("ok")), "ok");
@@ -332,12 +332,12 @@ fn helper_js_rejects_malformed_input_as_values_via_node() {
     let script = format!(
         r#"
 const Option = {{
-  Some: (value) => ({{ __enum: "Option", __case: "Some", name: "Some", value }}),
-  None: {{ __enum: "Option", __case: "None", name: "None" }},
+  Some: (value) => value,
+  None: undefined,
 }};
 const c = {CATALOG_HELPERS_JS};
 const assert = require("node:assert/strict");
-const isNone = (v) => v.__case === "None";
+const isNone = (v) => v === undefined;
 
 // --- hex: malformed is None, never a prefix-parsed or truncated buffer ---
 // "6g" is the load-bearing case: parseInt would read the "6" and silently
@@ -348,18 +348,18 @@ for (const bad of ["6g", "g6", "zz", "0x61", "61 62", "6 1", "６１", "61\n62"]
 assert.ok(isNone(c.bytes.from_hex("abc")), "odd length is None");
 assert.ok(isNone(c.bytes.from_hex("61 6")), "odd length with garbage is None");
 // Valid extremes still parse.
-assert.deepEqual([...c.bytes.from_hex("").value], []);
-assert.deepEqual([...c.bytes.from_hex("00ff10").value], [0, 255, 16]);
-assert.deepEqual([...c.bytes.from_hex("00FF10").value], [0, 255, 16]);
+assert.deepEqual([...c.bytes.from_hex("")], []);
+assert.deepEqual([...c.bytes.from_hex("00ff10")], [0, 255, 16]);
+assert.deepEqual([...c.bytes.from_hex("00FF10")], [0, 255, 16]);
 
 // --- base64: malformed is None ---
 for (const bad of ["!!", "YQ", "Y", "YWI", "YQ=", "YQ===", "Y Q=", "YQ==YQ==", "====", "=W==", "éé=="]) {{
   assert.ok(isNone(c.bytes.from_base64(bad)), `from_base64({{JSON.stringify(bad)}}) must be None`);
 }}
-assert.deepEqual([...c.bytes.from_base64("").value], []);
-assert.deepEqual([...c.bytes.from_base64("TQ==").value], [77]);
-assert.deepEqual([...c.bytes.from_base64("TWE=").value], [77, 97]);
-assert.deepEqual([...c.bytes.from_base64("TWFu").value], [77, 97, 110]);
+assert.deepEqual([...c.bytes.from_base64("")], []);
+assert.deepEqual([...c.bytes.from_base64("TQ==")], [77]);
+assert.deepEqual([...c.bytes.from_base64("TWE=")], [77, 97]);
+assert.deepEqual([...c.bytes.from_base64("TWFu")], [77, 97, 110]);
 
 // --- from_array: invalid elements are None, never coerced ---
 // Uint8Array.from would: truncate 1.5 -> 1, wrap -1 -> 255,
@@ -367,15 +367,15 @@ assert.deepEqual([...c.bytes.from_base64("TWFu").value], [77, 97, 110]);
 for (const bad of [[1.5], [-1], [256], [300], ["97"], [NaN], [null], [97, 256], [undefined]]) {{
   assert.ok(isNone(c.bytes.from_array(bad)), `from_array(${{JSON.stringify(bad)}}) must be None`);
 }}
-assert.deepEqual([...c.bytes.from_array([]).value], []);
-assert.deepEqual([...c.bytes.from_array([0, 127, 128, 255]).value], [0, 127, 128, 255]);
+assert.deepEqual([...c.bytes.from_array([])], []);
+assert.deepEqual([...c.bytes.from_array([0, 127, 128, 255])], [0, 127, 128, 255]);
 
 // --- get: non-integer and out-of-range indices are None ---
 const ab = c.bytes.from_string("ab");
 assert.ok(isNone(c.bytes.get(ab, 1.5)), "fractional index is None, not truncated");
 assert.ok(isNone(c.bytes.get(ab, -1)), "negative index is None");
 assert.ok(isNone(c.bytes.get(ab, 2)), "index == length is None");
-assert.equal(c.bytes.get(ab, 0).value, 97);
+assert.equal(c.bytes.get(ab, 0), 97);
 
 // --- to_string: every malformed UTF-8 shape throws (Err under unsafe) ---
 for (const bad of [
@@ -394,9 +394,9 @@ const all = new Uint8Array(256);
 for (let i = 0; i < 256; i++) all[i] = i;
 const allHex = c.bytes.to_hex(all);
 assert.equal(allHex.length, 512);
-assert.deepEqual([...c.bytes.from_hex(allHex).value], [...all]);
+assert.deepEqual([...c.bytes.from_hex(allHex)], [...all]);
 const b64All = c.bytes.to_base64(all);
-assert.deepEqual([...c.bytes.from_base64(b64All).value], [...all]);
+assert.deepEqual([...c.bytes.from_base64(b64All)], [...all]);
 assert.equal(c.bytes.to_string(c.bytes.from_string("héllo 𝄞")), "héllo 𝄞");
 console.log("ok");
 "#
@@ -416,8 +416,8 @@ fn helper_js_bytes_never_alias_or_mutate_via_node() {
     let script = format!(
         r#"
 const Option = {{
-  Some: (value) => ({{ __enum: "Option", __case: "Some", name: "Some", value }}),
-  None: {{ __enum: "Option", __case: "None", name: "None" }},
+  Some: (value) => value,
+  None: undefined,
 }};
 const c = {CATALOG_HELPERS_JS};
 const assert = require("node:assert/strict");
@@ -448,10 +448,10 @@ cat[0] = 0;
 assert.deepEqual(snap(src), before, "concat result aliases an input");
 
 // Decoders allocate fresh buffers.
-const dec = c.bytes.from_hex("6162").value;
+const dec = c.bytes.from_hex("6162");
 dec[0] = 0;
 assert.deepEqual(snap(src), before);
-const dec64 = c.bytes.from_base64("aGVsbG8=").value;
+const dec64 = c.bytes.from_base64("aGVsbG8=");
 dec64[0] = 0;
 assert.deepEqual(snap(src), before);
 

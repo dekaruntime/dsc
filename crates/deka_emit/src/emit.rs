@@ -1001,8 +1001,8 @@ fn json_encode(tree: &deka_syntax::typeck::DescriptorTree, value: &str) -> Strin
         T::Newtype { .. } => format!("{value}[__p]"),
         T::Array { elem } => format!("{value}.map((v) => {})", json_encode(elem, "v")),
         T::Option { inner } => format!(
-            "(() => {{ const __option = {value}; return __option.__case === \"Some\" ? {{ Option: {{ case: \"Some\", values: [{}] }} }} : {{ Option: {{ case: \"None\" }} }}; }})()",
-            json_encode(inner, "__option.value")
+            "(() => {{ const __option = {value}; return __option !== undefined ? {{ Option: {{ case: \"Some\", values: [{}] }} }} : {{ Option: {{ case: \"None\" }} }}; }})()",
+            json_encode(inner, "__option")
         ),
         T::Struct { name, fields } => {
             let entries = fields
@@ -1082,7 +1082,7 @@ fn json_predicate(tree: &deka_syntax::typeck::DescriptorTree, value: &str) -> St
         T::Enum { name: "Result", .. } => format!("typeof {value}?.ok === \"boolean\""),
         T::Enum { name, .. } => format!("{value}?.__enum === {}", json_string(name)),
         T::Newtype { name, .. } => format!("{value}?.__deka_newtype === {}", json_string(name)),
-        T::Option { .. } => format!("{value}?.__enum === \"Option\""),
+        T::Option { inner } => format!("({value} === undefined || ({}))", json_predicate(inner, value)),
         T::Array { .. } => format!("Array.isArray({value})"),
         T::Union { .. } => "true".to_string(),
         T::Interface { .. } => "true".to_string(),
@@ -1091,7 +1091,7 @@ fn json_predicate(tree: &deka_syntax::typeck::DescriptorTree, value: &str) -> St
 
 fn json_decode(tree: &deka_syntax::typeck::DescriptorTree, value: &str) -> String {
     use deka_syntax::typeck::DescriptorTree as T;
-    let invalid = "undefined";
+    let invalid = "__invalid";
     match tree {
         // Unreachable by construction -- see json_encode.
         T::Recurse { name } => unreachable!(
@@ -1109,15 +1109,15 @@ fn json_decode(tree: &deka_syntax::typeck::DescriptorTree, value: &str) -> Strin
         T::Newtype { name, repr } => {
             let inner = json_decode(repr, value);
             format!(
-                "(() => {{ const x = {inner}; return x === undefined ? undefined : {name}(x); }})()"
+                "(() => {{ const x = {inner}; return x === __invalid ? __invalid : {name}(x); }})()"
             )
         }
         T::Array { elem } => format!(
-            "Array.isArray({value}) ? (() => {{ const a = []; for (const x of {value}) {{ const y = {}; if (y === undefined) return undefined; a.push(y); }} return a; }})() : undefined",
+            "Array.isArray({value}) ? (() => {{ const a = []; for (const x of {value}) {{ const y = {}; if (y === __invalid) return __invalid; a.push(y); }} return a; }})() : __invalid",
             json_decode(elem, "x")
         ),
         T::Option { inner } => format!(
-            "{value} && typeof {value} === \"object\" && {value}.Option && ({value}.Option.case === \"None\" ? Option.None : {value}.Option.case === \"Some\" ? (() => {{ const x = {}; return x === undefined ? undefined : Option.Some(x); }})() : undefined)",
+            "{value} && typeof {value} === \"object\" && {value}.Option ? ({value}.Option.case === \"None\" ? undefined : {value}.Option.case === \"Some\" ? ({}) : __invalid) : __invalid",
             json_decode(inner, &format!("{value}.Option.values?.[0]"))
         ),
         T::Struct { name, fields } => {
@@ -1134,11 +1134,11 @@ fn json_decode(tree: &deka_syntax::typeck::DescriptorTree, value: &str) -> Strin
                 );
                 let decoded = json_decode(&field.ty, &source);
                 let local = format!("__{}", field.name);
-                checks.push(format!("(() => {{ const {local} = {decoded}; if ({local} === undefined) return false; return true; }})()"));
+                checks.push(format!("(() => {{ const {local} = {decoded}; if ({local} === __invalid) return false; return true; }})()"));
                 assignments.push(format!("{}: {}", json_string(field.name), decoded));
             }
             format!(
-                "({}) ? {}({{ {} }}) : undefined",
+                "({}) ? {}({{ {} }}) : __invalid",
                 checks.join(" && "),
                 name,
                 assignments.join(", ")
@@ -1152,7 +1152,7 @@ fn json_decode(tree: &deka_syntax::typeck::DescriptorTree, value: &str) -> Strin
                         let source = format!("{value}[{}].values?.[0]", json_string(name));
                         let decoded = json_decode(payload, &source);
                         format!(
-                            "(() => {{ const x = {}; return x === undefined ? undefined : {}.{}(x); }})()",
+                            "(() => {{ const x = {}; return x === __invalid ? __invalid : {}.{}(x); }})()",
                             decoded, name, case
                         )
                     }
@@ -1166,17 +1166,17 @@ fn json_decode(tree: &deka_syntax::typeck::DescriptorTree, value: &str) -> Strin
                 ));
             }
             format!(
-                "{value} && typeof {value} === \"object\" && {value}[{}] ? ({} : undefined) : undefined",
+                "{value} && typeof {value} === \"object\" && {value}[{}] ? ({} : __invalid) : __invalid",
                 json_string(name),
                 arms.join(" : ")
             )
         }
         T::Union { members } => {
-            let mut expression = "undefined".to_string();
+            let mut expression = "__invalid".to_string();
             for member in members.iter().rev() {
                 let decoded = json_decode(member, value);
                 expression = format!(
-                    "(() => {{ const x = {}; return x === undefined ? {} : x; }})()",
+                    "(() => {{ const x = {}; return x === __invalid ? {} : x; }})()",
                     decoded, expression
                 );
             }
@@ -1225,9 +1225,9 @@ fn emit_json_functions(
             deka_syntax::typeck::JsonOperation::ParseJson => {
                 out.push_str("function ");
                 out.push_str(&name);
-                out.push_str("(s) { try { const v = JSON.parse(s); const x = ");
+                out.push_str("(s) { const __invalid = Symbol(); try { const v = JSON.parse(s); const x = ");
                 out.push_str(&json_decode(&shape, "v"));
-                out.push_str("; return x === undefined ? Err(\"invalid JSON value\") : Ok(x); } catch (_) { return Err(\"invalid JSON\"); } }\n");
+                out.push_str("; return x === __invalid ? Err(\"invalid JSON value\") : Ok(x); } catch (_) { return Err(\"invalid JSON\"); } }\n");
             }
         }
     }
@@ -2289,26 +2289,6 @@ impl<'a> Emitter<'a> {
         if uses_json {
             self.uses_prelude_enums = true;
         }
-        // Same guarantee for `array_builtin_calls` (deka#561): the emitted
-        // rewrite calls `Some`/`None`, which the enum prelude defines.
-        if self
-            .array_builtin_calls
-            .values()
-            .any(|kind| *kind != deka_syntax::typeck::ArrayAccess::Has)
-        {
-            self.uses_prelude_enums = true;
-        }
-        // And for partial `number_math_calls` (deka#378 step 2): the emitted
-        // Option wrapper calls `Some`/`None`. Total calls emit plain
-        // `Math.*` expressions and need no prelude.
-        if self
-            .number_math_calls
-            .values()
-            .any(|kind| matches!(kind, deka_syntax::typeck::NumberMath::Partial))
-        {
-            self.uses_prelude_enums = true;
-        }
-
         // Record this module's demand for the shared helpers at member
         // granularity; the module graph unions these sets across the whole
         // program and synthesizes the prelude once (deka#595).
@@ -2500,14 +2480,13 @@ impl<'a> Emitter<'a> {
             let mut found = false;
             deka_syntax::visit::walk_stmt(stmt, &mut |expr| {
                 if let Expr::EnumConstructor { enum_name, .. } = expr {
-                    if (*enum_name == "Option" || *enum_name == "Result")
+                    if *enum_name == "Result"
                         && !matches!(self.exception_forms.get(&(expr as *const _)), Some(deka_syntax::typeck::ExceptionEmit::Ok | deka_syntax::typeck::ExceptionEmit::Throw)) {
                         found = true;
                     }
                 }
-                // A bare `None` literal is Expr::None, not an EnumConstructor, so it
-                // must be detected here or the prelude it now references is not emitted.
-                if matches!(expr, Expr::None { .. } | Expr::Safe { .. })
+                // Safe catalog calls and unsafe bridges still need Result constructors.
+                if matches!(expr, Expr::Safe { .. })
                     || matches!(expr, Expr::Unsafe { source, .. } if source.contains("deka") || source.contains("\\u")) {
                     found = true;
                 }
@@ -2789,7 +2768,7 @@ impl<'a> Emitter<'a> {
                 //
                 //   let name;
                 //   { const __u = scrutinee;
-                //     if (__u.__case === "Some") { name = __u.value; }
+                //     if (__u !== undefined) { name = __u; }
                 //     else { …alternative… } }
                 //
                 // `let` even for `const`, because the assignment happens in a
@@ -2805,9 +2784,11 @@ impl<'a> Emitter<'a> {
                 self.out.push_str(&format!("const {temp} = "));
                 self.emit_expr(scrutinee)?;
                 self.out.push_str(";\n");
-                self.out.push_str(&format!(
-                    "if ({temp}.__case === \"Some\" || {temp}.ok === true) {{ {name} = {temp}.value; }} else {{\n"
-                ));
+                if self.exception_forms.option_values.contains(&(scrutinee as *const _)) {
+                    self.out.push_str(&format!("if ({temp} !== undefined) {{ {name} = {temp}; }} else {{\n"));
+                } else {
+                    self.out.push_str(&format!("if ({temp}.ok === true) {{ {name} = {temp}.value; }} else {{\n"));
+                }
                 match alternative {
                     deka_syntax::UnwrapAlternative::Block(stmts) => {
                         for inner in stmts.iter() {
@@ -3691,10 +3672,8 @@ impl<'a> Emitter<'a> {
                 self.out.push_str(if *value { "true" } else { "false" });
             }
             Expr::None { .. } => {
-                // `None` is Option.None, not JS null. The prelude constant and the
-                // `__case === "None"` pattern test must agree on one representation
-                // (deka#394); emitting bare null made every match on it throw.
-                self.out.push_str("Option.None");
+                // Undefined is the reserved empty Option representation (rfd#62).
+                self.out.push_str("undefined");
             }
             Expr::Identifier { name, .. } => {
                 self.out.push_str(name);
@@ -3755,7 +3734,7 @@ impl<'a> Emitter<'a> {
                 callee, args, span, ..
             } => {
                 let expr_ptr = expr as *const Expr<'a>;
-                if let Some((params, ret, asynchronous)) =
+                if let Some((_params, ret, asynchronous)) =
                     self.exception_forms.summons.get(&expr_ptr).cloned()
                 {
                     use deka_syntax::typeck::Type;
@@ -3764,9 +3743,8 @@ impl<'a> Emitter<'a> {
                     if !void {
                         self.out.push_str(if asynchronous { "(async ($__deka_input) => { const $__deka_foreign = await $__deka_input; " } else { "(($__deka_foreign) => { " });
                         if option {
-                            // Post-dsc#98 seam: replace the tagged materialization
-                            // only when the Option-erasure train resumes.
-                            self.out.push_str("return $__deka_foreign == null ? { __enum: \"Option\", __case: \"None\", name: \"None\" } : { __enum: \"Option\", __case: \"Some\", name: \"Some\", value: $__deka_foreign }; })(");
+                            // Foreign nullish values enter the reserved None representation.
+                            self.out.push_str("return $__deka_foreign == null ? undefined : $__deka_foreign; })(");
                         } else {
                             self.out.push_str("if ($__deka_foreign == null) { const e = new Error(\"summoned function returned null or undefined\"); e.name = \"BoundaryError\"; e[Symbol.for(\"deka.BoundaryError\")] = true; throw e; } return $__deka_foreign; })(");
                         }
@@ -3779,14 +3757,7 @@ impl<'a> Emitter<'a> {
                         if i > 0 {
                             self.out.push_str(", ");
                         }
-                        if matches!(params.get(i), Some(Type::Option { .. })) {
-                            self.out
-                                .push_str("((v) => v.__case === \"Some\" ? v.value : undefined)(");
-                            self.emit_expr(arg)?;
-                            self.out.push(')');
-                        } else {
-                            self.emit_expr(arg)?;
-                        }
+                        self.emit_expr(arg)?;
                     }
                     self.out.push(')');
                     if !void {
@@ -3797,6 +3768,11 @@ impl<'a> Emitter<'a> {
                 if let Some(kind) = self.unwrap_calls.get(&expr_ptr) {
                     if let Some(arg) = args.first() {
                         match kind {
+                            deka_syntax::typeck::UnwrapKind::Isset => {
+                                self.out.push('(');
+                                self.emit_expr(arg)?;
+                                self.out.push_str(" !== undefined)");
+                            }
                             deka_syntax::typeck::UnwrapKind::Identity => {
                                 self.emit_expr(arg)?;
                             }
@@ -3819,7 +3795,7 @@ impl<'a> Emitter<'a> {
                                 // NaN; surface it as Option<number>.
                                 self.out.push_str("(() => { const __n = Number(");
                                 self.emit_expr(arg)?;
-                                self.out.push_str("); return isNaN(__n) ? { __enum: \"Option\", __case: \"None\", name: \"None\" } : { __enum: \"Option\", __case: \"Some\", name: \"Some\", value: __n }; })()");
+                                self.out.push_str("); return isNaN(__n) ? undefined : __n; })()");
                             }
                         }
                     }
@@ -3840,6 +3816,8 @@ impl<'a> Emitter<'a> {
                             .contains(&(*object as *const _))
                         {
                             self.out.push_str(", true");
+                        } else if self.exception_forms.option_values.contains(&(*object as *const _)) {
+                            self.out.push_str(", false, true");
                         }
                     }
                     self.out.push(')');
@@ -3895,14 +3873,14 @@ impl<'a> Emitter<'a> {
                     }
                     let produce = match kind {
                         deka_syntax::typeck::ArrayAccess::Has => unreachable!(),
-                        deka_syntax::typeck::ArrayAccess::First => "Some(v[0])",
-                        deka_syntax::typeck::ArrayAccess::Last => "Some(v[v.length - 1])",
-                        deka_syntax::typeck::ArrayAccess::Pop => "Some(v.pop())",
-                        deka_syntax::typeck::ArrayAccess::Shift => "Some(v.shift())",
+                        deka_syntax::typeck::ArrayAccess::First => "v[0]",
+                        deka_syntax::typeck::ArrayAccess::Last => "v[v.length - 1]",
+                        deka_syntax::typeck::ArrayAccess::Pop => "v.pop()",
+                        deka_syntax::typeck::ArrayAccess::Shift => "v.shift()",
                     };
                     self.out.push_str("((v) => v.length > 0 ? ");
                     self.out.push_str(produce);
-                    self.out.push_str(" : None)(");
+                    self.out.push_str(" : undefined)(");
                     if let Expr::FieldAccess { object, .. } = &**callee {
                         self.emit_expr(object)?;
                     }
@@ -3924,7 +3902,7 @@ impl<'a> Emitter<'a> {
                     if let Expr::FieldAccess { object, field, .. } = &**callee {
                         let partial = matches!(kind, deka_syntax::typeck::NumberMath::Partial);
                         if partial {
-                            self.out.push_str("((v) => isNaN(v) ? None : Some(v))(");
+                            self.out.push_str("((v) => isNaN(v) ? undefined : v)(");
                         }
                         self.out.push_str("Math.");
                         self.out.push_str(field);
@@ -4125,9 +4103,17 @@ impl<'a> Emitter<'a> {
                 payload,
                 ..
             } => {
-                if *enum_name == "Option" || *enum_name == "Result" {
-                    self.uses_prelude_enums = true;
+                if *enum_name == "Option" {
+                    if let Some(payload) = payload {
+                        self.out.push('(');
+                        self.emit_expr(payload)?;
+                        self.out.push(')');
+                    } else {
+                        self.out.push_str("undefined");
+                    }
+                    return Ok(());
                 }
+                if *enum_name == "Result" { self.uses_prelude_enums = true; }
                 self.out.push_str(enum_name);
                 self.out.push('.');
                 self.out.push_str(case_name);
@@ -4336,7 +4322,7 @@ impl<'a> Emitter<'a> {
                     Some(expr) => expr.clone(),
                     None => {
                         self.uses_prelude_enums = true;
-                        "None".to_string()
+                        "undefined".to_string()
                     }
                 };
                 entries.push(format!("{}: {}", opt, value));
@@ -4472,7 +4458,7 @@ impl<'a> Emitter<'a> {
                     Some(expr) => expr.clone(),
                     None => {
                         self.uses_prelude_enums = true;
-                        "None".to_string()
+                        "undefined".to_string()
                     }
                 };
                 entries.push(format!("{}: {}", opt, value));
@@ -4741,8 +4727,15 @@ impl<'a> Emitter<'a> {
         self.out.push_str(&scrutinee_value);
         self.out.push_str(";\n");
 
+        let option_pair = arms.len() == 2 && arms.iter().all(|arm| {
+            self.exception_forms.option_patterns.contains(&(&arm.pattern as *const _))
+                && matches!(arm.pattern, Pattern::Constructor { payload: None, .. }
+                    | Pattern::Constructor { payload: Some(Pattern::Identifier { .. } | Pattern::Wildcard { .. }), .. }
+                    | Pattern::Identifier { .. })
+                && arm.guard.is_none()
+        });
         for (i, arm) in arms.iter().enumerate() {
-            let condition = self.match_condition(&arm.pattern, &scrutinee_var);
+            let condition = if option_pair && i == 1 { "true".into() } else { self.match_condition(&arm.pattern, &scrutinee_var) };
             write_indent(&mut self.out, 0);
             if i > 0 {
                 self.out.push_str("else ");
@@ -4769,7 +4762,7 @@ impl<'a> Emitter<'a> {
             write_indent(&mut self.out, 0);
             self.out.push_str("}\n");
         }
-        if arms
+        if !option_pair && arms
             .last()
             .map(|arm| self.match_condition(&arm.pattern, &scrutinee_var) != "true")
             .unwrap_or(true)
@@ -4883,6 +4876,7 @@ impl<'a> Emitter<'a> {
                     .enum_case_patterns
                     .get(&(pattern as *const Pattern<'a>))
                 {
+                    Some(&"None") if self.exception_forms.option_patterns.contains(&(pattern as *const _)) => format!("{scrutinee_var} === undefined"),
                     Some(case) => format!("{}.__case === \"{}\"", scrutinee_var, case),
                     None => "true".to_string(),
                 }
@@ -4985,13 +4979,18 @@ impl<'a> Emitter<'a> {
                     .exception_forms
                     .result_patterns
                     .contains(&(pattern as *const _));
-                let mut conditions = vec![if result_case {
+                let option_case = self.exception_forms.option_patterns.contains(&(pattern as *const _));
+                let mut conditions = vec![if option_case {
+                    format!("{scrutinee_var} {} undefined", if *name == "Some" { "!==" } else { "===" })
+                } else if result_case {
                     format!("{scrutinee_var}.ok === {}", *name == "Ok")
                 } else {
                     format!("{}.__case === \"{}\"", scrutinee_var, name)
                 }];
                 if let Some(payload) = payload {
-                    let payload_access = if *name == "Err" {
+                    let payload_access = if option_case {
+                        scrutinee_var.to_string()
+                    } else if *name == "Err" {
                         format!("{}.error", scrutinee_var)
                     } else {
                         format!("{}.value", scrutinee_var)
@@ -5136,7 +5135,7 @@ impl<'a> Emitter<'a> {
                     return Ok(());
                 }
                 if let Some(payload) = payload {
-                    let payload_access = if *name == "None" {
+                    let payload_access = if self.exception_forms.option_patterns.contains(&(pattern as *const _)) {
                         scrutinee_var.to_string()
                     } else if *name == "Err" {
                         format!("{}.error", scrutinee_var)
@@ -5230,29 +5229,15 @@ impl<'a> Emitter<'a> {
                     }
                     None => "true".to_string(),
                 };
-                // An `?:` prop is `Option<T>` inside the component and the
-                // caller wrote a bare `T`. This is a construction site the
-                // compiler owns, so it does the wrapping (deka#416).
-                let value = if plan
-                    .map(|plan| plan.wrap_some.iter().any(|name| *name == attr.name))
-                    .unwrap_or(false)
-                {
-                    self.uses_prelude_enums = true;
-                    format!("Option.Some({value})")
-                } else {
-                    value
-                };
+                // Optional props erase to the caller's value, just like Some(v).
                 props.push(format!("\"{}\": {}", escape_string(attr.name), value));
             }
         }
 
-        // Optional props the caller left out. Without this the field would be
-        // JS `undefined` while the type says `Option<T>` -- the runtime hole
-        // deka#401 closed for `T?`.
+        // Keep omitted props explicit in canonical output: None is undefined.
         if let Some(plan) = plan {
             for name in plan.fill_none.iter() {
-                self.uses_prelude_enums = true;
-                props.push(format!("\"{}\": Option.None", escape_string(name)));
+                props.push(format!("\"{}\": undefined", escape_string(name)));
             }
         }
 

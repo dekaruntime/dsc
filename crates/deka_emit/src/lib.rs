@@ -65,6 +65,17 @@ mod tests {
     }
 
     #[test]
+    fn option_erasure_runtime() { run_hats_fixtures("option_erasure", 1); }
+
+    #[test]
+    fn option_erasure_exact_output() {
+        assert_eq!(parse_check_and_emit("const a = Some(0); const b: Option<number> = None; const c = isset(a);"),
+            "\"use strict\";\nconst a = (0);\nconst b = undefined;\nconst c = (a !== undefined);");
+        let out = parse_check_and_emit("fn f(v: Option<number>) number { return match v { Some(x) => x, None => 0 }; }");
+        assert_eq!(out, "\"use strict\";\nfunction f(v) {\nlet __deka_match_result_1;\nconst __deka_match_scrutinee_1 = v;\nif (__deka_match_scrutinee_1 !== undefined) {\n const x = __deka_match_scrutinee_1;\n __deka_match_result_1 = x;\n}\nelse {\n __deka_match_result_1 = 0;\n}\nreturn __deka_match_result_1;\n}");
+    }
+
+    #[test]
     fn indexing_has_emits_inline_and_access_stays_bare() {
         let out = parse_check_and_emit(
             "fn f(scores: Array<number>, round: number) number { return scores.has(round) ? scores[round] : 0; }",
@@ -177,6 +188,58 @@ mod tests {
             count += 1;
         }
         assert_eq!(count, expected_count);
+    }
+
+    #[test]
+    fn option_reflection_and_json_preserve_public_format() {
+        let out = parse_check_and_emit(r#"
+fn reflected(v: Option<number>) string { return v.getType().toString(); }
+fn encoded(v: Option<number>) string { return v.toJSON(); }
+alias Maybe = Option<number>;
+alias Many = Array<Option<number>>;
+alias Outcome = Result<Option<number>, string>;
+const none = "{\"Option\":{\"case\":\"None\"}}".parseJSON<Maybe>();
+const many = "[{\"Option\":{\"case\":\"None\"}},{\"Option\":{\"case\":\"Some\",\"values\":[0]}}]".parseJSON<Many>();
+const outcome = "{\"Result\":{\"case\":\"Ok\",\"values\":[{\"Option\":{\"case\":\"None\"}}]}}".parseJSON<Outcome>();
+const bad = "{\"Option\":{\"case\":\"Some\"}}".parseJSON<Maybe>();
+const payload = Some({value: 7});
+const n: Option<number> = None;
+const t = n.signature();
+"#);
+        let js = format!("{out}\n{}", r#"
+import assert from 'node:assert/strict';
+assert.equal(reflected(0), 'Option');
+assert.equal(reflected(undefined), 'Option');
+assert.equal(t.kind, 'option');
+assert.equal(t.inner.name, 'number');
+assert.deepEqual(none, {ok: true, value: undefined});
+assert.deepEqual(many, {ok: true, value: [undefined, 0]});
+assert.deepEqual(outcome, {ok: true, value: {ok: true, value: undefined}});
+assert.equal(bad.ok, false);
+assert.deepEqual(payload, {value: 7});
+assert.deepEqual(JSON.parse(encoded(undefined)), {Option: {case: 'None'}});
+assert.deepEqual(JSON.parse(encoded(0)), {Option: {case: 'Some', values: [0]}});
+"#);
+        let result = std::process::Command::new("node")
+            .args(["--input-type=module", "-e", &js]).output().unwrap();
+        assert!(result.status.success(), "{}\n{out}", String::from_utf8_lossy(&result.stderr));
+    }
+
+    #[test]
+    fn option_diagnostic_fixtures() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/diagnostics");
+        for name in ["option_void", "option_nested", "option_bodyless"] {
+            let dir = root.join(name);
+            let source = std::fs::read_to_string(dir.join(format!("{name}.fail.ds"))).unwrap();
+            let metadata: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join(format!("{name}.json"))).unwrap()).unwrap();
+            let arena = Bump::new();
+            let parsed = parse(&source, &arena);
+            let errors = if !parsed.errors.is_empty() { parsed.errors } else {
+                assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+                deka_syntax::typeck::check_program(&parsed.program.unwrap(), &source).errors
+            };
+            assert!(errors.iter().any(|e| e.message.contains(metadata["expectedDiagnosticContains"].as_str().unwrap())), "{name}: {errors:?}");
+        }
     }
 
     #[test]
@@ -401,7 +464,7 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
         assert!(out.contains("function toJSON$User(v)"), "got: {out}");
         assert!(out.contains("function parseJSON$User(s)"), "got: {out}");
         assert!(out.contains("\"User\""), "got: {out}");
-        assert!(out.contains("\"Option\""), "got: {out}");
+        assert!(out.contains("Option: { case:"), "got: {out}");
         assert!(!out.contains("globalThis"), "got: {out}");
         assert!(!out.contains("prototype.toJSON"), "got: {out}");
     }
@@ -601,21 +664,9 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
 
     #[test]
     fn emit_match_expression() {
-        let out =
-            parse_and_emit("const o = Some(5); const x = match o { Some(n) => n, None => 0 };");
-        assert!(
-            out.contains("__case"),
-            "expected case dispatch, got: {}",
-            out
-        );
-        assert!(out.contains("Some"), "got: {}", out);
-        assert!(out.contains("None"), "got: {}", out);
-        assert!(out.contains("let __deka_match_result_1;"), "got: {}", out);
-        assert!(
-            !out.contains("((__deka_scrutinee) =>"),
-            "match expression still has an IIFE: {}",
-            out
-        );
+        let out = parse_check_and_emit("const o = Some(5); const x = match o { Some(n) => n, None => 0 };");
+        assert!(out.contains("!== undefined"), "{out}");
+        assert!(!out.contains("__case"), "{out}");
     }
 
     #[test]
@@ -652,8 +703,8 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
 
     #[test]
     fn emit_match_statement_without_iife() {
-        let out = parse_and_emit(
-            "const o = Some(5); match o { Some(n) => console.log(n), None => console.log(0) };",
+        let out = parse_check_and_emit(
+            "fn log(n: number) void {} const o = Some(5); match o { Some(n) => log(n), None => log(0) };",
         );
         assert!(
             out.contains("const __deka_match_scrutinee_1 = o;"),
@@ -661,7 +712,7 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
             out
         );
         assert!(
-            out.contains("if (__deka_match_scrutinee_1.__case === \"Some\")"),
+            out.contains("if (__deka_match_scrutinee_1 !== undefined)"),
             "got: {}",
             out
         );
@@ -671,7 +722,7 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
             out
         );
         assert!(
-            out.contains("throw new Error(\"non-exhaustive match\")"),
+            !out.contains("throw new Error(\"non-exhaustive match\")"),
             "got: {}",
             out
         );
@@ -685,8 +736,7 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
     #[test]
     fn emit_enum_constructor() {
         let out = parse_and_emit("const o = Some(5);");
-        assert!(out.contains("__case"), "expected case tag, got: {}", out);
-        assert!(out.contains("Some"), "got: {}", out);
+        assert_eq!(out, "\"use strict\";\nconst o = (5);");
     }
 
     #[test]
@@ -1477,7 +1527,7 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
         assert!(out.contains("__deka_type_of(\"hi\")"), "got: {}", out);
         // The descriptor helper and its interning cache are emitted.
         assert!(
-            out.contains("function __deka_type_of(v,result=false)"),
+            out.contains("function __deka_type_of(v,result=false,option=false)"),
             "got: {}",
             out
         );
@@ -1542,18 +1592,18 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
             "const a: Array<number> = [1, 2, 3];\nlet f = unwrap(a.first()) or { 0 };\nlet l = unwrap(a.last()) or { 0 };",
         );
         assert!(
-            out.contains("((v) => v.length > 0 ? Some(v[0]) : None)(a)"),
+            out.contains("((v) => v.length > 0 ? v[0] : undefined)(a)"),
             "got: {}",
             out
         );
         assert!(
-            out.contains("((v) => v.length > 0 ? Some(v[v.length - 1]) : None)(a)"),
+            out.contains("((v) => v.length > 0 ? v[v.length - 1] : undefined)(a)"),
             "got: {}",
             out
         );
         // The rewrite needs `Some`/`None`, so the enum prelude is forced.
-        assert!(out.contains("const Some = Option.Some;"), "got: {}", out);
-        assert!(out.contains("const None = Option.None;"), "got: {}", out);
+        assert!(!out.contains("const Some = Option.Some;"), "got: {}", out);
+        assert!(!out.contains("const None = Option.None;"), "got: {}", out);
     }
 
     #[test]
@@ -1561,7 +1611,7 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
         // Runtime shape, asserted on emitted JS: empty array -> None branch.
         let out = parse_check_and_emit("const e: Array<string> = [];\nconst h = e.first();");
         assert!(
-            out.contains("((v) => v.length > 0 ? Some(v[0]) : None)(e)"),
+            out.contains("((v) => v.length > 0 ? v[0] : undefined)(e)"),
             "got: {}",
             out
         );
@@ -1591,18 +1641,18 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
             "const s: Option<number> = (4).sqrt();\nconst p: Option<number> = (2).pow(10);",
         );
         assert!(
-            out.contains("((v) => isNaN(v) ? None : Some(v))(Math.sqrt((4)))"),
+            out.contains("((v) => isNaN(v) ? undefined : v)(Math.sqrt((4)))"),
             "got: {}",
             out
         );
         assert!(
-            out.contains("((v) => isNaN(v) ? None : Some(v))(Math.pow((2), 10))"),
+            out.contains("((v) => isNaN(v) ? undefined : v)(Math.pow((2), 10))"),
             "got: {}",
             out
         );
         // The wrapper needs `Some`/`None`, so the enum prelude is forced.
-        assert!(out.contains("const Some = Option.Some;"), "got: {}", out);
-        assert!(out.contains("const None = Option.None;"), "got: {}", out);
+        assert!(!out.contains("const Some = Option.Some;"), "got: {}", out);
+        assert!(!out.contains("const None = Option.None;"), "got: {}", out);
     }
 
     #[test]
@@ -1637,11 +1687,11 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
             "Result.Err should return a plain ephemeral value: {out}"
         );
         assert!(
-            out.contains("Some: (value) => ({ __enum: \"Option\""),
+            out.contains("Some: (value) => value"),
             "Option.Some should return a plain ephemeral value: {out}"
         );
         assert!(
-            out.contains("None: ({ __enum: \"Option\""),
+            out.contains("None: undefined"),
             "Option.None should be a plain ephemeral value: {out}"
         );
         assert!(
@@ -1670,17 +1720,17 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
             "let a: Array<number> = [1, 2, 3];\nlet p = unwrap(a.pop()) or { -1 };\nlet s = unwrap(a.shift()) or { -1 };",
         );
         assert!(
-            out.contains("((v) => v.length > 0 ? Some(v.pop()) : None)(a)"),
+            out.contains("((v) => v.length > 0 ? v.pop() : undefined)(a)"),
             "got: {}",
             out
         );
         assert!(
-            out.contains("((v) => v.length > 0 ? Some(v.shift()) : None)(a)"),
+            out.contains("((v) => v.length > 0 ? v.shift() : undefined)(a)"),
             "got: {}",
             out
         );
-        assert!(out.contains("const Some = Option.Some;"), "got: {}", out);
-        assert!(out.contains("const None = Option.None;"), "got: {}", out);
+        assert!(!out.contains("const Some = Option.Some;"), "got: {}", out);
+        assert!(!out.contains("const None = Option.None;"), "got: {}", out);
     }
 
     #[test]

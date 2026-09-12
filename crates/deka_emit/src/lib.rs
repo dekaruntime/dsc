@@ -80,6 +80,8 @@ alias Syntax = SyntaxError;
 fn typed(e: SyntaxError | TypeError) Exception<number, TypeError> { try { return Throw(e); } catch (e: Syntax) { return Ok(2); } }
 struct Trouble { message: string }
 fn typed_struct() string { try { return Throw(Trouble { message: "struct" }); } catch (e: Trouble) { return e.message; } }
+async fn plain() Promise<number> { return 5; }
+async fn nested_await() Promise<number> { return 1 + (match inner(false) { Ok(v) => await plain(), Throw(e) => 0 }); }
 async fn rejecting() Promise<Exception<number, string>> { return Throw("async"); }
 async fn awaiting() Promise<string> { return match await rejecting() { Ok(v) => "ok", Throw(e) => e }; }
 "#,
@@ -100,6 +102,7 @@ assert(result_early(true).__case === "Err" && result_early(false).value === 8);
 assert(typed(new SyntaxError("s")) === 2);
 const e = new TypeError("t"); try { typed(e); throw new Error("lost type"); } catch (actual) { assert(actual === e); }
 assert(await awaiting() === "async");
+assert(await nested_await() === 6);
 assert(typed_struct() === "struct");
 const original = Result.Err("identity"); assert(preserve(original) === original);
 try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "bad"); }

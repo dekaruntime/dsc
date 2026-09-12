@@ -4555,7 +4555,7 @@ impl<'a> Emitter<'a> {
                     | deka_syntax::typeck::ExceptionEmit::FromResult
             )
         ) {
-            let asynchronous = expr_contains_await(scrutinee);
+            let asynchronous = expr_contains_await(scrutinee) || arms.iter().any(|arm| expr_contains_await(&arm.body));
             self.out.push_str(if asynchronous {
                 "(await (async () => {\n"
             } else {

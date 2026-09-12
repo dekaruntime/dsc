@@ -3,6 +3,7 @@
 pub mod catalog;
 pub mod module_graph;
 pub mod shake;
+pub mod summon;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -405,6 +406,9 @@ pub struct DevPlanSlot {
 /// Options controlling compiler emission and module resolution.
 #[derive(Debug, Default, Clone)]
 pub struct CompileOptions {
+    /// Foreign module bytes supplied by a virtual host, keyed by relative specifier.
+    /// Filesystem compilation reads these afresh when no virtual source is supplied.
+    pub foreign_modules: HashMap<String, String>,
     /// Package identity supplied by a trusted virtual loader; disk sources use
     /// their nearest deka.json. None defaults to unprivileged for virtual files.
     pub package_name: Option<String>,
@@ -640,6 +644,10 @@ pub fn compile_to_js_with_imports_and_options<'a>(
         source,
         package.as_deref().is_some_and(|n| n.starts_with("@deka/")),
     );
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+    let errors = summon::validate(&program, file_path, &options.foreign_modules);
     if !errors.is_empty() {
         return Err(errors);
     }

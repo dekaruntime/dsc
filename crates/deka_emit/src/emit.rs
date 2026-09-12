@@ -1261,7 +1261,7 @@ struct ReceiverMethod<'a> {
     receiver_name: String,
     receiver_mutable: bool,
     params: Vec<String>,
-    body: Vec<deka_syntax::Stmt<'a>>,
+    body: &'a [deka_syntax::Stmt<'a>],
     is_async: bool,
 }
 
@@ -1282,6 +1282,8 @@ struct Emitter<'a> {
     /// embedded declaration a normal, user-addressable factory (dsc#86).
     promotion_structs: HashMap<String, HashMap<String, StructMeta>>,
     enums: HashMap<String, EnumMeta>,
+    opaques: HashSet<String>,
+    opaque_exports: HashMap<String, HashSet<String>>,
     newtypes: HashMap<String, NewtypeRepr>,
     receiver_methods: HashMap<String, Vec<ReceiverMethod<'a>>>,
     /// Base URL for rewriting bare import specifiers.
@@ -1387,6 +1389,8 @@ impl<'a> Emitter<'a> {
             structs: HashMap::new(),
             promotion_structs: HashMap::new(),
             enums: HashMap::new(),
+            opaques: HashSet::new(),
+            opaque_exports: HashMap::new(),
             newtypes: HashMap::new(),
             receiver_methods: HashMap::new(),
             module_base: None,
@@ -1762,6 +1766,13 @@ impl<'a> Emitter<'a> {
         live
     }
 
+    fn is_opaque_export(&self, name: &str, source: Option<&str>) -> bool {
+        match source {
+            Some(source) => self.opaque_exports.get(source).is_some_and(|names| names.contains(name)),
+            None => self.opaques.contains(name),
+        }
+    }
+
     fn is_live(&self, name: &str) -> bool {
         self.live_names
             .as_ref()
@@ -1811,17 +1822,19 @@ impl<'a> Emitter<'a> {
             Stmt::UnwrapLet { name, .. } => self.is_live(name),
             Stmt::Import { specifiers, .. } => {
                 specifiers.is_empty()
-                    || specifiers
-                        .iter()
-                        .any(|spec| self.is_live(spec.local) || self.is_build_factory_import(spec))
+                    || specifiers.iter().any(|spec| {
+                        !self.opaques.contains(spec.local)
+                            && (self.is_live(spec.local) || self.is_build_factory_import(spec))
+                    })
             }
             Stmt::Export { decl, .. } => match decl {
                 ExportDecl::Const { name, .. } | ExportDecl::Function { name, .. } => {
                     self.is_live(name)
                 }
-                ExportDecl::NamedGroup { names, .. } => names
-                    .iter()
-                    .any(|n| self.is_live(n.alias.unwrap_or(n.name)) || self.is_live(n.name)),
+                ExportDecl::NamedGroup { names, .. } => names.iter().any(|n| {
+                    !self.opaques.contains(n.name)
+                        && (self.is_live(n.alias.unwrap_or(n.name)) || self.is_live(n.name))
+                }),
             },
             Stmt::Const { name, .. }
             | Stmt::Let { name, .. }
@@ -1854,6 +1867,8 @@ impl<'a> Emitter<'a> {
             | Stmt::Break { .. }
             | Stmt::Continue { .. }
             | Stmt::Try { .. }
+            | Stmt::Opaque { .. }
+            | Stmt::Summon { .. }
             | Stmt::Empty { .. } => true,
         }
     }
@@ -2042,9 +2057,12 @@ impl<'a> Emitter<'a> {
                             receiver_name: receiver_name.to_string(),
                             receiver_mutable: *receiver_mutable,
                             params: params.iter().map(|p| p.name.to_string()).collect(),
-                            body: body.to_vec(),
+                            body: *body,
                             is_async: *is_async,
                         });
+                }
+                Stmt::Opaque { name, .. } => {
+                    self.opaques.insert(name.to_string());
                 }
                 Stmt::Newtype { name, repr, .. } => {
                     self.newtypes.insert(name.to_string(), *repr);
@@ -2088,6 +2106,7 @@ impl<'a> Emitter<'a> {
 
     fn seed_imports(&mut self, imports: &HashMap<&str, &deka_syntax::ModuleExports<'a>>) {
         for (source, exports) in imports.iter() {
+            self.opaque_exports.insert((*source).to_string(), exports.opaques.keys().map(|name| name.to_string()).collect());
             // A dependency's descriptor fragments name factories in the
             // dependency's own namespace; their union is the closure its
             // compiler-private `__deka_factories` export provides (dsc#52).
@@ -2150,6 +2169,9 @@ impl<'a> Emitter<'a> {
                 if !self.enums.contains_key(local) {
                     self.seed_enum_export(local, info);
                 }
+            }
+            if exports.opaques.contains_key(imported) {
+                self.opaques.insert(local.to_string());
             }
             if let Some(info) = exports.newtypes.get(imported) {
                 if !self.newtypes.contains_key(local) {
@@ -2523,7 +2545,9 @@ impl<'a> Emitter<'a> {
                 continue;
             }
             for spec in specifiers.iter() {
-                if self.is_live(spec.local) || self.is_build_factory_import(spec) {
+                if !self.opaques.contains(spec.local)
+                    && (self.is_live(spec.local) || self.is_build_factory_import(spec))
+                {
                     names.insert(spec.local);
                 }
             }
@@ -2809,6 +2833,11 @@ impl<'a> Emitter<'a> {
                 self.out.push_str(";");
             }
             Stmt::Export { decl, .. } => {
+                if let ExportDecl::NamedGroup { names, source } = decl {
+                    if names.iter().all(|n| self.is_opaque_export(n.name, *source)) {
+                        return Ok(());
+                    }
+                }
                 write_indent(&mut self.out, 0);
                 self.out.push_str("export ");
                 match decl {
@@ -2857,7 +2886,9 @@ impl<'a> Emitter<'a> {
                         let kept: Vec<_> = names
                             .iter()
                             .filter(|n| {
-                                self.is_live(n.alias.unwrap_or(n.name)) || self.is_live(n.name)
+                                !self.is_opaque_export(n.name, *source)
+                                    && (self.is_live(n.alias.unwrap_or(n.name))
+                                        || self.is_live(n.name))
                             })
                             .collect();
                         if kept.is_empty() {
@@ -2900,7 +2931,8 @@ impl<'a> Emitter<'a> {
                     let kept: Vec<_> = specifiers
                         .iter()
                         .filter(|spec| {
-                            self.is_live(spec.local) || self.is_build_factory_import(spec)
+                            !self.opaques.contains(spec.local)
+                                && (self.is_live(spec.local) || self.is_build_factory_import(spec))
                         })
                         .collect();
                     for (index, spec) in kept.iter().enumerate() {
@@ -2924,7 +2956,8 @@ impl<'a> Emitter<'a> {
                     let kept: Vec<_> = specifiers
                         .iter()
                         .filter(|spec| {
-                            self.is_live(spec.local) || self.is_build_factory_import(spec)
+                            !self.opaques.contains(spec.local)
+                                && (self.is_live(spec.local) || self.is_build_factory_import(spec))
                         })
                         .collect();
                     if kept.is_empty() {
@@ -3066,7 +3099,21 @@ impl<'a> Emitter<'a> {
             Stmt::Enum { name, cases, .. } => {
                 self.emit_enum_object(name, cases)?;
             }
-            Stmt::TypeAlias { .. } => {
+            Stmt::Summon {
+                functions, source, ..
+            } => {
+                self.out.push_str("import { ");
+                for (i, f) in functions.iter().enumerate() {
+                    if i > 0 {
+                        self.out.push_str(", ");
+                    }
+                    self.out.push_str(f.name);
+                }
+                self.out.push_str(" } from ");
+                self.out.push_str(&json_string(source));
+                self.out.push(';');
+            }
+            Stmt::Opaque { .. } | Stmt::TypeAlias { .. } => {
                 // Erased at runtime.
             }
             Stmt::Newtype { name, repr, .. } => {
@@ -3289,13 +3336,15 @@ impl<'a> Emitter<'a> {
         let primitive_methods: Vec<(String, Vec<ReceiverMethod<'a>>)> = self
             .receiver_methods
             .iter()
-            .filter(|(receiver_type, _)| is_primitive_receiver(receiver_type))
+            .filter(|(receiver_type, _)| {
+                is_primitive_receiver(receiver_type) || self.opaques.contains(*receiver_type)
+            })
             .map(|(receiver_type, methods)| (receiver_type.clone(), methods.clone()))
             .collect();
         for (receiver_type, methods) in primitive_methods {
             for method in methods {
                 let mangled = format!("{}${}", method.name, receiver_type);
-                if !self.is_live(&mangled) {
+                if !self.is_live(&mangled) && !self.opaques.contains(&receiver_type) {
                     continue;
                 }
                 write_indent(&mut self.out, 0);
@@ -3513,7 +3562,7 @@ impl<'a> Emitter<'a> {
                         "(() => { try { return Ok("
                     });
                     self.emit_expr(object)?;
-                    self.out.push_str("); } catch (e) { return Err(e); } })()");
+                    self.out.push_str("); } catch (e) { if (e?.[Symbol.for(\"deka.BoundaryError\")]) throw e; return Err(e); } })()");
                     if asynchronous {
                         self.out.push(')');
                     }
@@ -3573,6 +3622,7 @@ impl<'a> Emitter<'a> {
                 op, left, right, ..
             } => {
                 let expr_ptr = expr as *const Expr<'a>;
+
                 let rewrite = self.operator_rewrites.get(&expr_ptr).copied();
                 if let Some(rewrite) = rewrite {
                     self.emit_newtype_binary(&rewrite, *op, left, right)?;
@@ -3624,6 +3674,45 @@ impl<'a> Emitter<'a> {
                 callee, args, span, ..
             } => {
                 let expr_ptr = expr as *const Expr<'a>;
+                if let Some((params, ret, asynchronous)) =
+                    self.exception_forms.summons.get(&expr_ptr).cloned()
+                {
+                    use deka_syntax::typeck::Type;
+                    let void = matches!(ret, Type::Named { name: "void" });
+                    let option = matches!(ret, Type::Option { .. });
+                    if !void {
+                        self.out.push_str(if asynchronous { "(async ($__deka_input) => { const $__deka_foreign = await $__deka_input; " } else { "(($__deka_foreign) => { " });
+                        if option {
+                            // Post-dsc#98 seam: replace the tagged materialization
+                            // only when the Option-erasure train resumes.
+                            self.out.push_str("return $__deka_foreign == null ? { __enum: \"Option\", __case: \"None\", name: \"None\" } : { __enum: \"Option\", __case: \"Some\", name: \"Some\", value: $__deka_foreign }; })(");
+                        } else {
+                            self.out.push_str("if ($__deka_foreign == null) { const e = new Error(\"summoned function returned null or undefined\"); e.name = \"BoundaryError\"; e[Symbol.for(\"deka.BoundaryError\")] = true; throw e; } return $__deka_foreign; })(");
+                        }
+                    }
+                    // Evaluate the direct call in the authored frame. In particular,
+                    // await inside an argument must not move into a sync IIFE.
+                    self.emit_expr(callee)?;
+                    self.out.push('(');
+                    for (i, arg) in args.iter().enumerate() {
+                        if i > 0 {
+                            self.out.push_str(", ");
+                        }
+                        if matches!(params.get(i), Some(Type::Option { .. })) {
+                            self.out
+                                .push_str("((v) => v.__case === \"Some\" ? v.value : undefined)(");
+                            self.emit_expr(arg)?;
+                            self.out.push(')');
+                        } else {
+                            self.emit_expr(arg)?;
+                        }
+                    }
+                    self.out.push(')');
+                    if !void {
+                        self.out.push(')');
+                    }
+                    return Ok(());
+                }
                 if let Some(kind) = self.unwrap_calls.get(&expr_ptr) {
                     if let Some(arg) = args.first() {
                         match kind {
@@ -4481,7 +4570,7 @@ impl<'a> Emitter<'a> {
             .push_str(&format!("{label}: {{\nlet {value};\ntry {{\n"));
         let scrutinee_value = self.lift_value(scrutinee)?;
         self.out.push_str(&format!("{value} = {scrutinee_value}"));
-        self.out.push_str(&format!("; }} catch ({error}) {{\n"));
+        self.out.push_str(&format!("; }} catch ({error}) {{\nif ({error}?.[Symbol.for(\"deka.BoundaryError\")]) throw {error};\n"));
         self.emit_exception_arms(arms, "Throw", &error, &label, result)?;
         self.out.push_str(&format!("throw {error};\n}}\n"));
         self.emit_exception_arms(arms, "Ok", &value, &label, result)?;
@@ -4713,6 +4802,8 @@ impl<'a> Emitter<'a> {
                     structs: HashMap::new(),
                     promotion_structs: HashMap::new(),
                     enums: HashMap::new(),
+                    opaques: HashSet::new(),
+            opaque_exports: HashMap::new(),
                     newtypes: HashMap::new(),
                     receiver_methods: HashMap::new(),
                     module_base: self.module_base.clone(),

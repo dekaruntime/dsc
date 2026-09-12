@@ -121,6 +121,8 @@ pub fn walk_stmt(stmt: &Stmt<'_>, visit: &mut dyn FnMut(&Expr<'_>)) {
         }
         Stmt::Enum { .. }
         | Stmt::TypeAlias { .. }
+        | Stmt::Opaque { .. }
+        | Stmt::Summon { .. }
         | Stmt::Newtype { .. }
         | Stmt::Interface { .. }
         | Stmt::Import { .. }

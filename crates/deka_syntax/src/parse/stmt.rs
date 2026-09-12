@@ -52,6 +52,71 @@ impl<'a> Parser<'a> {
             });
         }
 
+        if self.current_kind() == TokenKind::Identifier
+            && matches!(self.current_text(), "opaque" | "summon")
+        {
+            if in_block {
+                self.error("opaque and summon declarations are only allowed at the top level");
+                return None;
+            }
+            let opaque = self.current_text() == "opaque";
+            self.advance();
+            if opaque {
+                self.expect(TokenKind::Type)?;
+                let name = self.expect_identifier()?;
+                self.expect_statement_end(false)?;
+                return Some(Stmt::Opaque {
+                    name,
+                    span: self.span_from(start, start_byte),
+                });
+            }
+            self.expect(TokenKind::LBrace)?;
+            self.skip_newlines();
+            let mut functions = Vec::new();
+            while !self.at(TokenKind::RBrace) && !self.at_end() {
+                let (fs, fb) = self.span_start();
+                let total =
+                    self.current_kind() == TokenKind::Identifier && self.current_text() == "total";
+                if total {
+                    self.advance();
+                }
+                // Keep the RFD's import-shaped signature; `fn` is accepted explicitly too.
+                self.eat(TokenKind::Fn);
+                let name = self.expect_identifier()?;
+                self.expect(TokenKind::LParen)?;
+                self.skip_newlines();
+                let params = self.parse_params()?;
+                self.expect(TokenKind::RParen)?;
+                self.expect(TokenKind::Colon)?;
+                let return_type = self.parse_type()?;
+                functions.push(crate::ast::SummonedFunction {
+                    name,
+                    params,
+                    return_type,
+                    total,
+                    span: self.span_from(fs, fb),
+                });
+                self.skip_newlines();
+                if !self.eat(TokenKind::Comma) {
+                    break;
+                }
+                self.skip_newlines();
+            }
+            self.expect(TokenKind::RBrace)?;
+            self.expect(TokenKind::From)?;
+            if !self.at(TokenKind::String) {
+                self.error("expected summoned module path string");
+                return None;
+            }
+            let source = self.bump_str(self.current_text());
+            self.advance();
+            self.expect_statement_end(false)?;
+            return Some(Stmt::Summon {
+                functions: alloc_slice(self.arena, functions),
+                source,
+                span: self.span_from(start, start_byte),
+            });
+        }
         if self.current_kind() == TokenKind::Identifier && self.current_text() == "throw" {
             self.error("there is no lowercase `throw` statement; use `Throw(e)` to raise into the exception channel");
             return None;
@@ -1266,6 +1331,8 @@ fn stmt_has_top_level_await(stmt: &Stmt<'_>) -> bool {
         | Stmt::TypeAlias { .. }
         | Stmt::Newtype { .. }
         | Stmt::Interface { .. }
+        | Stmt::Opaque { .. }
+        | Stmt::Summon { .. }
         | Stmt::Import { .. } => false,
     }
 }

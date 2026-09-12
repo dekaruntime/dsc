@@ -33,6 +33,8 @@ pub enum Type<'a> {
     None,
     /// A named scalar or user-defined type.
     Named { name: &'a str },
+    /// Nominal identity is the declaring AST node, preserved across imports.
+    Opaque { name: &'a str, identity: usize },
     /// `Option<T>`.
     Option { inner: Box<Type<'a>> },
     /// Function type.
@@ -286,7 +288,7 @@ impl fmt::Display for Type<'_> {
                 write!(f, "}}")
             }
             Type::Interface { name } => write!(f, "{name}"),
-            Type::Newtype { name, .. } => write!(f, "{name}"),
+            Type::Newtype { name, .. } | Type::Opaque { name, .. } => write!(f, "{name}"),
             Type::Param { name } => write!(f, "{name}"),
             Type::Union { members } => {
                 // Print members sorted so union types have one canonical

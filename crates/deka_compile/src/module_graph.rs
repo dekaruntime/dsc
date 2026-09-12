@@ -745,6 +745,7 @@ pub fn compile_module_graph_with_options(
                     || dep_exports.structs.contains_key(spec.imported)
                     || dep_exports.enums.contains_key(spec.imported)
                     || dep_exports.aliases.contains_key(spec.imported)
+                    || dep_exports.opaques.contains_key(spec.imported)
                     || dep_exports.newtypes.contains_key(spec.imported)
                     || dep_exports.re_exports.contains(spec.imported);
                 if !known {
@@ -1014,7 +1015,22 @@ pub fn compile_module_graph_with_options(
                 combined.insert(*spec, *exports);
             }
         }
+        let mut foreign_modules = HashMap::new();
+        let foreign_arena = Bump::new();
+        if let Some(program) = deka_syntax::parse(&module.source, &foreign_arena).program {
+            for stmt in program.statements {
+                if let deka_syntax::Stmt::Summon { source, .. } = stmt {
+                    if let Ok(spec) = crate::summon::module_spec(source) {
+                        let foreign_path = path.parent().unwrap_or(Path::new(".")).join(&spec);
+                        if let Ok(bytes) = loader.load(&foreign_path) {
+                            foreign_modules.insert(spec, bytes);
+                        }
+                    }
+                }
+            }
+        }
         let compile_options = CompileOptions {
+            foreign_modules,
             package_name: loader.package_name(&path),
             used_exports: plan.live.get(&path).cloned().flatten(),
             client: options.client,
@@ -1137,6 +1153,9 @@ fn copy_export<'a>(
     }
     if let Some(info) = source.aliases.get(imported) {
         changed |= dest.aliases.insert(external, info.clone()).is_none();
+    }
+    if let Some(ty) = source.opaques.get(imported) {
+        changed |= dest.opaques.insert(external, ty.clone()).is_none();
     }
     if let Some(info) = source.newtypes.get(imported) {
         changed |= dest.newtypes.insert(external, info.clone()).is_none();

@@ -537,6 +537,30 @@ impl<'a> Checker<'a> {
                 span,
                 ..
             } => {
+                if let ast::Expr::Identifier { name, .. } = *callee {
+                    let summoned = self.program.statements.iter().any(|stmt| matches!(stmt, ast::Stmt::Summon { functions, .. } if functions.iter().any(|f| f.name == *name)));
+                    if summoned {
+                        if let Some(Type::Function { params, ret, .. }) = self.lookup_var(name) {
+                            let (ret, asynchronous) = match *ret {
+                                Type::Generic {
+                                    base: "Promise",
+                                    args,
+                                } => (args[0].clone(), true),
+                                other => (other, false),
+                            };
+                            let ret = match ret {
+                                Type::Generic {
+                                    base: "Exception",
+                                    ref args,
+                                } => args[0].clone(),
+                                other => other,
+                            };
+                            self.exception_forms
+                                .summons
+                                .insert(expr as *const _, (params, ret, asynchronous));
+                        }
+                    }
+                }
                 // `deka.panic` must not go through method-call typeck: `deka`
                 // is not a typed object (RFD 21 lang item).
                 if let Some(ret) = self.check_catalog_call(callee, args) {
@@ -657,6 +681,10 @@ impl<'a> Checker<'a> {
                 span,
             } => {
                 let object_type = self.check_expr(object);
+                if let Type::Opaque { name, .. } = &object_type {
+                    self.error_span(*span, format!("cannot index opaque type `{name}`"));
+                    return Type::Error;
+                }
                 let index_type = self.check_expr(index);
                 // dsc#88: `obj[idx]` compiles to raw JavaScript indexing,
                 // which answers a non-numeric index with `undefined` while
@@ -1036,6 +1064,15 @@ impl<'a> Checker<'a> {
         fields: &'a [ast::StructLiteralField<'a>],
         span: ast::Span,
     ) -> Type<'a> {
+        if self.opaques.contains_key(name) {
+            self.error_span(
+                span,
+                format!(
+                    "cannot construct opaque type `{name}`; obtain it from a summoned function"
+                ),
+            );
+            return Type::Error;
+        }
         let info = match self.structs.get(name).cloned() {
             Some(info) => info,
             None => {
@@ -1304,6 +1341,13 @@ impl<'a> Checker<'a> {
         span: ast::Span,
     ) -> Type<'a> {
         let object_type = self.check_expr(object);
+        if let Type::Opaque { name, .. } = &object_type {
+            self.error_span(
+                span,
+                format!("cannot access field `{field}` on opaque type `{name}`"),
+            );
+            return Type::Error;
+        }
         if object_type.is_error() {
             return Type::Error;
         }
@@ -2253,6 +2297,26 @@ impl<'a> Checker<'a> {
                 .result_patterns
                 .insert(pattern as *const _);
         }
+        if let Type::Opaque { name, .. } = scrutinee_type {
+            if !matches!(
+                pattern,
+                ast::Pattern::Wildcard { .. } | ast::Pattern::Identifier { .. }
+            ) {
+                self.error_span(
+                    match pattern {
+                        ast::Pattern::Struct { span, .. }
+                        | ast::Pattern::Constructor { span, .. }
+                        | ast::Pattern::Tuple { span, .. }
+                        | ast::Pattern::Or { span, .. }
+                        | ast::Pattern::Literal { span, .. }
+                        | ast::Pattern::Identifier { span, .. }
+                        | ast::Pattern::Wildcard { span } => *span,
+                    },
+                    format!("cannot destructure opaque type `{name}`"),
+                );
+                return;
+            }
+        }
         match pattern {
             ast::Pattern::Wildcard { .. } => {}
             ast::Pattern::Identifier { name, span } => {
@@ -2780,6 +2844,12 @@ impl<'a> Checker<'a> {
         } else {
             self.check_expr(right)
         };
+        if !matches!(op, ast::BinOp::Assign | ast::BinOp::Pipe) {
+            if let Some(Type::Opaque { name, .. }) = [&left_type, &right_type].into_iter().find(|ty| matches!(ty, Type::Opaque { .. })) {
+                self.error_span(span, format!("cannot apply operators to opaque type `{name}`; hold, pass, or store the handle"));
+                return Type::Error;
+            }
+        }
         // rfd#56 phase 2: a bounded operand is checked as its bound — `<T:
         // number>` arithmetic is number arithmetic. Unbounded parameters
         // pass through unchanged and hit the phase-1 rejection below.
@@ -3419,6 +3489,15 @@ impl<'a> Checker<'a> {
         }
 
         let object_type = self.check_expr(object);
+        if let Type::Opaque { name, .. } = &object_type {
+            if let Some(ty) =
+                self.check_primitive_extension_call(call_expr, name, method_name, args, span)
+            {
+                return Some(ty);
+            }
+            self.error_span(span, format!("cannot inspect opaque type `{name}`; call a declared receiver method or summoned function"));
+            return Some(Type::Error);
+        }
 
         // rfd#56 phase 2: runtime type interrogation on a type parameter is
         // not a bound-guaranteed operation — a bound unlocks exactly the
@@ -4205,6 +4284,17 @@ impl<'a> Checker<'a> {
         args: &'a [ast::Expr<'a>],
         span: ast::Span,
     ) -> Type<'a> {
+        if let ast::Expr::Identifier { name, .. } = callee {
+            if self.opaques.contains_key(name) {
+                self.error_span(
+                    span,
+                    format!(
+                        "cannot construct opaque type `{name}`; obtain it from a summoned function"
+                    ),
+                );
+                return Type::Error;
+            }
+        }
         // `unwrap(x)` with no `or` block. The parser only claims the name when
         // `or` follows, so a program with its own `unwrap` function is
         // unaffected and reaches this only when the name is genuinely unbound

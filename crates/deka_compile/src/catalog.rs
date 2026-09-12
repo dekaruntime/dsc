@@ -183,7 +183,7 @@ pub fn validate(program: &Program<'_>, source: &str, official: bool) -> Vec<Diag
     errors
 }
 
-fn parse_js(source: &str) -> Result<js::Module, String> {
+pub(crate) fn parse_js(source: &str) -> Result<js::Module, String> {
     let lexer = Lexer::new(
         Syntax::Es(EsSyntax::default()),
         js::EsVersion::EsNext,

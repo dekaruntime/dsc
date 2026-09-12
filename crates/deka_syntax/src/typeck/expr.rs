@@ -2306,6 +2306,9 @@ impl<'a> Checker<'a> {
     }
 
     pub(super) fn check_pattern(&mut self, pattern: &ast::Pattern<'a>, scrutinee_type: &Type<'a>) {
+        if matches!(scrutinee_type, Type::Option { .. } | Type::None) {
+            self.exception_forms.option_patterns.insert(pattern as *const _);
+        }
         if matches!(scrutinee_type, Type::Generic { base: "Result", .. }) {
             self.exception_forms
                 .result_patterns
@@ -4359,22 +4362,18 @@ impl<'a> Checker<'a> {
             }
         }
 
-        // `isset` was removed in deka#416. It existed only to test presence on
-        // an interface `?:` field, which is now an `Option` like every other
-        // maybe-absent value. Name it explicitly rather than letting it fall
-        // through to `unknown identifier`, because the useful thing to say is
-        // what replaced it.
         if let ast::Expr::Identifier { name: "isset", .. } = callee {
-            for arg in args.iter() {
-                self.check_expr(arg);
+            if args.len() != 1 || !type_args.is_empty() {
+                self.error_span(span, "`isset` expects one Option<T> argument and no type arguments");
             }
-            self.error_span(
-                span,
-                "`isset` was removed: optional fields are `Option<T>`, so match on the value \
-                 (`match (x) { Some(v) => …, None => … }`)"
-                    .to_string(),
-            );
-            return Type::Error;
+            for arg in args {
+                let ty = self.check_expr(arg);
+                if !matches!(ty, Type::Option { .. } | Type::None | Type::Error) {
+                    self.error_span(span, "`isset` expects Option<T>; use a boolean directly or match the value");
+                }
+            }
+            self.unwrap_calls.insert(expr as *const _, super::types::UnwrapKind::Isset);
+            return Type::Named { name: "boolean" };
         }
 
         // `panic(msg)` / `deka.panic(msg)`: never-returning lang item (RFD 21).

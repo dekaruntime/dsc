@@ -89,7 +89,7 @@ fn emitted_helpers_execute_without_installation_or_globals() {
       const m = await import(process.argv[1]);
       assert.equal(m.valid, true);
       assert.equal(m.decoded.ok, true);
-      assert.equal(m.absent.__case, 'None');
+      assert.equal(m.absent, undefined);
       assert.deepEqual(Reflect.ownKeys(globalThis), before);
       assert.equal(globalThis.deka, undefined);
       assert.equal(globalThis.__dsc_catalog, undefined);

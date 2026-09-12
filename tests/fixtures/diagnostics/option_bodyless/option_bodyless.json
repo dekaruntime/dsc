@@ -1,0 +1,5 @@
+{
+  "title": "option bodyless",
+  "stage": "parse",
+  "expectedDiagnosticContains": "bodyless"
+}

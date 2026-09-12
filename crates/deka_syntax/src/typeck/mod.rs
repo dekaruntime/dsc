@@ -70,6 +70,8 @@ pub struct ExceptionLowering<'a> {
     pub result_values: HashSet<*const ast::Expr<'a>>,
     /// Resolved Result patterns; spelling alone cannot identify a builtin enum.
     pub result_patterns: HashSet<*const ast::Pattern<'a>>,
+    pub option_values: HashSet<*const ast::Expr<'a>>,
+    pub option_patterns: HashSet<*const ast::Pattern<'a>>,
     pub catches: HashMap<*const ast::Type<'a>, &'a str>,
     pub summons: HashMap<*const ast::Expr<'a>, (Vec<Type<'a>>, Type<'a>, bool)>,
 }
@@ -1986,6 +1988,8 @@ impl<'a> Checker<'a> {
         self.exception_forms.catches.clear();
         self.exception_forms.result_values.clear();
         self.exception_forms.result_patterns.clear();
+        self.exception_forms.option_values.clear();
+        self.exception_forms.option_patterns.clear();
         self.method_calls.clear();
         self.type_of_calls.clear();
         self.signature_calls.clear();
@@ -3283,19 +3287,28 @@ mod tests {
     }
 
     #[test]
-    fn nested_option_binding_payload_mismatch_fails() {
-        let errors = typeck("const o: Option<Option<number>> = Some(Some(\"text\"));");
-        assert_eq!(errors.len(), 1);
-        assert!(
-            errors[0].message.contains("Option<number>"),
-            "{}",
-            errors[0].message
-        );
-        assert!(
-            errors[0].message.contains("Option<string>"),
-            "{}",
-            errors[0].message
-        );
+    fn option_erasure_rejects_ambiguous_payloads() {
+        for source in [
+            "const o: Option<void> = None;",
+            "fn noop() void {} const o = Some(noop());",
+            "alias Unit = void; const o: Option<Unit> = None;",
+            "fn wrap<T>(v: T) Option<T> { return Some(v); } fn noop() void {} const o = wrap(noop());",
+            "fn absent<T>(v: T) Option<T> { return None; } fn noop() void {} const o = absent(noop());",
+            "fn empty<T>(v: T) Array<Option<T>> { return []; } fn noop() void {} const o = empty(noop());",
+            "fn absent<T>(v: T) Result<Option<T>, string> { return Ok(None); } fn noop() void {} const o = absent(noop());",
+            "const o: Option<Option<number>> = None;",
+            "const o = Some(Some(1));",
+            "const o = Some(None);",
+            "alias Maybe = Option<number>; const o: Option<Maybe> = None;",
+            "fn wrap<T>(v: T) Option<T> { return Some(v); } const o = wrap(Some(1));",
+        ] {
+            let errors = typeck(source);
+            assert!(errors.iter().any(|e| e.message.contains("under erasure") && e.message.contains("purpose-built enum")), "{source}: {errors:?}");
+        }
+        assert!(typeck("const a: Option<number> = Some(0); const b: Option<boolean> = Some(false); const c: Option<string> = Some(\"\");").is_empty());
+        let arena = bumpalo::Bump::new();
+        let parsed = crate::parse("fn f(v: Option<number>) Option<number> { return match v { Some(x) => Some(x), None }; }", &arena);
+        assert!(parsed.errors.iter().any(|e| e.message.contains("bodyless arm requires a Result or Exception")));
     }
 
     #[test]

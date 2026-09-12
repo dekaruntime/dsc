@@ -30,8 +30,8 @@
 pub(crate) const RESULT_OK: &str = r#"(value) => ({ ok: true, value })"#;
 pub(crate) const RESULT_ERR: &str = r#"(error) => ({ ok: false, error })"#;
 const OPTION_SOME: &str =
-    r#"(value) => ({ __enum: "Option", __case: "Some", name: "Some", value })"#;
-const OPTION_NONE: &str = r#"({ __enum: "Option", __case: "None", name: "None" })"#;
+    r#"(value) => value"#;
+const OPTION_NONE: &str = "undefined";
 
 /// Module-local prelude emitted into compiled modules: frozen namespace
 /// consts plus the bare `Ok`/`Err`/`Some`/`None` aliases the emitter
@@ -219,7 +219,7 @@ pub const NEWTYPE_SYMBOL: &str = "const __p = Symbol.for('deka.nt');";
 /// The descriptor cache backing `__deka_type_of`. Emitted with the helper.
 pub const TYPE_OF_CACHE: &str = "const __deka_type_cache = new Map();";
 
-const TYPE_OF_HEAD: &str = "function __deka_type_of(v,result=false){const mk=(k,n)=>{const key=k+\":\"+n;let t=__deka_type_cache.get(key);if(!t){t=Object.freeze({kind:k,name:n,toString(){return this.name;}});__deka_type_cache.set(key,t);}return t;};if(v===null||v===undefined)return mk(\"none\",\"none\");if(v instanceof Uint8Array)return mk(\"bytes\",\"bytes\");if(result&&typeof v.ok===\"boolean\")return mk(\"enum\",\"Result\");const ty=typeof v;if(ty===\"string\"||ty===\"number\"||ty===\"boolean\"||ty===\"function\")return mk(ty,ty);if(Array.isArray(v))return mk(\"array\",\"Array\");";
+const TYPE_OF_HEAD: &str = "function __deka_type_of(v,result=false,option=false){const mk=(k,n)=>{const key=k+\":\"+n;let t=__deka_type_cache.get(key);if(!t){t=Object.freeze({kind:k,name:n,toString(){return this.name;}});__deka_type_cache.set(key,t);}return t;};if(option)return mk(\"enum\",\"Option\");if(v===null||v===undefined)return mk(\"none\",\"none\");if(v instanceof Uint8Array)return mk(\"bytes\",\"bytes\");if(result&&typeof v.ok===\"boolean\")return mk(\"enum\",\"Result\");const ty=typeof v;if(ty===\"string\"||ty===\"number\"||ty===\"boolean\"||ty===\"function\")return mk(ty,ty);if(Array.isArray(v))return mk(\"array\",\"Array\");";
 const TYPE_OF_NEWTYPES: &str = "const nt=v.__deka_newtype;if(nt)return mk(\"newtype\",nt);";
 const TYPE_OF_STRUCTS: &str = "const st=v.__deka_struct;if(st)return mk(\"struct\",st);";
 const TYPE_OF_ENUMS: &str = "const en=v.__enum;if(en)return mk(\"enum\",en);";
@@ -312,8 +312,8 @@ mod tests {
                 "  Err: (error) => ({ ok: false, error })\n",
                 "});\n",
                 "const Option = Object.freeze({\n",
-                "  Some: (value) => ({ __enum: \"Option\", __case: \"Some\", name: \"Some\", value }),\n",
-                "  None: ({ __enum: \"Option\", __case: \"None\", name: \"None\" })\n",
+                "  Some: (value) => value,\n",
+                "  None: undefined\n",
                 "});\n",
                 "const Ok = Result.Ok;\n",
                 "const Err = Result.Err;\n",

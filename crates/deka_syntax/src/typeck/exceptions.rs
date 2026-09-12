@@ -119,6 +119,10 @@ impl<'a> Checker<'a> {
         }
         let ty = self.check_expr_erasure(expr);
         self.apply_index_effect(expr);
+        self.validate_option_erasure(&ty, expr.span());
+        if matches!(ty, Type::Option { .. }) {
+            self.exception_forms.option_values.insert(expr as *const _);
+        }
         if channels(&ty, "Result").is_some() {
             self.exception_forms.result_values.insert(expr as *const _);
         }

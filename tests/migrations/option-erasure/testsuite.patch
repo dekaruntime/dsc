@@ -1,0 +1,142 @@
+diff --git a/diagnostics/option_bodyless/option_bodyless.fail.ds b/diagnostics/option_bodyless/option_bodyless.fail.ds
+new file mode 100644
+index 0000000..10ee0d8
+--- /dev/null
++++ b/diagnostics/option_bodyless/option_bodyless.fail.ds
+@@ -0,0 +1 @@
++fn f(v: Option<number>) Option<number> { return match v { Some(x) => Some(x), None }; }
+diff --git a/diagnostics/option_bodyless/option_bodyless.json b/diagnostics/option_bodyless/option_bodyless.json
+new file mode 100644
+index 0000000..fc15282
+--- /dev/null
++++ b/diagnostics/option_bodyless/option_bodyless.json
+@@ -0,0 +1,5 @@
++{
++  "title": "option bodyless",
++  "stage": "parse",
++  "expectedDiagnosticContains": "bodyless"
++}
+diff --git a/diagnostics/option_nested/option_nested.fail.ds b/diagnostics/option_nested/option_nested.fail.ds
+new file mode 100644
+index 0000000..0af94e7
+--- /dev/null
++++ b/diagnostics/option_nested/option_nested.fail.ds
+@@ -0,0 +1 @@
++const absent: Option<Option<number>> = None;
+diff --git a/diagnostics/option_nested/option_nested.json b/diagnostics/option_nested/option_nested.json
+new file mode 100644
+index 0000000..13fd39f
+--- /dev/null
++++ b/diagnostics/option_nested/option_nested.json
+@@ -0,0 +1,5 @@
++{
++  "title": "option nested",
++  "stage": "parse",
++  "expectedDiagnosticContains": "`Option<Option<T>>` is ambiguous under erasure"
++}
+diff --git a/diagnostics/option_void/option_void.fail.ds b/diagnostics/option_void/option_void.fail.ds
+new file mode 100644
+index 0000000..f51113a
+--- /dev/null
++++ b/diagnostics/option_void/option_void.fail.ds
+@@ -0,0 +1 @@
++const absent: Option<void> = None;
+diff --git a/diagnostics/option_void/option_void.json b/diagnostics/option_void/option_void.json
+new file mode 100644
+index 0000000..f1a6df2
+--- /dev/null
++++ b/diagnostics/option_void/option_void.json
+@@ -0,0 +1,5 @@
++{
++  "title": "option void",
++  "stage": "parse",
++  "expectedDiagnosticContains": "`Option<void>` is indistinguishable under erasure"
++}
+diff --git a/option_erasure/runtime/runtime.code b/option_erasure/runtime/runtime.code
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/option_erasure/runtime/runtime.code
+@@ -0,0 +1 @@
++0
+diff --git a/option_erasure/runtime/runtime.json b/option_erasure/runtime/runtime.json
+new file mode 100644
+index 0000000..3426602
+--- /dev/null
++++ b/option_erasure/runtime/runtime.json
+@@ -0,0 +1,4 @@
++{
++  "title": "Erased Option presence and JSON",
++  "stage": "run"
++}
+diff --git a/option_erasure/runtime/runtime.pass.ds b/option_erasure/runtime/runtime.pass.ds
+new file mode 100644
+index 0000000..f1b4323
+--- /dev/null
++++ b/option_erasure/runtime/runtime.pass.ds
+@@ -0,0 +1,19 @@
++fn value(v: Option<number>) number { return match v { Some(x) => x, None => -1 }; }
++if (value(Some(0)) != 0 || value(None) != -1) { panic("presence must distinguish zero"); }
++if (!isset(Some(false)) || !isset(Some("")) || isset(None)) { panic("presence must compare undefined"); }
++let calls = 0;
++fn next() Option<number> { calls += 1; return Some(7); }
++if (!isset(next()) || calls != 1) { panic("isset evaluates once"); }
++const picked = match next() { Some(x) => x, None => 0 };
++if (picked != 7 || calls != 2) { panic("match evaluates once"); }
++const obj = Some({ ok: false, value: 9 });
++const found = match obj { Some(x) => x.value, None => 0 };
++if (found != 9) { panic("Result-looking payload must stay whole"); }
++struct Box { item: Option<number> }
++const empty = Box { item: None };
++const full = Box { item: Some(0) };
++const empty2 = match empty.toJSON().parseJSON<Box>() { Ok(x) => x, Err(e) => panic(e) };
++const full2 = match full.toJSON().parseJSON<Box>() { Ok(x) => x, Err(e) => panic(e) };
++if (isset(empty2.item) || value(full2.item) != 0) { panic("JSON None/Some round trip"); }
++const bad = "{\"Box\":{\"item\":{\"Option\":{\"case\":\"Some\",\"values\":[false]}}}}";
++match bad.parseJSON<Box>() { Ok(x) => panic("invalid payload accepted"), Err(e) => 0 };
+diff --git a/option_erasure/runtime/runtime.stdout b/option_erasure/runtime/runtime.stdout
+new file mode 100644
+index 0000000..e69de29
+diff --git a/types/nested_generic_option/nested_generic_option.json b/types/nested_generic_option/nested_generic_option.json
+index 1bf207a..2d5b9da 100644
+--- a/types/nested_generic_option/nested_generic_option.json
++++ b/types/nested_generic_option/nested_generic_option.json
+@@ -1,5 +1,5 @@
+ {
+-  "title": "Nested generic Option<Option<number>> parses and typechecks",
++  "title": "Nested generic Option<Array<number>> parses and typechecks",
+   "stage": "run",
+-  "notes": "The lexer emits >> as a single Shr token; the type parser splits it when closing nested generics (deka#465)."
++  "notes": "The lexer emits >> as a single Shr token; the type parser splits it when closing nested generics (deka#465). rfd#62: use a representable nested generic; Option<Option<T>> is now rejected in diagnostics/option_nested."
+ }
+diff --git a/types/nested_generic_option/nested_generic_option.pass.ds b/types/nested_generic_option/nested_generic_option.pass.ds
+index 0abb609..7244f9c 100644
+--- a/types/nested_generic_option/nested_generic_option.pass.ds
++++ b/types/nested_generic_option/nested_generic_option.pass.ds
+@@ -1,3 +1,3 @@
+ import { echo } from "io"
+-const x: Option<Option<number>> = None
++const x: Option<Array<number>> = None
+ echo("ok")
+diff --git a/types/nested_generic_return/nested_generic_return.json b/types/nested_generic_return/nested_generic_return.json
+index 20d96fc..2fe6a76 100644
+--- a/types/nested_generic_return/nested_generic_return.json
++++ b/types/nested_generic_return/nested_generic_return.json
+@@ -1,5 +1,5 @@
+ {
+   "title": "Nested generic in parameter and return position parses",
+   "stage": "run",
+-  "notes": "Nested generics must work in every type position, not just const annotations (deka#465)."
++  "notes": "Nested generics must work in every type position, not just const annotations (deka#465). rfd#62: use a representable nested generic; Option<Option<T>> is now rejected in diagnostics/option_nested."
+ }
+diff --git a/types/nested_generic_return/nested_generic_return.pass.ds b/types/nested_generic_return/nested_generic_return.pass.ds
+index 4ba5538..30c39b3 100644
+--- a/types/nested_generic_return/nested_generic_return.pass.ds
++++ b/types/nested_generic_return/nested_generic_return.pass.ds
+@@ -1,5 +1,5 @@
+ import { echo } from "io"
+-fn wrap(x: Option<Option<number>>) Option<Option<number>> {
++fn wrap(x: Option<Array<number>>) Option<Array<number>> {
+   return x
+ }
+ const v = wrap(None)

@@ -1106,9 +1106,9 @@ fn load() string {
             "test.ds",
         )
         .expect("compile should succeed");
-        assert!(result.js.contains("__case"));
-        assert!(result.js.contains("Some"));
-        assert!(result.js.contains("None"));
+        assert!(!result.js.contains("__case"));
+        assert!(result.js.contains("!== undefined"));
+        assert!(result.js.contains("else {"));
     }
 
     #[test]

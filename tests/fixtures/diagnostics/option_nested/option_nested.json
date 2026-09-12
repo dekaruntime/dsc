@@ -1,0 +1,5 @@
+{
+  "title": "option nested",
+  "stage": "parse",
+  "expectedDiagnosticContains": "`Option<Option<T>>` is ambiguous under erasure"
+}

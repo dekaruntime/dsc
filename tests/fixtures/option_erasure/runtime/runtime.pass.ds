@@ -1,0 +1,19 @@
+fn value(v: Option<number>) number { return match v { Some(x) => x, None => -1 }; }
+if (value(Some(0)) != 0 || value(None) != -1) { panic("presence must distinguish zero"); }
+if (!isset(Some(false)) || !isset(Some("")) || isset(None)) { panic("presence must compare undefined"); }
+let calls = 0;
+fn next() Option<number> { calls += 1; return Some(7); }
+if (!isset(next()) || calls != 1) { panic("isset evaluates once"); }
+const picked = match next() { Some(x) => x, None => 0 };
+if (picked != 7 || calls != 2) { panic("match evaluates once"); }
+const obj = Some({ ok: false, value: 9 });
+const found = match obj { Some(x) => x.value, None => 0 };
+if (found != 9) { panic("Result-looking payload must stay whole"); }
+struct Box { item: Option<number> }
+const empty = Box { item: None };
+const full = Box { item: Some(0) };
+const empty2 = match empty.toJSON().parseJSON<Box>() { Ok(x) => x, Err(e) => panic(e) };
+const full2 = match full.toJSON().parseJSON<Box>() { Ok(x) => x, Err(e) => panic(e) };
+if (isset(empty2.item) || value(full2.item) != 0) { panic("JSON None/Some round trip"); }
+const bad = "{\"Box\":{\"item\":{\"Option\":{\"case\":\"Some\",\"values\":[false]}}}}";
+match bad.parseJSON<Box>() { Ok(x) => panic("invalid payload accepted"), Err(e) => 0 };

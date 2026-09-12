@@ -1,0 +1,5 @@
+{
+  "title": "Bodyless payload arms are Result/Exception privileges, not Option",
+  "stage": "typecheck",
+  "expectedDiagnosticContains": "privilege of Result and Exception"
+}

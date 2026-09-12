@@ -65,6 +65,99 @@ mod tests {
     }
 
     #[test]
+    fn ternary_emits_authored_conditional_expressions() {
+        for expression in [
+            "a || b ? 1 : 2",
+            "a && b ? 1 : 2",
+            "a ? b ? 1 : 2 : 3",
+            "a ? 1 : b ? 2 : 3",
+            "(a ? b : a) ? 1 : 2",
+        ] {
+            let source = format!("fn f(a: boolean, b: boolean) number {{ return {expression}; }}");
+            let out = parse_check_and_emit(&source);
+            assert!(out.contains(&format!("return {expression};")), "{out}");
+            assert!(!out.contains("if ("), "{out}");
+            assert!(!out.contains("=>"), "{out}");
+        }
+    }
+
+    #[test]
+    fn ternary_hats_fixtures() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/ternary");
+        let mut count = 0;
+        for entry in std::fs::read_dir(root).unwrap() {
+            let dir = entry.unwrap().path();
+            let name = dir.file_name().unwrap().to_str().unwrap();
+            let metadata: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(dir.join(format!("{name}.json"))).unwrap(),
+            )
+            .unwrap();
+            let source_path = std::fs::read_dir(&dir)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .find(|path| {
+                    matches!(
+                        path.extension().and_then(|e| e.to_str()),
+                        Some("ds" | "dsx")
+                    )
+                })
+                .unwrap();
+            let source = std::fs::read_to_string(source_path).unwrap();
+            let arena = Bump::new();
+            let parsed = parse(&source, &arena);
+            assert!(parsed.errors.is_empty(), "{name}: {:?}", parsed.errors);
+            let program = parsed.program.unwrap();
+            let checked = deka_syntax::typeck::check_program(&program, &source);
+            if let Some(diagnostic) = metadata["expectedDiagnosticContains"].as_str() {
+                assert_eq!(checked.errors.len(), 1, "{name}: {:?}", checked.errors);
+                assert!(
+                    checked.errors[0].message.contains(diagnostic),
+                    "{name}: {:?}",
+                    checked.errors
+                );
+            } else {
+                let out = parse_check_and_emit(&source);
+                assert!(out.contains(" ? "), "{name}: {out}");
+                // JSX imports the host UI runtime. Check its emitted JS syntax;
+                // execute the pure DS fixtures, including lazy-arm assertions.
+                let mut command = std::process::Command::new("node");
+                command.arg("--input-type=module");
+                if name == "jsx" {
+                    command.arg("--check");
+                }
+                let mut child = command
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .expect("Node.js is required to execute ternary fixtures");
+                std::io::Write::write_all(&mut child.stdin.take().unwrap(), out.as_bytes())
+                    .unwrap();
+                let result = child.wait_with_output().unwrap();
+                let expected_code: i32 = std::fs::read_to_string(dir.join(format!("{name}.code")))
+                    .unwrap()
+                    .trim()
+                    .parse()
+                    .unwrap();
+                assert_eq!(
+                    result.status.code(),
+                    Some(expected_code),
+                    "{name}: {}",
+                    String::from_utf8_lossy(&result.stderr)
+                );
+                assert_eq!(
+                    String::from_utf8(result.stdout).unwrap(),
+                    std::fs::read_to_string(dir.join(format!("{name}.stdout"))).unwrap(),
+                    "{name}"
+                );
+            }
+            count += 1;
+        }
+        assert_eq!(count, 5);
+    }
+
+    #[test]
     fn result_reflection_and_json_keep_the_public_format() {
         let out = parse_check_and_emit(
             r#"

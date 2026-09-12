@@ -14,7 +14,7 @@ pub(super) fn infix_info(kind: TokenKind) -> Option<(u8, u8, BinOp)> {
         StarEq => (0, 0, BinOp::MulAssign),
         SlashEq => (0, 0, BinOp::DivAssign),
         PercentEq => (0, 0, BinOp::ModAssign),
-        Or => (1, 2, BinOp::Or),
+        Or => (2, 3, BinOp::Or),
         And => (3, 4, BinOp::And),
         Pipe => (3, 4, BinOp::Pipe),
         EqEq => (5, 6, BinOp::Eq),

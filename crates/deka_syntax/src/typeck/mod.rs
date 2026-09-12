@@ -2073,6 +2073,33 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Match and conditional arms share the first returning arm's type.
+    /// A diverging arm contributes no type, regardless of its position.
+    fn unify_arm_types(&mut self, first: &Type<'a>, next: &Type<'a>) -> Option<Type<'a>> {
+        if matches!(first, Type::Never) {
+            Some(next.clone())
+        } else if self.is_assignable(first, next) {
+            Some(first.clone())
+        } else {
+            None
+        }
+    }
+
+    fn unify_ternary_arms(
+        &mut self,
+        first: Type<'a>,
+        next: Type<'a>,
+        span: ast::Span,
+    ) -> Type<'a> {
+        self.unify_arm_types(&first, &next).unwrap_or_else(|| {
+            self.error_span(
+                span,
+                format!("ternary arm has type `{next}`, expected type `{first}`"),
+            );
+            Type::Error
+        })
+    }
+
     fn expect_boolean(&mut self, ty: &Type<'a>, span: ast::Span) {
         if matches!(ty, Type::Var) {
             return;
@@ -2493,6 +2520,73 @@ mod tests {
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         let program = result.program.expect("parse produced no program");
         check_program(&program, source).errors
+    }
+
+    #[test]
+    fn ternary_checks_precedence_nesting_and_arm_types() {
+        for source in [
+            "const x: number = true || false ? 1 : 2;",
+            "const x: number = true && false || true ? 1 : 2;",
+            "const x: number = true ? false ? 1 : 2 : 3;",
+            "const x: number = false ? 1 : true ? 2 : 3;",
+            "const x: boolean = true ? false || true : true && false;",
+            "fn f(b: boolean) number { return b ? 1 : 2; }",
+            "const x: string = true ? panic(\"stop\") : \"ok\";",
+            "const x: string = true ? \"ok\" : panic(\"stop\");",
+            "fn f(b: boolean) string { return b ? panic(\"stop\") : \"ok\"; }",
+        ] {
+            assert!(typeck(source).is_empty(), "{source}: {:?}", typeck(source));
+        }
+    }
+
+    #[test]
+    fn ternary_condition_diagnostic_teaches_the_actual_type() {
+        for source in [
+            "const x = 1 ? 2 : 3;",
+            "fn f() number { return 1 ? 2 : 3; }",
+            "const x = [1 ? 2 : 3];",
+        ] {
+            let errors = typeck(source);
+            assert_eq!(errors.len(), 1, "{errors:?}");
+            assert_eq!(
+                errors[0].message,
+                "expected type `boolean`, found type `number`"
+            );
+        }
+    }
+
+    #[test]
+    fn ternary_arm_mismatch_matches_match_unification() {
+        for expression in ["true ? 1 : \"no\"", "true ? \"no\" : 1"] {
+            for source in [
+                format!("const x = {expression};"),
+                format!("fn f() {{ const x = [{expression}]; }}"),
+            ] {
+                let errors = typeck(&source);
+                assert_eq!(errors.len(), 1, "{errors:?}");
+                assert!(
+                    errors[0].message.contains("ternary arm has type"),
+                    "{errors:?}"
+                );
+            }
+        }
+        // Match selects the first non-never arm, including a declared union.
+        for expression in ["b ? x : 1", "match b { true => x, false => 1 }"] {
+            let source = format!(
+                "fn f(b: boolean, x: number | string) number | string {{ return {expression}; }}"
+            );
+            assert!(
+                typeck(&source).is_empty(),
+                "{source}: {:?}",
+                typeck(&source)
+            );
+        }
+        for expression in ["b ? 1 : x", "match b { true => 1, false => x }"] {
+            let source = format!(
+                "fn f(b: boolean, x: number | string) number | string {{ return {expression}; }}"
+            );
+            assert!(!typeck(&source).is_empty(), "{source}");
+        }
     }
 
     #[test]

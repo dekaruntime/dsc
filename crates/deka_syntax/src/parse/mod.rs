@@ -2657,4 +2657,67 @@ mod tests {
             _ => panic!("expected expr statement"),
         }
     }
+
+    #[test]
+    fn ternary_precedence_nesting_and_expression_positions() {
+        fn shape(expr: &Expr<'_>) -> String {
+            match expr {
+                Expr::Identifier { name, .. } => name.to_string(),
+                Expr::Binary {
+                    op, left, right, ..
+                } => format!("({op:?} {} {})", shape(left), shape(right)),
+                Expr::Ternary {
+                    condition,
+                    then_branch,
+                    else_branch,
+                    ..
+                } => format!(
+                    "(?: {} {} {})",
+                    shape(condition),
+                    shape(then_branch),
+                    shape(else_branch)
+                ),
+                other => panic!("unexpected expression: {other:?}"),
+            }
+        }
+        for (source, expected) in [
+            ("a || b ? c : d", "(?: (Or a b) c d)"),
+            ("a && b || c ? d : e", "(?: (Or (And a b) c) d e)"),
+            ("a ? b || c : d && e", "(?: a (Or b c) (And d e))"),
+            ("a ? b : c ? d : e", "(?: a b (?: c d e))"),
+            ("a ? b ? c : d : e", "(?: a (?: b c d) e)"),
+            ("x = a ? b : c", "(Assign x (?: a b c))"),
+            ("a ? x = b : x = c", "(?: a (Assign x b) (Assign x c))"),
+            ("a\n?\nb\n:\nc", "(?: a b c)"),
+        ] {
+            let arena = Bump::new();
+            let result = parse(source, &arena);
+            assert!(result.errors.is_empty(), "{source}: {:?}", result.errors);
+            let program = result.program.unwrap();
+            let Stmt::Expr { expr, .. } = &program.statements[0] else {
+                panic!("expected expression")
+            };
+            assert_eq!(shape(expr), expected, "{source}");
+        }
+        for source in [
+            "const x = f(a ? b : c)",
+            "const x = [a ? b : c]",
+            "const x = items[a ? b : c]",
+            "const x = (a ? b : c) + d",
+            "const x = <div title={a ? b : c}>{a ? <span /> : <b />}</div>",
+        ] {
+            let arena = Bump::new();
+            let result = parse(source, &arena);
+            assert!(result.errors.is_empty(), "{source}: {:?}", result.errors);
+        }
+    }
+
+    #[test]
+    fn ternary_requires_both_arms_and_colon() {
+        for source in ["a ? b", "a ? : c", "a ? b :", "a ? b c"] {
+            let arena = Bump::new();
+            assert!(!parse(source, &arena).errors.is_empty(), "{source}");
+        }
+    }
+
 }

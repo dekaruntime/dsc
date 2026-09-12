@@ -1,0 +1,8 @@
+fn choose(a: boolean, b: boolean) number { return a ? b ? 1 : 2 : b ? 3 : 4; }
+if (choose(true, true) != 1) { panic("true/true"); }
+if (choose(true, false) != 2) { panic("true/false"); }
+if (choose(false, true) != 3) { panic("false/true"); }
+if (choose(false, false) != 4) { panic("false/false"); }
+let value = 0;
+const assigned = true ? value = 5 : value = 6;
+if (value != 5) { panic("arm assignment escaped conditional"); }

@@ -1619,7 +1619,7 @@ const arrow = unsafe { () => User { name: "Bob" } }
     fn compile_unsafe_expression() {
         let result = compile_to_js("const r = unsafe { JSON.parse('{}') };", "test.ds")
             .expect("compile should succeed");
-        assert!(result.js.contains("__case: \"Ok\""), "got: {}", result.js);
+        assert!(result.js.contains("ok: true"), "got: {}", result.js);
         assert!(result.js.contains("JSON.parse('{}')"), "got: {}", result.js);
     }
 

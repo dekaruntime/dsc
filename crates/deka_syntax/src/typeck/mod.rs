@@ -63,6 +63,12 @@ pub enum ExceptionEmit {
 #[derive(Clone, Default)]
 pub struct ExceptionLowering<'a> {
     pub forms: HashMap<*const ast::Expr<'a>, ExceptionEmit>,
+    /// Distinguish checked metadata from the legacy parser-only emit API.
+    pub checked: bool,
+    /// Result-typed values whose reflection must survive representation erasure.
+    pub result_values: HashSet<*const ast::Expr<'a>>,
+    /// Resolved Result patterns; spelling alone cannot identify a builtin enum.
+    pub result_patterns: HashSet<*const ast::Pattern<'a>>,
     pub catches: HashMap<*const ast::Type<'a>, &'a str>,
 }
 impl<'a> std::ops::Deref for ExceptionLowering<'a> {
@@ -919,7 +925,11 @@ pub fn refresh_module_export_values<'a>(
                 ..
             } => vec![(*name, *name)],
             ast::Stmt::Export {
-                decl: ast::ExportDecl::NamedGroup { names, source: None },
+                decl:
+                    ast::ExportDecl::NamedGroup {
+                        names,
+                        source: None,
+                    },
                 ..
             } => names
                 .iter()
@@ -932,10 +942,9 @@ pub fn refresh_module_export_values<'a>(
     for (local, exported) in exported_constants {
         let ty = inferred_values.get(local).cloned().unwrap_or(Type::Error);
         let concrete = is_concrete_export_type(&ty);
-        exports.values.insert(
-            exported,
-            if concrete { ty.clone() } else { Type::Error },
-        );
+        exports
+            .values
+            .insert(exported, if concrete { ty.clone() } else { Type::Error });
         if concrete {
             let mut names = HashSet::new();
             collect_struct_type_names(&ty, &mut names);
@@ -1779,7 +1788,10 @@ impl<'a> Checker<'a> {
             fn_param_bounds: HashMap::new(),
             in_function: false,
             in_async_function: false,
-            exception_forms: ExceptionLowering::default(),
+            exception_forms: ExceptionLowering {
+                checked: true,
+                ..Default::default()
+            },
             exception_use: exceptions::Use::Value,
             exception_expected: None,
             exception_catches: Vec::new(),
@@ -1947,6 +1959,8 @@ impl<'a> Checker<'a> {
     pub(super) fn reset_lowering_state(&mut self) {
         self.exception_forms.clear();
         self.exception_forms.catches.clear();
+        self.exception_forms.result_values.clear();
+        self.exception_forms.result_patterns.clear();
         self.method_calls.clear();
         self.type_of_calls.clear();
         self.signature_calls.clear();
@@ -4711,7 +4725,9 @@ mod tests {
         // representation (dsc#60), so the Err side types as `string`. Member
         // access on it is a check-time error with a span instead of a runtime
         // `undefined`. The Ok side stays `Infer` until deka#252/#460.
-        let errors = typeck("const r = match (unsafe { JSON.parse(1) }) { Ok(v) => v, Err(e) => e.message };");
+        let errors = typeck(
+            "const r = match (unsafe { JSON.parse(1) }) { Ok(v) => v, Err(e) => e.message };",
+        );
         assert!(
             errors.iter().any(|e| e.message.contains("`string` has no field `message`")),
             "{:?}",

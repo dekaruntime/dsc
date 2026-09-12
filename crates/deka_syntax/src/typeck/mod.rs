@@ -22,6 +22,7 @@ mod ast_type;
 mod descriptor;
 mod exceptions;
 mod expr;
+mod indexing;
 mod stmt;
 mod types;
 
@@ -107,9 +108,9 @@ pub struct TypeckResult<'a> {
     pub super_trees: HashMap<&'a str, descriptor::DescriptorTree<'a>>,
     /// `.toJSON()` and `.parseJSON<T>()` call sites specialized to a static shape.
     pub json_calls: HashMap<*const ast::Expr<'a>, descriptor::JsonCall<'a>>,
-    /// Builtin `Array.first()`/`Array.last()`/`Array.pop()`/`Array.shift()`
-    /// call sites, rewritten to an Option-producing expression during
-    /// emission (deka#561, deka#566).
+    /// Builtin array call sites: accessors produce Option (deka#561,
+    /// deka#566); `has` emits an inline predicate and carries a bounds fact
+    /// into a guarded branch (rfd#65).
     pub array_builtin_calls: HashMap<*const ast::Expr<'a>, types::ArrayAccess>,
     /// Builtin `Math`-backed `number` method call sites, rewritten to a
     /// `Math.*` expression during emission — partial functions wrapped so
@@ -1623,6 +1624,7 @@ pub struct InterfaceInfo<'a> {
 }
 
 struct Checker<'a> {
+    index_flow: indexing::IndexFlow,
     program: &'a ast::Program<'a>,
     errors: Vec<Diagnostic>,
     warnings: Vec<Diagnostic>,
@@ -1787,6 +1789,7 @@ impl<'a> Checker<'a> {
             static_type_calls: HashMap::new(),
             super_trees: HashMap::new(),
             json_calls: HashMap::new(),
+            index_flow: indexing::IndexFlow::default(),
             array_builtin_calls: HashMap::new(),
             number_math_calls: HashMap::new(),
             unwrap_calls: HashMap::new(),
@@ -1989,6 +1992,7 @@ impl<'a> Checker<'a> {
         self.static_type_calls.clear();
         self.json_calls.clear();
         self.array_builtin_calls.clear();
+        self.index_flow = indexing::IndexFlow::default();
         self.number_math_calls.clear();
         self.unwrap_calls.clear();
         self.operator_rewrites.clear();
@@ -1999,6 +2003,7 @@ impl<'a> Checker<'a> {
     // ------------------------------------------------------------------
 
     fn declare_var(&mut self, name: &'a str, ty: Type<'a>) {
+        self.index_flow.shadow(name);
         if self.program.statements.iter().any(|stmt| matches!(stmt, ast::Stmt::Summon { functions, .. } if functions.iter().any(|f| f.name == name))) {
             self.error_span(ast::Span::dummy(), format!("cannot shadow summoned binding `{name}`"));
         }
@@ -2006,6 +2011,7 @@ impl<'a> Checker<'a> {
     }
 
     fn declare_mutable_var(&mut self, name: &'a str, ty: Type<'a>) {
+        self.index_flow.shadow(name);
         if self.program.statements.iter().any(|stmt| matches!(stmt, ast::Stmt::Summon { functions, .. } if functions.iter().any(|f| f.name == name))) {
             self.error_span(ast::Span::dummy(), format!("cannot shadow summoned binding `{name}`"));
         }
@@ -2514,7 +2520,7 @@ mod tests {
     use super::*;
     use crate::parse::parse;
 
-    fn typeck(source: &str) -> Vec<Diagnostic> {
+    pub(super) fn typeck(source: &str) -> Vec<Diagnostic> {
         let arena = Bump::new();
         let result = parse(source, &arena);
         assert!(result.errors.is_empty(), "{:?}", result.errors);
@@ -3110,11 +3116,11 @@ mod tests {
         // deka#467: `map` is (T -> U) -> Array<U>; U solves from the
         // callback's return type, so downstream uses see the real element.
         assert!(typeck(
-            "const a = [1, 2, 3].map(fn(x: number) string { return \"s\" });\nconst s: string = a[0];"
+            "const a = [1, 2, 3].map(fn(x: number) string { return \"s\" });\nconst s: string = a.has(0) ? a[0] : \"\";"
         )
         .is_empty());
         let errors = typeck(
-            "const a = [1, 2, 3].map(fn(x: number) string { return \"s\" });\nconst n: number = a[0];",
+            "const a = [1, 2, 3].map(fn(x: number) string { return \"s\" });\nconst n: number = a.has(0) ? a[0] : \"\";",
         );
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(
@@ -3155,7 +3161,7 @@ mod tests {
         // `Array<Var>` — unconstrained, exactly as before `map` gained a type
         // parameter (deka#468 semantics).
         assert!(typeck(
-            "const a = [1, 2, 3];\nconst cbs = [];\nconst d = a.map(cbs[0]);\nconst s: string = d[0];"
+            "const a = [1, 2, 3];\nconst cbs = [];\nif (cbs.has(0)) { const d = a.map(cbs[0]); if (d.has(0)) { const s: string = d[0]; } }"
         )
         .is_empty());
     }
@@ -4262,7 +4268,7 @@ mod tests {
     fn array_and_string_index_types_are_checked_at_use_sites() {
         let errors = typeck(
             "fn takes_number(x: number) {} fn takes_string(x: string) {}\
-             takes_number([1, 2][0]); takes_string(\"ab\"[0]); takes_string([1, 2][0]);",
+             const items = [1, 2]; takes_number(items.has(0) ? items[0] : 0); takes_string(\"ab\"[0]); takes_string(items.has(0) ? items[0] : 0);",
         );
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(
@@ -4281,9 +4287,9 @@ mod tests {
     fn indexed_array_mutation_and_function_elements_are_typed() {
         let errors = typeck(
             "fn apply(f: fn(number) number) number { return f(1); }\
-             let numbers = [1]; numbers[0] = \"bad\";\
+             let numbers = [1]; if (numbers.has(0)) { numbers[0] = \"bad\"; }\
              const funcs = [fn (x: number) number { return x }];\
-             apply(funcs[0]);",
+             if (funcs.has(0)) { apply(funcs[0]); }",
         );
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(
@@ -4363,7 +4369,7 @@ mod tests {
         // array used to yield `Infer`, assignable to anything.
         let errors = typeck(
             "const xs = [\"a\", \"b\"]\n\
-             const n: number = [...xs][0];",
+             const items = [...xs]; if (items.has(0)) { const n: number = items[0]; }",
         );
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(
@@ -4402,9 +4408,8 @@ mod tests {
             errors[0].message
         );
 
-        // Numeric indices are unaffected (out-of-range is the Option<T>
-        // question, split from this lane — see dsc#88).
-        assert!(typeck("const a = [1, 2, 3]\nconst x = a[999];").is_empty());
+        // Numeric indices require an explicit bounds proof (rfd#65).
+        assert!(typeck("const a = [1, 2, 3]\nconst x = a.has(999) ? a[999] : 0;").is_empty());
     }
 
     #[test]

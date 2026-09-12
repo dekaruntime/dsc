@@ -773,7 +773,7 @@ struct User { name: string }
 const users: Array<User> = build {
   return Ok([User { name: "Ada" }])
 }
-const first = users[0]
+const first = users.has(0) ? users[0] : User { name: "" }
 "#;
         let result = compile_to_js(source, "app/users.ds").expect("dev binding compiles");
         assert_eq!(result.dev_plan.version, 2);
@@ -1549,7 +1549,7 @@ const arrow = unsafe { () => User { name: "Bob" } }
         // dsc#88: object string-key indexing (`o["x"]`) is a check-time
         // error now, so the index half of this test uses array indexing.
         let result = compile_to_js(
-            "const a = [1, 2, 3]; const o = { x: 1 }; const v = a[0] + a[1] + o.x;",
+            "const a = [1, 2, 3]; const o = { x: 1 }; const v = a.has(0) && a.has(1) ? a[0] + a[1] + o.x : 0;",
             "test.ds",
         )
         .expect("compile should succeed");

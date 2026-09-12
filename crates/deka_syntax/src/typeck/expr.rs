@@ -301,6 +301,9 @@ pub(super) fn primitive_member<'a>(
                 elem: Box::new(elem?.clone()),
             },
         )),
+        ("Array", "has") => {
+            PrimitiveMember::BuiltinMethod(fn1(&number_ty, &Type::Named { name: "boolean" }))
+        }
         ("Array", "push") => PrimitiveMember::BuiltinMethod(fn1(elem?, &number_ty)),
         ("Array", "pop") => PrimitiveMember::BuiltinMethod(fn0(Type::Option {
             inner: Box::new(elem?.clone()),
@@ -686,6 +689,18 @@ impl<'a> Checker<'a> {
                     return Type::Error;
                 }
                 let index_type = self.check_expr(index);
+                let bounded_array = match &object_type {
+                    Type::Array { .. } => true,
+                    Type::Param { name } => {
+                        matches!(self.lookup_param_bound(name), Some(Type::Array { .. }))
+                    }
+                    _ => false,
+                };
+                if bounded_array
+                    && matches!(index_type, Type::Named { name: "number" } | Type::Var | Type::Infer)
+                {
+                    self.require_index_proof(object, index, *span);
+                }
                 // dsc#88: `obj[idx]` compiles to raw JavaScript indexing,
                 // which answers a non-numeric index with `undefined` while
                 // the checker used to type the result as the element type.
@@ -926,8 +941,12 @@ impl<'a> Checker<'a> {
             } => {
                 let cond_type = self.check_expr(condition);
                 self.expect_boolean(&cond_type, condition.span());
+                let saved = self.index_flow.clone();
+                self.assume_index_condition(condition);
                 let then_type = self.check_expr(then_branch);
+                self.index_flow.restrict_to(&saved);
                 let else_type = self.check_expr(else_branch);
+                self.index_flow.restrict_to(&saved);
                 self.unify_ternary_arms(then_type, else_type, *span)
             }
             ast::Expr::TemplateLiteral { parts, .. } => {
@@ -985,6 +1004,19 @@ impl<'a> Checker<'a> {
         self.mutables.push(HashSet::new());
 
         for (p, t) in params.iter().zip(param_types.iter()) {
+            if let Some(default) = &p.default_value {
+                let actual = self.check_exception_use(
+                    default,
+                    super::exceptions::Use::Value,
+                    Some(t.clone()),
+                );
+                if !self.is_assignable(t, &actual) {
+                    self.error_at_expr(
+                        default,
+                        format!("expected default type `{t}`, found type `{actual}`"),
+                    );
+                }
+            }
             self.declare_var(p.name, t.clone());
         }
 
@@ -1024,7 +1056,7 @@ impl<'a> Checker<'a> {
         self.in_function = saved_in_function;
         self.return_type = saved_return_type;
         self.exception_catches = saved_catches;
-        self.scopes.pop();
+        self.pop_value_scope();
         self.mutables.pop();
 
         let optional = params
@@ -2067,7 +2099,7 @@ impl<'a> Checker<'a> {
             } else {
                 self.check_exception_use(&arm.body, super::exceptions::Use::Arm, expected.clone())
             };
-            self.scopes.pop();
+            self.pop_value_scope();
             self.mutables.pop();
 
             match &result_type {
@@ -2821,13 +2853,44 @@ impl<'a> Checker<'a> {
         let left_type = self.check_expr(left);
         // Pipe checks its right-hand side specially (it desugars into a call),
         // so avoid the generic check_expr here.
+        let saved_flow = self.index_flow.clone();
+        if op == ast::BinOp::And {
+            self.assume_index_condition(left);
+        }
         let right_type = if op == ast::BinOp::Pipe {
             Type::Infer
         } else {
             self.check_expr(right)
         };
+        self.index_flow.restrict_to(&saved_flow);
+        if matches!(
+            op,
+            ast::BinOp::Assign
+                | ast::BinOp::AddAssign
+                | ast::BinOp::SubAssign
+                | ast::BinOp::MulAssign
+                | ast::BinOp::DivAssign
+                | ast::BinOp::ModAssign
+        ) && self.index_flow != saved_flow
+        {
+            if let ast::Expr::IndexAccess {
+                object,
+                index,
+                span,
+            } = left
+            {
+                // A mutating RHS can invalidate the target after its reference
+                // was evaluated but before JavaScript performs the write.
+                if saved_flow.proves(object, index) {
+                    self.require_index_proof(object, index, *span);
+                }
+            }
+        }
         if !matches!(op, ast::BinOp::Assign | ast::BinOp::Pipe) {
-            if let Some(Type::Opaque { name, .. }) = [&left_type, &right_type].into_iter().find(|ty| matches!(ty, Type::Opaque { .. })) {
+            if let Some(Type::Opaque { name, .. }) = [&left_type, &right_type]
+                .into_iter()
+                .find(|ty| matches!(ty, Type::Opaque { .. }))
+            {
                 self.error_span(span, format!("cannot apply operators to opaque type `{name}`; hold, pass, or store the handle"));
                 return Type::Error;
             }
@@ -3616,18 +3679,19 @@ impl<'a> Checker<'a> {
                         ),
                     );
                 }
-                // Record `first`/`last`/`pop`/`shift` so the emitter rewrites
-                // them to an Option-producing expression. Returning `None`
+                // Record array superpowers for the emitter: `has` melts to
+                // an integer/bounds predicate; accessors produce Option. Returning `None`
                 // keeps the existing `check_call` flow (argument arity
                 // checking against the `BuiltinMethod` signature). Extensions
                 // cannot target `Array` receivers (deka#527), so this cannot
                 // shadow user code. The mutability guard above already
                 // rejects pop/shift on immutable receivers (deka#590's
                 // richer message), so no per-method check is needed here.
-                if matches!(method_name, "first" | "last" | "pop" | "shift") {
+                if matches!(method_name, "has" | "first" | "last" | "pop" | "shift") {
                     self.array_builtin_calls.insert(
                         call_expr as *const ast::Expr,
                         match method_name {
+                            "has" => super::types::ArrayAccess::Has,
                             "first" => super::types::ArrayAccess::First,
                             "last" => super::types::ArrayAccess::Last,
                             "pop" => super::types::ArrayAccess::Pop,

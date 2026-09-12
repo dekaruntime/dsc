@@ -1,0 +1,5 @@
+{
+  "title": "Indexing evaluation",
+  "stage": "run",
+  "notes": "rfd#65 part 2: explicit index proofs."
+}

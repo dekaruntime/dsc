@@ -60,3 +60,28 @@ They are local feature regressions, not a vendored copy of the owner corpus.
 JavaScript with Node.js (also required by the UI runtime tests); JSX output
 is syntax-checked because its imports require the host UI runtime. The fixtures
 can be moved to the owner corpus in a coordinated corpus release.
+
+## Indexing conformance (rfd#65, part 2)
+
+`tests/fixtures/indexing/` covers range loops, integer comparison pairs, `has()`
+reads/writes, single evaluation and laziness, and an unproven-index diagnostic.
+`cargo test -p deka_emit indexing` checks the Hats metadata and executes the
+passing fixtures with Node.js. The formatter roundtrip includes local fixtures.
+
+Array reads and writes require a dominating proof. `has()` is a compiler builtin
+with a `number` argument and `boolean` result; its integer and bounds predicate
+emits inline. A proven subscript still emits the authored bare subscript.
+`for i in 0..items.length` lowers to the existing C-style counting-loop AST;
+that canonical counting form is recognized too. Comparison pairs require known
+integerness (integer literals/bindings, counting-loop variables, or `has()`).
+Facts currently identify local array bindings and index bindings/integer literals.
+Rebind computed receivers or indexes to locals before guarding them.
+
+Calls other than the builtin predicate, writes, suspension, and unsafe JS kill
+facts conservatively, including possible alias mutation. Shadowing kills facts
+for that name; closures and loop backedges cannot inherit stale proofs. The gate
+also checks parameter defaults. String/bytes indexing and Option representations
+are outside this array-indexing lane.
+
+The required external owner patches and pin coordination are documented in
+[migrations/indexing-98/README.md](migrations/indexing-98/README.md).

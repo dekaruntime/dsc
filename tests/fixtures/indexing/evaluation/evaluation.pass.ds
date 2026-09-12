@@ -1,0 +1,10 @@
+let calls = 0;
+fn index() number { calls = calls + 1; return 0; }
+fn array() Array<number> { calls = calls + 10; return [7]; }
+const yes = array().has(index());
+if (!yes || calls != 11) { panic("has must evaluate receiver and index once"); }
+const lazy = false ? array().has(index()) : false;
+if (calls != 11 || lazy) { panic("has must remain lazy"); }
+fn defaulted(value: boolean = array().has(index())) boolean { return value; }
+const default_yes = defaulted();
+if (!default_yes || calls != 22) { panic("has default must evaluate once"); }

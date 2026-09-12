@@ -114,7 +114,11 @@ impl<'a> Checker<'a> {
     }
 
     pub(super) fn check_expr(&mut self, expr: &ast::Expr<'a>) -> Type<'a> {
+        if matches!(expr, ast::Expr::Function { .. }) {
+            self.index_flow.kill();
+        }
         let ty = self.check_expr_erasure(expr);
+        self.apply_index_effect(expr);
         if channels(&ty, "Result").is_some() {
             self.exception_forms.result_values.insert(expr as *const _);
         }
@@ -220,8 +224,12 @@ impl<'a> Checker<'a> {
                 } else {
                     Use::Value
                 };
+                let saved_flow = self.index_flow.clone();
+                self.assume_index_condition(condition);
                 let left = self.check_exception_use(then_branch, branch_use, expected.clone());
+                self.index_flow.restrict_to(&saved_flow);
                 let right = self.check_exception_use(else_branch, branch_use, expected);
+                self.index_flow.restrict_to(&saved_flow);
                 return self.unify_ternary_arms(left, right, *span);
             }
             ast::Expr::Call {
@@ -464,7 +472,7 @@ impl<'a> Checker<'a> {
         for s in body {
             self.check_statement(s);
         }
-        self.scopes.pop();
+        self.pop_value_scope();
         self.mutables.pop();
         let errors = self.exception_catches.pop().unwrap();
         let catch_type = if let Some(annotation) = annotation {
@@ -519,7 +527,7 @@ impl<'a> Checker<'a> {
         for s in catch_body {
             self.check_statement(s);
         }
-        self.scopes.pop();
+        self.pop_value_scope();
         self.mutables.pop();
     }
 

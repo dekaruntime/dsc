@@ -523,6 +523,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "deka-modules"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b8bb715c1bb11510df786b3a9f6a592fa7994404b4648c26bc4ceba78094875"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "deka-validation"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -575,8 +585,7 @@ dependencies = [
 name = "deka_project"
 version = "0.49.0"
 dependencies = [
- "serde",
- "serde_json",
+ "deka-modules",
  "tempfile",
 ]
 

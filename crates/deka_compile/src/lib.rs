@@ -172,10 +172,14 @@ fn program_contains_jsx(program: &Program<'_>) -> bool {
 /// rather than a host import, so its single constant is available anywhere
 /// DekaScript runs without making `Math` ambient.
 pub fn is_math_module_spec(spec: &str) -> bool {
-    let bare = spec.trim().strip_prefix("@deka/").unwrap_or(spec.trim());
-    bare == "math"
+    deka_project::module_spec::is_closed_stdlib_module_spec(spec)
 }
 
+/// Compiler-side stdlib membership for virtual-import inference.
+///
+/// Not `deka_modules::project_gate::is_stdlib_module_spec`: that gate treats
+/// every `@deka/*` specifier as stdlib and does not include the `ui` / `ui/`
+/// virtual-stdlib bypass (dsc#111/#129). Prefixes come from the shared table.
 pub(crate) fn is_stdlib_module_spec(spec: &str) -> bool {
     if spec.starts_with("@user/") {
         return false;
@@ -202,10 +206,9 @@ pub(crate) fn is_stdlib_module_spec(spec: &str) -> bool {
             | "db"
             | "time"
             | "io"
-    ) || bare.starts_with("component/")
-        || bare.starts_with("deka/")
-        || bare.starts_with("encoding/")
-        || bare.starts_with("db/")
+    ) || deka_project::module_spec::STDLIB_SPEC_PREFIXES
+        .iter()
+        .any(|prefix| bare.starts_with(prefix))
         || bare == "ui"
         || bare.starts_with("ui/")
 }

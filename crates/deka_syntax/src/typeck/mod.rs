@@ -20,6 +20,7 @@ use crate::diagnostics::Diagnostic;
 
 mod ast_type;
 mod descriptor;
+mod exceptions;
 mod expr;
 mod stmt;
 mod types;
@@ -49,7 +50,35 @@ pub(super) fn with_union_narrowing_hint<'a>(
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExceptionEmit {
+    Ok,
+    Throw,
+    Match,
+    ToResult,
+    FromResult,
+}
+
+/// Checker-owned erasure decisions, including resolved typed-catch aliases.
+#[derive(Clone, Default)]
+pub struct ExceptionLowering<'a> {
+    pub forms: HashMap<*const ast::Expr<'a>, ExceptionEmit>,
+    pub catches: HashMap<*const ast::Type<'a>, &'a str>,
+}
+impl<'a> std::ops::Deref for ExceptionLowering<'a> {
+    type Target = HashMap<*const ast::Expr<'a>, ExceptionEmit>;
+    fn deref(&self) -> &Self::Target {
+        &self.forms
+    }
+}
+impl<'a> std::ops::DerefMut for ExceptionLowering<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.forms
+    }
+}
+
 pub struct TypeckResult<'a> {
+    pub exception_forms: ExceptionLowering<'a>,
     pub program: &'a Program<'a>,
     pub errors: Vec<Diagnostic>,
     pub warnings: Vec<Diagnostic>,
@@ -398,6 +427,12 @@ fn summarize_stmt<'a>(
     inside_island: bool,
 ) {
     match stmt {
+        ast::Stmt::Try {
+            body, catch_body, ..
+        } => {
+            summarize_statements(body, direct, references, inside_island);
+            summarize_statements(catch_body, direct, references, inside_island);
+        }
         ast::Stmt::Const { value, .. } | ast::Stmt::Let { value, .. } => {
             summarize_expr(value, direct, references, inside_island)
         }
@@ -705,6 +740,7 @@ pub fn check_program_with_imports<'a>(
     checker.check_program();
 
     TypeckResult {
+        exception_forms: checker.exception_forms,
         program,
         errors: checker.errors,
         warnings: checker.warnings,
@@ -780,7 +816,9 @@ fn collect_struct_type_names<'a>(ty: &Type<'a>, names: &mut HashSet<&'a str>) {
         Type::Struct { name } => {
             names.insert(*name);
         }
-        Type::Option { inner } | Type::Array { elem: inner } => collect_struct_type_names(inner, names),
+        Type::Option { inner } | Type::Array { elem: inner } => {
+            collect_struct_type_names(inner, names)
+        }
         Type::Function { params, ret, .. } => {
             for param in params {
                 collect_struct_type_names(param, names);
@@ -824,12 +862,22 @@ pub fn refresh_module_export_values<'a>(
         .statements
         .iter()
         .filter_map(|stmt| match stmt {
-            ast::Stmt::Struct { name, fields, embeds, type_params, is_super, .. } => Some((*name, StructInfo {
-                fields: *fields,
-                embeds: *embeds,
+            ast::Stmt::Struct {
+                name,
+                fields,
+                embeds,
                 type_params,
-                is_super: *is_super,
-            })),
+                is_super,
+                ..
+            } => Some((
+                *name,
+                StructInfo {
+                    fields: *fields,
+                    embeds: *embeds,
+                    type_params,
+                    is_super: *is_super,
+                },
+            )),
             _ => None,
         })
         .collect();
@@ -1109,7 +1157,9 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
         match ty {
             ast::Type::Named { name, .. } => match *name {
                 "number" | "string" | "boolean" | "never" | "void" | "bytes" | "Component"
-                | "JsError" | "Type" => Type::Named { name },
+                | "JsError" | "SyntaxError" | "TypeError" | "RangeError" | "Error" | "Type" => {
+                    Type::Named { name }
+                }
                 _ => {
                     if structs.contains_key(name) {
                         Type::Struct { name }
@@ -1146,7 +1196,9 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
                             &args[0], structs, enums, aliases, newtypes, seen,
                         )),
                     }
-                } else if (*base == "Result" || *base == "Promise") && args.len() <= 2 {
+                } else if (*base == "Result" || *base == "Exception" || *base == "Promise")
+                    && args.len() <= 2
+                {
                     Type::Generic {
                         base,
                         args: args
@@ -1671,6 +1723,10 @@ struct Checker<'a> {
     /// Are we currently inside an async function body?
     in_async_function: bool,
     /// Expected / inferred return type of the current function.
+    exception_forms: ExceptionLowering<'a>,
+    exception_use: exceptions::Use,
+    exception_expected: Option<Type<'a>>,
+    exception_catches: Vec<Vec<Type<'a>>>,
     return_type: Option<Type<'a>>,
     /// How many nested loops currently enclose the checked statement?
     loop_depth: usize,
@@ -1723,6 +1779,10 @@ impl<'a> Checker<'a> {
             fn_param_bounds: HashMap::new(),
             in_function: false,
             in_async_function: false,
+            exception_forms: ExceptionLowering::default(),
+            exception_use: exceptions::Use::Value,
+            exception_expected: None,
+            exception_catches: Vec::new(),
             return_type: None,
             loop_depth: 0,
             infer_only: false,
@@ -1822,7 +1882,7 @@ impl<'a> Checker<'a> {
                 }
 
                 if let Some(ty) = exports.values.get(imported) {
-                    self.declare_var(local, ty.clone());
+                    self.declare_var(local, exceptions::localize_export(ty, specifiers, exports));
                     // A value can carry a private struct type (for example,
                     // `export const origin = Point { ... }`). Reuse the
                     // compiler-private closure from dsc#86 for field lookup
@@ -1885,6 +1945,8 @@ impl<'a> Checker<'a> {
     /// lowering collection added to `Checker` must be cleared here — missing
     /// one surfaces as a lowering bug far away from this call site (deka#367).
     pub(super) fn reset_lowering_state(&mut self) {
+        self.exception_forms.clear();
+        self.exception_forms.catches.clear();
         self.method_calls.clear();
         self.type_of_calls.clear();
         self.signature_calls.clear();

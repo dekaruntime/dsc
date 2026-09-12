@@ -13,6 +13,7 @@ mod expr;
 mod jsx;
 mod pattern;
 mod stmt;
+pub use stmt::expr_has_top_level_await;
 mod ty;
 mod util;
 

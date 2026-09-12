@@ -3,8 +3,8 @@
 use crate::ast::{MatchArm, Pattern, PatternField};
 use crate::lexer::TokenKind;
 
-use super::util::token_name;
 use super::Parser;
+use super::util::token_name;
 
 impl<'a> Parser<'a> {
     pub(super) fn parse_match_arms(&mut self) -> Option<&'a [MatchArm<'a>]> {
@@ -66,9 +66,58 @@ impl<'a> Parser<'a> {
             first
         };
 
-        self.expect(TokenKind::FatArrow)?;
-        let body = self.parse_expression()?;
+        if !self.at(TokenKind::FatArrow)
+            && (!matches!(pattern, Pattern::Constructor { .. })
+                || !matches!(
+                    self.current_kind(),
+                    TokenKind::Comma
+                        | TokenKind::Semicolon
+                        | TokenKind::Newline
+                        | TokenKind::RBrace
+                ))
+        {
+            self.expect(TokenKind::FatArrow)?;
+        }
+        let bodyless = !self.eat(TokenKind::FatArrow);
+        let body = if bodyless {
+            match &pattern {
+                Pattern::Constructor {
+                    name,
+                    payload: Some(payload),
+                    span,
+                } => {
+                    let (binding, payload_span) = match **payload {
+                        Pattern::Identifier { name, span } => (name, span),
+                        _ => (self.bump_str(&format!("$__deka_passthrough_{start_byte}")), *span),
+                    };
+                    crate::ast::Expr::EnumConstructor {
+                        shared_ok: *name == "Ok",
+                        enum_name: if *name == "Throw" {
+                            "Exception"
+                        } else {
+                            "Result"
+                        },
+                        case_name: name,
+                        payload: Some(crate::ast::alloc(
+                            self.arena,
+                            crate::ast::Expr::Identifier {
+                                name: binding,
+                                span: payload_span,
+                            },
+                        )),
+                        span: *span,
+                    }
+                }
+                _ => {
+                    self.error("a bodyless arm requires a Result or Exception variant with a payload");
+                    return None;
+                }
+            }
+        } else {
+            self.parse_expression()?
+        };
         Some(MatchArm {
+            bodyless,
             pattern,
             guard: None,
             body,

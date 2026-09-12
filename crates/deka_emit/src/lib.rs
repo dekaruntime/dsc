@@ -43,6 +43,7 @@ mod tests {
             source,
             &std::collections::HashMap::new(),
             None,
+            &typeck.exception_forms,
             &typeck.unwrap_calls,
             &typeck.operator_rewrites,
             &typeck.method_calls,
@@ -61,6 +62,61 @@ mod tests {
             None,
         )
         .expect("emit failed")
+    }
+
+    #[test]
+    fn exception_native_frames_and_wysiwyg() {
+        let out = parse_check_and_emit(
+            r#"
+fn inner(fail: boolean) Exception<number, string> { if (fail) { return Throw("bad"); } return Ok(7); }
+fn delegated(fail: boolean) Exception<number, string> { return inner(fail); }
+fn raised(fail: boolean) Exception<number, string> { return match inner(fail) { Ok(v) => Ok(v), Throw(e) }; }
+fn as_data(fail: boolean) Result<number, string> { return inner(fail).to_result(); }
+fn recovered(fail: boolean) number { try { const n = inner(fail); return n + 1; } catch (e) { return 0; } }
+fn preserve(r: Result<number, string>) Result<number, string> { return match r { Ok(_), Err(_) }; }
+fn wildcard() Exception<number, string> { return match inner(true) { Ok(v) => Ok(v), Throw("bad"), Throw(e) }; }
+fn result_early(fail: boolean) Result<number, string> { const n = match as_data(fail) { Ok(v) => v, Err(e) }; return Ok(n + 1); }
+alias Syntax = SyntaxError;
+fn typed(e: SyntaxError | TypeError) Exception<number, TypeError> { try { return Throw(e); } catch (e: Syntax) { return Ok(2); } }
+struct Trouble { message: string }
+fn typed_struct() string { try { return Throw(Trouble { message: "struct" }); } catch (e: Trouble) { return e.message; } }
+async fn plain() Promise<number> { return 5; }
+async fn nested_await() Promise<number> { return 1 + (match inner(false) { Ok(v) => await plain(), Throw(e) => 0 }); }
+async fn rejecting() Promise<Exception<number, string>> { return Throw("async"); }
+async fn awaiting() Promise<string> { return match await rejecting() { Ok(v) => "ok", Throw(e) => e }; }
+"#,
+        );
+        assert!(out.contains("throw e;"), "{out}");
+        assert!(out.contains("instanceof SyntaxError"), "{out}");
+        assert!(!out.contains("__enum: \"Exception\""), "{out}");
+        let js = format!(
+            "{out}\n{}",
+            r#"
+const assert = (v) => { if (!v) throw new Error("assertion failed"); };
+assert(delegated(false) === 7);
+try { delegated(true); throw new Error("not thrown"); } catch (e) { assert(e === "bad"); }
+try { raised(true); throw new Error("not raised"); } catch (e) { assert(e === "bad"); }
+assert(as_data(true).__case === "Err" && as_data(true).error === "bad");
+assert(recovered(true) === 0 && recovered(false) === 8);
+assert(result_early(true).__case === "Err" && result_early(false).value === 8);
+assert(typed(new SyntaxError("s")) === 2);
+const e = new TypeError("t"); try { typed(e); throw new Error("lost type"); } catch (actual) { assert(actual === e); }
+assert(await awaiting() === "async");
+assert(await nested_await() === 6);
+assert(typed_struct() === "struct");
+const original = Result.Err("identity"); assert(preserve(original) === original);
+try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "bad"); }
+"#
+        );
+        let result = std::process::Command::new("node")
+            .args(["--input-type=module", "-e", &js])
+            .output()
+            .expect("Node is required for exception runtime tests");
+        assert!(
+            result.status.success(),
+            "{}\n{out}",
+            String::from_utf8_lossy(&result.stderr)
+        );
     }
 
     #[test]
@@ -1467,6 +1523,7 @@ mod tests {
             source,
             &std::collections::HashMap::new(),
             None,
+            &Default::default(),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
@@ -1598,6 +1655,7 @@ mod tests {
             source,
             &std::collections::HashMap::new(),
             None,
+            &typeck.exception_forms,
             &typeck.unwrap_calls,
             &typeck.operator_rewrites,
             &typeck.method_calls,
@@ -1673,6 +1731,7 @@ mod tests {
             source,
             &std::collections::HashMap::new(),
             None,
+            &typeck.exception_forms,
             &typeck.unwrap_calls,
             &typeck.operator_rewrites,
             &typeck.method_calls,

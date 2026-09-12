@@ -234,6 +234,7 @@ fn is_entry_seed(stmt: &Stmt<'_>) -> bool {
         | Stmt::Let { .. }
         | Stmt::Expr { .. }
         | Stmt::If { .. }
+        | Stmt::Try { .. }
         | Stmt::Block { .. }
         | Stmt::For { .. }
         | Stmt::ForOf { .. }
@@ -250,10 +251,9 @@ fn exported_names<'a>(stmt: &'a Stmt<'a>) -> Vec<&'a str> {
     match stmt {
         Stmt::Export { decl, .. } => match decl {
             ExportDecl::Const { name, .. } | ExportDecl::Function { name, .. } => vec![*name],
-            ExportDecl::NamedGroup { names, .. } => names
-                .iter()
-                .map(|n| n.alias.unwrap_or(n.name))
-                .collect(),
+            ExportDecl::NamedGroup { names, .. } => {
+                names.iter().map(|n| n.alias.unwrap_or(n.name)).collect()
+            }
         },
         _ => Vec::new(),
     }
@@ -293,10 +293,9 @@ fn declared_names<'a>(stmt: &'a Stmt<'a>) -> Vec<Cow<'a, str>> {
                 .map(Cow::Borrowed)
                 .collect(),
         },
-        Stmt::Import { specifiers, .. } => specifiers
-            .iter()
-            .map(|s| Cow::Borrowed(s.local))
-            .collect(),
+        Stmt::Import { specifiers, .. } => {
+            specifiers.iter().map(|s| Cow::Borrowed(s.local)).collect()
+        }
         _ => Vec::new(),
     }
 }
@@ -349,6 +348,14 @@ fn collect_expr_idents(expr: &Expr<'_>, out: &mut HashSet<String>) {
     }
 }
 
+// Typed catches use a constructor at runtime. Retain both its alias and the
+// alias's target factory even when neither appears in a value expression.
+fn walk_runtime_type(ty: &deka_syntax::Type<'_>, visit: &mut dyn FnMut(&Expr<'_>)) {
+    if let deka_syntax::Type::Named { name, span } = ty {
+        visit(&Expr::Identifier { name, span: *span });
+    }
+}
+
 fn walk_stmt(stmt: &Stmt<'_>, visit: &mut dyn FnMut(&Expr<'_>)) {
     match stmt {
         Stmt::Const { value, .. } | Stmt::Let { value, .. } | Stmt::Expr { expr: value, .. } => {
@@ -397,6 +404,20 @@ fn walk_stmt(stmt: &Stmt<'_>, visit: &mut dyn FnMut(&Expr<'_>)) {
                 walk_stmt(s, visit);
             }
         }
+        Stmt::Try {
+            body,
+            catch_type,
+            catch_body,
+            ..
+        } => {
+            if let Some(ty) = catch_type {
+                walk_runtime_type(ty, visit);
+            }
+            for s in body.iter().chain(catch_body.iter()) {
+                walk_stmt(s, visit);
+            }
+        }
+        Stmt::TypeAlias { value, .. } => walk_runtime_type(value, visit),
         Stmt::Block { body, .. } => {
             for s in body.iter() {
                 walk_stmt(s, visit);
@@ -652,7 +673,9 @@ pub fn shake_graph(
                 ..
             } = stmt
             {
-                let Some(dep) = module.dependencies.get(*source) else { continue };
+                let Some(dep) = module.dependencies.get(*source) else {
+                    continue;
+                };
                 let mut needed = false;
                 for spec in names.iter() {
                     if live.contains(spec.alias.unwrap_or(spec.name)) {

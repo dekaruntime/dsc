@@ -100,6 +100,7 @@ impl<'a> Parser<'a> {
                         {
                             if args.len() == 1 {
                                 left = Expr::EnumConstructor {
+                                    shared_ok: *name == "Ok",
                                     enum_name: self.bump_str(enum_name),
                                     case_name: name,
                                     payload: Some(alloc(
@@ -507,6 +508,7 @@ fn builtin_enum_constructor(name: &str) -> Option<(&'static str, bool)> {
         "Some" => Some(("Option", true)),
         "Ok" => Some(("Result", true)),
         "Err" => Some(("Result", true)),
+        "Throw" => Some(("Exception", true)),
         _ => None,
     }
 }

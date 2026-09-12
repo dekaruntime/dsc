@@ -1,0 +1,27 @@
+// DRAFT — review before committing
+//
+// Rule: `total` is emitted only where visible analysis of this module proves
+// there are no throw sites and no calls into unseen code. Uncaught `throw`,
+// known-throwing intrinsics (JSON.parse, decodeURI*), and calls the walker
+// cannot see all force the pessimistic default Exception<T, JsError>.
+// `total` is a claim the author must own; the draft never emits it silently.
+//
+// opaque-candidates:
+//   CallsUnknown — return of callsUnknown has no visible JS type
+//   Parses — return of parses has no visible JS type
+//   S — parameter `s` of parses has no visible JS type
+//   UsesHelper — return of usesHelper has no visible JS type
+
+opaque type CallsUnknown
+opaque type Parses
+opaque type S
+opaque type UsesHelper
+
+summon {
+  boom(): Exception<void, JsError>,
+  total ok(): number,
+  parses(s: S): Exception<Parses, JsError>,
+  callsUnknown(): Exception<CallsUnknown, JsError>,
+  usesHelper(): Exception<UsesHelper, JsError>,
+  total caught(): number
+} from "./infer_throw.mjs"

@@ -420,6 +420,7 @@ fn transform_stmt<'a>(
                 span: *span,
             }
         }
+        Stmt::Opaque { .. } | Stmt::Summon { .. } => stmt.clone(),
         Stmt::Newtype { name, repr, span } => Stmt::Newtype {
             name,
             repr: *repr,
@@ -1124,6 +1125,7 @@ fn lower_stmt<'a>(
                 span: *span,
             }
         }
+        Stmt::Opaque { .. } | Stmt::Summon { .. } => stmt.clone(),
         Stmt::Newtype { name, repr, span } => Stmt::Newtype {
             name,
             repr: *repr,

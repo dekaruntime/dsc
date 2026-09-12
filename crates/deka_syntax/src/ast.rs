@@ -47,6 +47,14 @@ pub struct Program<'a> {
 /// Top-level or block statement.
 #[derive(Clone, Debug, Serialize)]
 pub enum Stmt<'a> {
+    /// A nominal foreign handle with no DekaScript construction surface.
+    Opaque { name: &'a str, span: Span },
+    /// File-private, checked foreign function declarations (rfd#39).
+    Summon {
+        functions: &'a [SummonedFunction<'a>],
+        source: &'a str,
+        span: Span,
+    },
     /// `export const x = 1;` or `export function f() {}`
     Export { decl: ExportDecl<'a>, span: Span },
     /// `import { a, b } from "./mod.ds";`
@@ -197,6 +205,15 @@ pub enum Stmt<'a> {
     Break { span: Span },
     /// `continue`
     Continue { span: Span },
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct SummonedFunction<'a> {
+    pub name: &'a str,
+    pub params: &'a [Param<'a>],
+    pub return_type: Type<'a>,
+    pub total: bool,
+    pub span: Span,
 }
 
 /// Primitive representation allowed for a newtype declaration.

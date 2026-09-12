@@ -35,7 +35,9 @@ impl<'a> Checker<'a> {
                     if let Some(param) = self.lookup_type_param(name) {
                         return param;
                     }
-                    if self.structs.contains_key(name) {
+                    if let Some(ty) = self.opaques.get(name) {
+                        ty.clone()
+                    } else if self.structs.contains_key(name) {
                         Type::Struct { name }
                     } else if self.enums.contains_key(name) {
                         Type::Named { name }

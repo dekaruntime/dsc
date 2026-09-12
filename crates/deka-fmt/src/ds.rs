@@ -515,6 +515,30 @@ impl<'src> Formatter<'src> {
                 self.write(" = ");
                 self.fmt_type(value);
             }
+            Stmt::Opaque { name, .. } => {
+                self.write("opaque type ");
+                self.write(name);
+            }
+            Stmt::Summon {
+                functions, source, ..
+            } => {
+                self.write("summon { ");
+                for (i, f) in functions.iter().enumerate() {
+                    if i > 0 {
+                        self.write(", ");
+                    }
+                    if f.total {
+                        self.write("total ");
+                    }
+                    self.write(f.name);
+                    self.write("(");
+                    self.fmt_param_list(f.params);
+                    self.write("): ");
+                    self.fmt_type(&f.return_type);
+                }
+                self.write(" } from ");
+                self.write(&format!("\"{}\"", escape_string(source)));
+            }
             Stmt::Newtype { name, repr, .. } => {
                 self.write("type ");
                 self.write(name);
@@ -1725,7 +1749,7 @@ fn stmt_span(stmt: &Stmt<'_>) -> Span {
         Stmt::Struct { span, .. } => *span,
         Stmt::Enum { span, .. } => *span,
         Stmt::TypeAlias { span, .. } => *span,
-        Stmt::Newtype { span, .. } => *span,
+        Stmt::Opaque { span, .. } | Stmt::Summon { span, .. } | Stmt::Newtype { span, .. } => *span,
         Stmt::Interface { span, .. } => *span,
         Stmt::Expr { span, .. } => *span,
         Stmt::Return { span, .. } => *span,

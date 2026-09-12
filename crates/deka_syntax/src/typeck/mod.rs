@@ -70,6 +70,7 @@ pub struct ExceptionLowering<'a> {
     /// Resolved Result patterns; spelling alone cannot identify a builtin enum.
     pub result_patterns: HashSet<*const ast::Pattern<'a>>,
     pub catches: HashMap<*const ast::Type<'a>, &'a str>,
+    pub summons: HashMap<*const ast::Expr<'a>, (Vec<Type<'a>>, Type<'a>, bool)>,
 }
 impl<'a> std::ops::Deref for ExceptionLowering<'a> {
     type Target = HashMap<*const ast::Expr<'a>, ExceptionEmit>;
@@ -214,6 +215,7 @@ pub struct ModuleExports<'a> {
     pub promotion_structs: HashMap<&'a str, HashMap<&'a str, StructInfo<'a>>>,
     pub enums: HashMap<&'a str, EnumInfo<'a>>,
     pub aliases: HashMap<&'a str, ast::Type<'a>>,
+    pub opaques: HashMap<&'a str, Type<'a>>,
     pub newtypes: HashMap<&'a str, NewtypeInfo>,
     pub receiver_methods: HashMap<(&'a str, &'a str), MethodInfo<'a>>,
     /// Value bindings (functions / constants) exported by the module.
@@ -247,6 +249,7 @@ impl<'a> Default for ModuleExports<'a> {
             promotion_structs: HashMap::new(),
             enums: HashMap::new(),
             aliases: HashMap::new(),
+            opaques: HashMap::new(),
             newtypes: HashMap::new(),
             receiver_methods: HashMap::new(),
             values: HashMap::new(),
@@ -524,6 +527,8 @@ fn summarize_stmt<'a>(
         | ast::Stmt::Struct { .. }
         | ast::Stmt::Enum { .. }
         | ast::Stmt::TypeAlias { .. }
+        | ast::Stmt::Opaque { .. }
+        | ast::Stmt::Summon { .. }
         | ast::Stmt::Newtype { .. }
         | ast::Stmt::Interface { .. }
         | ast::Stmt::Break { .. }
@@ -1489,6 +1494,17 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
                     if let Some(ty) = declared_aliases.get(local) {
                         exports.aliases.insert(external, ty.clone());
                     }
+                    if let Some(stmt) = program.statements.iter().find(
+                        |stmt| matches!(stmt, ast::Stmt::Opaque { name, .. } if *name == local),
+                    ) {
+                        exports.opaques.insert(
+                            external,
+                            Type::Opaque {
+                                name: local,
+                                identity: stmt as *const _ as usize,
+                            },
+                        );
+                    }
                     if let Some(info) = declared_newtypes.get(local) {
                         exports.newtypes.insert(external, info.clone());
                         // Promote receiver methods declared on the local
@@ -1637,6 +1653,7 @@ struct Checker<'a> {
     /// User-defined interfaces.
     interfaces: HashMap<&'a str, InterfaceInfo<'a>>,
     /// User-defined newtypes.
+    opaques: HashMap<&'a str, Type<'a>>,
     newtypes: HashMap<&'a str, NewtypeInfo>,
     /// Receiver methods keyed by `(receiver_type, method_name)`. Primitive
     /// receivers (`string`, `number`, `boolean`) hold extension methods whose
@@ -1761,6 +1778,7 @@ impl<'a> Checker<'a> {
             structs: HashMap::new(),
             promotion_structs: HashMap::new(),
             interfaces: HashMap::new(),
+            opaques: HashMap::new(),
             newtypes: HashMap::new(),
             receiver_methods: HashMap::new(),
             method_calls: HashMap::new(),
@@ -1884,6 +1902,9 @@ impl<'a> Checker<'a> {
                     self.aliases.insert(local, ty.clone());
                 }
 
+                if let Some(ty) = exports.opaques.get(imported) {
+                    self.opaques.insert(local, ty.clone());
+                }
                 if let Some(info) = exports.newtypes.get(imported) {
                     self.newtypes.insert(local, info.clone());
                     for ((rt, mn), mi) in exports.receiver_methods.iter() {
@@ -1931,6 +1952,7 @@ impl<'a> Checker<'a> {
                     || exports.structs.contains_key(imported)
                     || exports.enums.contains_key(imported)
                     || exports.aliases.contains_key(imported)
+                    || exports.opaques.contains_key(imported)
                     || exports.newtypes.contains_key(imported);
                 if !known {
                     self.error_span(
@@ -1977,10 +1999,16 @@ impl<'a> Checker<'a> {
     // ------------------------------------------------------------------
 
     fn declare_var(&mut self, name: &'a str, ty: Type<'a>) {
+        if self.program.statements.iter().any(|stmt| matches!(stmt, ast::Stmt::Summon { functions, .. } if functions.iter().any(|f| f.name == name))) {
+            self.error_span(ast::Span::dummy(), format!("cannot shadow summoned binding `{name}`"));
+        }
         self.scopes.last_mut().unwrap().insert(name, ty);
     }
 
     fn declare_mutable_var(&mut self, name: &'a str, ty: Type<'a>) {
+        if self.program.statements.iter().any(|stmt| matches!(stmt, ast::Stmt::Summon { functions, .. } if functions.iter().any(|f| f.name == name))) {
+            self.error_span(ast::Span::dummy(), format!("cannot shadow summoned binding `{name}`"));
+        }
         self.scopes.last_mut().unwrap().insert(name, ty);
         self.mutables.last_mut().unwrap().insert(name);
     }

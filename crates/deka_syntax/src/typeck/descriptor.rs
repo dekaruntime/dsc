@@ -181,6 +181,9 @@ impl<'a> Checker<'a> {
         allow_recurse: bool,
     ) -> Result<DescriptorTree<'a>, String> {
         match ty {
+            Type::Opaque { name, .. } => Err(format!(
+                "opaque type `{name}` has no inspectable descriptor"
+            )),
             Type::Named { name } => {
                 // An imported factory's fragment was computed in the
                 // declaring module's namespace; splice it instead of guessing

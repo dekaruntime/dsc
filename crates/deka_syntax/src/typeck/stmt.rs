@@ -95,6 +95,7 @@ impl<'a> Checker<'a> {
         self.collect_declarations();
         self.collect_module_value_bindings();
         self.collect_function_signatures();
+        self.collect_summon_signatures();
         self.collect_receiver_methods();
         self.check_embedded_method_ambiguity();
         self.validate_interface_declarations();
@@ -177,6 +178,23 @@ impl<'a> Checker<'a> {
     }
 
     fn collect_declarations(&mut self) {
+        for stmt in self.program.statements {
+            if let ast::Stmt::Opaque { name, span } = stmt {
+                if self
+                    .opaques
+                    .insert(
+                        name,
+                        Type::Opaque {
+                            name,
+                            identity: stmt as *const _ as usize,
+                        },
+                    )
+                    .is_some()
+                {
+                    self.error_span(*span, format!("duplicate opaque type `{name}`"));
+                }
+            }
+        }
         // `Type` is the builtin first-class type descriptor (rfd#41,
         // deka#529). Reserving the name keeps user declarations from
         // colliding with the builtin in annotations; restriction-first,
@@ -345,6 +363,42 @@ impl<'a> Checker<'a> {
         // declaration is collected, compute the transitive super marking and
         // build/validate descriptor trees so both this pass and later
         // `Name.type()` call sites see them.
+        for stmt in self.program.statements {
+            if let ast::Stmt::Opaque { name, span } = stmt {
+                if self.structs.contains_key(name)
+                    || self.enums.contains_key(name)
+                    || self.aliases.contains_key(name)
+                    || self.interfaces.contains_key(name)
+                    || self.newtypes.contains_key(name)
+                    || matches!(
+                        *name,
+                        "number"
+                            | "string"
+                            | "boolean"
+                            | "void"
+                            | "Option"
+                            | "Result"
+                            | "Exception"
+                            | "JsValue"
+                            | "JsError"
+                            | "Error"
+                            | "TypeError"
+                            | "SyntaxError"
+                            | "RangeError"
+                            | "bytes"
+                            | "never"
+                            | "Component"
+                            | "Promise"
+                            | "Type"
+                    )
+                {
+                    self.error_span(
+                        *span,
+                        format!("opaque type `{name}` conflicts with an existing or reserved type"),
+                    );
+                }
+            }
+        }
         self.collect_super_declarations();
     }
 
@@ -483,6 +537,7 @@ impl<'a> Checker<'a> {
             {
                 if !self.structs.contains_key(receiver_type)
                     && !self.newtypes.contains_key(receiver_type)
+                    && !self.opaques.contains_key(receiver_type)
                     && !super::is_primitive_receiver_name(receiver_type)
                 {
                     self.error_span(*span, format!("unknown receiver type `{receiver_type}`"));
@@ -665,6 +720,114 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn collect_summon_signatures(&mut self) {
+        let mut names = HashSet::new();
+        for stmt in self.program.statements {
+            if let ast::Stmt::Summon { functions, .. } = stmt {
+                for f in *functions {
+                    let ret = self.resolve_ast_type(&f.return_type);
+                    let payload = match &ret {
+                        Type::Generic {
+                            base: "Promise",
+                            args,
+                        } => &args[0],
+                        other => other,
+                    };
+                    let fallible = matches!(
+                        payload,
+                        Type::Generic {
+                            base: "Exception",
+                            ..
+                        }
+                    );
+                    if !fallible && !f.total {
+                        self.error_span(f.span, format!("summoned function `{}` requires an Exception<T, E> return or the explicit `total` marker", f.name));
+                    }
+                    if fallible && f.total {
+                        self.error_span(f.span, "`total` cannot declare an Exception return");
+                    }
+                    let params = f
+                        .params
+                        .iter()
+                        .map(|p| {
+                            if p.default_value.is_some() {
+                                self.error_span(
+                                    p.span,
+                                    "summoned parameters cannot have DekaScript default values",
+                                );
+                            }
+                            match &p.ty {
+                                Some(ty) => self.resolve_ast_type(ty),
+                                None => {
+                                    self.error_span(
+                                        p.span,
+                                        "summoned parameter requires an explicit type",
+                                    );
+                                    Type::Error
+                                }
+                            }
+                        })
+                        .collect();
+                    if !names.insert(f.name) || self.lookup_var(f.name).is_some() {
+                        self.error_span(f.span, format!("duplicate summoned binding `{}`", f.name));
+                    }
+                    self.globals.insert(
+                        f.name,
+                        Type::Function {
+                            params,
+                            ret: Box::new(ret),
+                            optional: 0,
+                        },
+                    );
+                }
+            }
+        }
+        // Only direct calls may reference the binding. Wrapping it in an ordinary
+        // DS function creates the authored, checked public boundary.
+        let mut calls = HashSet::new();
+        let mut references = Vec::new();
+        for stmt in self.program.statements {
+            crate::visit::walk_stmt(stmt, &mut |expr| match expr {
+                ast::Expr::Call {
+                    callee: ast::Expr::Identifier { name, span },
+                    ..
+                } if names.contains(name) => {
+                    calls.insert(span.byte_start);
+                }
+                ast::Expr::Identifier { name, span } if names.contains(name) => {
+                    references.push((name.to_string(), *span))
+                }
+                _ => {}
+            });
+            if let ast::Stmt::Export {
+                decl:
+                    ast::ExportDecl::NamedGroup {
+                        names: exports,
+                        source: None,
+                    },
+                ..
+            } = stmt
+            {
+                for export in *exports {
+                    if names.contains(export.name) {
+                        self.error_span(
+                            export.span,
+                            format!(
+                                "summoned function `{}` is file-private and cannot be exported",
+                                export.name
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+        for (name, span) in references {
+            if !calls.contains(&span.byte_start) {
+                self.error_span(span, format!("summoned function `{name}` cannot escape its file; use a direct call inside a DekaScript function"));
+            }
+        }
+    }
+
     fn collect_function_signatures(&mut self) {
         for stmt in self.program.statements {
             let (name, type_params, params, return_type) = match stmt {
@@ -782,6 +945,7 @@ impl<'a> Checker<'a> {
         self.collect_declarations();
         self.collect_module_value_bindings();
         self.collect_function_signatures();
+        self.collect_summon_signatures();
         self.collect_receiver_methods();
         self.check_embedded_method_ambiguity();
         self.validate_interface_declarations();
@@ -1124,6 +1288,8 @@ impl<'a> Checker<'a> {
             }
             ast::Stmt::Empty { .. }
             | ast::Stmt::TypeAlias { .. }
+            | ast::Stmt::Opaque { .. }
+            | ast::Stmt::Summon { .. }
             | ast::Stmt::Newtype { .. }
             | ast::Stmt::Interface { .. }
             | ast::Stmt::ReceiverMethod { .. } => {
@@ -1722,7 +1888,9 @@ impl<'a> Checker<'a> {
         // unbounded-parameter capability rule like any other `T`. A method
         // that declares no parameters still sees the struct's declared
         // parameters, as fresh opaque parameters.
-        let receiver_binding_type = if let Some(info) = self.newtypes.get(receiver_type) {
+        let receiver_binding_type = if let Some(ty) = self.opaques.get(receiver_type) {
+            ty.clone()
+        } else if let Some(info) = self.newtypes.get(receiver_type) {
             Type::Newtype {
                 name: receiver_type,
                 repr: info.repr,

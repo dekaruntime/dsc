@@ -555,6 +555,10 @@ fn transform_expr<'a>(
             expr: transform_expr(expr, arena, enums),
             span: *span,
         },
+        Expr::Safe { expr, span } => Expr::Safe {
+            expr: transform_expr(expr, arena, enums),
+            span: *span,
+        },
         Expr::Paren { expr, span } => Expr::Paren {
             expr: transform_expr(expr, arena, enums),
             span: *span,
@@ -1256,6 +1260,10 @@ fn lower_expr<'a>(
             span: *span,
         },
         Expr::Spread { expr, span } => Expr::Spread {
+            expr: lower_expr(expr, arena, method_calls),
+            span: *span,
+        },
+        Expr::Safe { expr, span } => Expr::Safe {
             expr: lower_expr(expr, arena, method_calls),
             span: *span,
         },

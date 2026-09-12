@@ -29,6 +29,12 @@ pub(crate) fn is_compiler_ui_spec(spec: &str) -> bool {
 /// Callers provide the loader so the compiler can run against a filesystem,
 /// an in-memory test fixture set, or a virtual project layout.
 pub trait ModuleLoader {
+    /// Trusted package identity for virtual modules. Filesystem modules use
+    /// their nearest manifest; None leaves virtual sources unprivileged.
+    fn package_name(&self, _path: &Path) -> Option<String> {
+        None
+    }
+
     /// Resolve a module specifier relative to the importing file.
     ///
     /// Returns the absolute path to the DekaScript source file that should
@@ -1009,6 +1015,7 @@ pub fn compile_module_graph_with_options(
             }
         }
         let compile_options = CompileOptions {
+            package_name: loader.package_name(&path),
             used_exports: plan.live.get(&path).cloned().flatten(),
             client: options.client,
             module_base: options.module_base.clone(),

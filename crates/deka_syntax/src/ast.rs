@@ -422,6 +422,10 @@ pub enum Expr<'a> {
         arms: &'a [MatchArm<'a>],
         span: Span,
     },
+    Safe {
+        expr: &'a Expr<'a>,
+        span: Span,
+    },
     Unsafe {
         source: &'a str,
         /// The declared success type: `unsafe<T> { ... }` yields
@@ -664,7 +668,7 @@ impl<'a> Expr<'a> {
             Expr::StructLiteral { span, .. } => *span,
             Expr::EnumConstructor { span, .. } => *span,
             Expr::Match { span, .. } => *span,
-            Expr::Unsafe { span, .. } => *span,
+            Expr::Safe { span, .. } | Expr::Unsafe { span, .. } => *span,
             Expr::Build { span, .. } => *span,
             Expr::Bridge { span, .. } => *span,
             Expr::Ternary { span, .. } => *span,

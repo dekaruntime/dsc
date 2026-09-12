@@ -21,3 +21,6 @@ pub use typeck::{
     collect_exported_interactive_components, collect_interactive_components, collect_module_exports,
     refresh_module_export_values, EnumInfo, MethodInfo, ModuleExports, StructInfo, TypeError,
 };
+
+pub mod deka_catalog;
+pub mod visit;

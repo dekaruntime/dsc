@@ -1,0 +1,3 @@
+export const valid = safe { deka.json.validate("{}") }
+export const decoded: Result<number, string> = unsafe { deka.json.parse("42") }
+export const absent = safe { deka.bytes.from_hex("xx") }

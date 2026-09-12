@@ -2437,7 +2437,7 @@ impl<'a> Emitter<'a> {
     fn needs_prelude_enums(&self) -> bool {
         self.program.statements.iter().any(|stmt| {
             let mut found = false;
-            visit_stmt_exprs(stmt, &mut |expr| {
+            deka_syntax::visit::walk_stmt(stmt, &mut |expr| {
                 if let Expr::EnumConstructor { enum_name, .. } = expr {
                     if *enum_name == "Option" || *enum_name == "Result" {
                         found = true;
@@ -2445,7 +2445,8 @@ impl<'a> Emitter<'a> {
                 }
                 // A bare `None` literal is Expr::None, not an EnumConstructor, so it
                 // must be detected here or the prelude it now references is not emitted.
-                if matches!(expr, Expr::None { .. }) {
+                if matches!(expr, Expr::None { .. } | Expr::Safe { .. })
+                    || matches!(expr, Expr::Unsafe { source, .. } if source.contains("deka") || source.contains("\\u")) {
                     found = true;
                 }
             });
@@ -3692,7 +3693,7 @@ impl<'a> Emitter<'a> {
                 self.emit_expr(index)?;
                 self.out.push(']');
             }
-            Expr::Paren { expr, .. } => {
+            Expr::Safe { expr, .. } | Expr::Paren { expr, .. } => {
                 self.out.push('(');
                 self.emit_expr(expr)?;
                 self.out.push(')');
@@ -5470,7 +5471,7 @@ fn jsx_child_needs_live(expr: &Expr) -> bool {
         | Expr::JsxElement { .. }
         | Expr::JsxFragment { .. }
         | Expr::None { .. } => false,
-        Expr::Paren { expr, .. } => jsx_child_needs_live(expr),
+        Expr::Safe { expr, .. } | Expr::Paren { expr, .. } => jsx_child_needs_live(expr),
         _ if expr_contains_jsx(expr) => false,
         _ => true,
     }
@@ -5539,6 +5540,7 @@ fn visit_expr(expr: &Expr, visitor: &mut dyn FnMut(&Expr)) {
         Expr::FieldAccess { object, .. }
         | Expr::IndexAccess { object, .. }
         | Expr::Await { expr: object, .. }
+        | Expr::Safe { expr: object, .. }
         | Expr::Paren { expr: object, .. }
         | Expr::Spread { expr: object, .. } => visit_expr(object, visitor),
         Expr::StructLiteral { fields, .. } => {

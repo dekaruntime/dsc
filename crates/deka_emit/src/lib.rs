@@ -10,9 +10,9 @@ pub mod prelude;
 mod util;
 
 pub use emit::{
-    ModuleEmit, build_factory_names, collect_js_identifier_tokens, css_scope_hash, dev_slot_id,
+    build_factory_names, collect_js_identifier_tokens, css_scope_hash, dev_slot_id,
     dev_slot_source_path, dev_uses_name, emit_dev_entry, emit_js, emit_js_module_with_options,
-    emit_js_with_imports, emit_js_with_options, live_dev_uses_name,
+    emit_js_with_imports, emit_js_with_options, live_dev_uses_name, ModuleEmit,
 };
 
 #[cfg(test)]
@@ -65,6 +65,165 @@ mod tests {
     }
 
     #[test]
+    fn result_reflection_and_json_keep_the_public_format() {
+        let out = parse_check_and_emit(
+            r#"
+fn reflected(r: Result<number, string>) string { return r.getType().toString(); }
+fn encoded(r: Result<number, string>) string { return r.toJSON(); }
+const ordinary = {ok: true, value: 4};
+const ordinary_type = ordinary.getType().toString();
+alias Outcome = Result<number, string>;
+const decoded = "{\"Result\":{\"case\":\"Err\",\"values\":[\"bad\"]}}".parseJSON<Outcome>();
+"#,
+        );
+        let js = format!(
+            "{out}\n{}",
+            r#"
+import assert from 'node:assert/strict';
+assert.equal(reflected(Result.Err('bad')), 'Result');
+assert.equal(ordinary_type, 'object');
+assert.deepEqual(decoded, {ok: true, value: {ok: false, error: 'bad'}});
+assert.deepEqual(JSON.parse(encoded(Result.Ok(3))), {Result: {case: 'Ok', values: [3]}});
+assert.deepEqual(JSON.parse(encoded(Result.Err('bad'))), {Result: {case: 'Err', values: ['bad']}});
+"#
+        );
+        let result = std::process::Command::new("node")
+            .args(["--input-type=module", "-e", &js])
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}\n{out}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+
+    #[test]
+    fn result_lifting_loop_conditions_and_single_use_local() {
+        let out = parse_check_and_emit(
+            r#"
+fn data(fail: boolean) Result<number, string> { return fail ? Err("bad") : Ok(3); }
+fn local() number { const r = Ok(7); let x = 1; x = x + 1; return match r { Ok(v) => v + x, Err(e) => 0 }; }
+fn looping(fail: boolean) Result<number, string> { let total = 0; for (let i = 0; i < (match data(fail) { Ok(v) => v, Err(e) }); i = i + 1) { if (i == 1) { continue; } total = total + i; } return Ok(total); }
+fn branch(fail: boolean) Result<number, string> { if (match data(fail) { Ok(v) => true, Err(e) }) { return Ok(4); } return Ok(5); }
+fn spread_copy(fail: boolean) Result<number, string> { let original = {x: 1}; const copy = {...original, y: match data(fail) { Ok(v) => original.x = 2, Err(e) }}; return Ok(match unsafe<number> { copy.x } { Ok(v) => v, Err(e) => 0 }); }
+fn combined(fail: boolean) Result<number, string> { let n = 1; n += (match data(fail) { Ok(v) => n = 10, Err(e) }); return Ok(n); }
+"#,
+        );
+        let local = out
+            .split("function local(")
+            .nth(1)
+            .unwrap()
+            .split("function looping")
+            .next()
+            .unwrap();
+        assert!(
+            !local.contains("Result.") && !local.contains("{ ok:"),
+            "{local}"
+        );
+        let js = format!(
+            "{out}\n{}",
+            r#"
+import assert from 'node:assert/strict';
+assert.equal(local(), 9);
+assert.deepEqual(looping(false), {ok: true, value: 2}); assert.deepEqual(looping(true), {ok: false, error: 'bad'});
+assert.deepEqual(branch(false), {ok: true, value: 4}); assert.deepEqual(branch(true), {ok: false, error: 'bad'});
+assert.deepEqual(spread_copy(false), {ok: true, value: 1}); assert.deepEqual(spread_copy(true), {ok: false, error: 'bad'});
+assert.deepEqual(combined(false), {ok: true, value: 11}); assert.deepEqual(combined(true), {ok: false, error: 'bad'});
+"#
+        );
+        let result = std::process::Command::new("node")
+            .args(["--input-type=module", "-e", &js])
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}\n{out}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+
+    #[test]
+    fn result_erasure_nested_propagation_and_scalars() {
+        let out = parse_check_and_emit(
+            r#"
+fn data(fail: boolean) Result<number, string> { return fail ? Err("bad") : Ok(7); }
+fn native(fail: boolean) Exception<number, string> { if (fail) { return Throw("bad"); } return Ok(7); }
+fn nested(fail: boolean) Result<number, string> { return Ok(1 + (match data(fail) { Ok(v) => v, Err(e) })); }
+fn nested_exception(fail: boolean) Exception<number, string> { return Ok(1 + (match native(fail) { Ok(v) => v, Throw(e) })); }
+fn scalar_unsafe(fail: boolean) number { return match unsafe<number> { if (fail) { throw new Error("bad"); } return 7; } { Ok(v) => v, Err(e) => 0 }; }
+fn scalar(fail: boolean) number { return match (fail ? Err("bad") : Ok(7)) { Ok(7) => 9, Ok(v) => v, Err(e) => 0 }; }
+fn scalar_conversion(fail: boolean) number { return match native(fail).to_result() { Ok(v) => v, Err(e) => 0 }; }
+fn scalar_escape(fail: boolean) Result<number, string> { return Ok(match (fail ? Err("bad") : Ok(7)) { Ok(v) => v, Err(e) }); }
+fn lazy(fail: boolean) Result<boolean, string> { return Ok(false && (match data(fail) { Ok(v) => true, Err(e) })); }
+fn choice(fail: boolean) Result<number, string> { return Ok(true ? 2 : (match data(fail) { Ok(v) => v, Err(e) })); }
+fn arg(a: number, b: number) number { return a + b; }
+fn arg_result(a: number, b: number) Result<number, string> { return Ok(a + b); }
+fn captured(fail: boolean) Result<number, string> { let seen = 0; const f = arg_result(_, match data(fail) { Ok(v) => v, Err(e) }); seen = 1; const r = f(2); return match r { Ok(v) => Ok(v + seen), Err(e) => Err(string(seen) + e) }; }
+fn piped(fail: boolean) Result<number, string> { return Ok(2 |> arg(match data(fail) { Ok(v) => v, Err(e) })); }
+fn raise_after(n: number) Exception<number, string> { return Throw("raised"); }
+fn nested_conversion() Result<number, string> { return raise_after(match Ok(1) { Ok(v) => v, Err(e) }).to_result(); }
+fn order(input: Array<number>, fail: boolean) Result<number, string> { let log = input; return Ok(arg((match Ok(log.push(1)) { Ok(v) => 3, Err(e) => 0 }), (match data(fail) { Ok(v) => v, Err(e) }))); }
+fn converted(r: Result<number, string>) Exception<number, string> { return Exception.from(r); }
+enum User { Ok(number), Err(string) }
+enum Status { Good(number), Bad(string) }
+fn user(r: Status) number { return match r { Good(v) => v, Bad(e) => 0 }; }
+async fn later() Promise<number> { return 4; }
+async fn async_nested(fail: boolean) Promise<Result<number, string>> { return Ok(await later() + (match data(fail) { Ok(v) => v, Err(e) })); }
+"#,
+        );
+        let scalar = out
+            .split("function scalar(")
+            .nth(1)
+            .unwrap()
+            .split("function scalar_conversion")
+            .next()
+            .unwrap();
+        assert!(
+            !scalar.contains("Result.") && !scalar.contains("{ ok:"),
+            "{scalar}"
+        );
+        assert!(
+            scalar.contains("if (") && scalar.contains(".to_result") == false,
+            "{scalar}"
+        );
+        let js = format!(
+            "{out}\n{}",
+            r#"
+import assert from 'node:assert/strict';
+assert.deepEqual(nested(false), {ok: true, value: 8});
+assert.deepEqual(nested(true), {ok: false, error: 'bad'});
+assert.equal(nested_exception(false), 8);
+assert.throws(() => nested_exception(true), e => e === 'bad');
+assert.deepEqual(captured(false), {ok: true, value: 10}); assert.deepEqual(captured(true), {ok: false, error: '1bad'});
+assert.deepEqual(piped(false), {ok: true, value: 9}); assert.deepEqual(piped(true), {ok: false, error: 'bad'});
+assert.deepEqual(nested_conversion(), {ok: false, error: 'raised'});
+assert.equal(scalar(false), 9); assert.equal(scalar(true), 0);
+assert.equal(scalar_unsafe(false), 7); assert.equal(scalar_unsafe(true), 0);
+assert.equal(scalar_conversion(false), 7); assert.equal(scalar_conversion(true), 0);
+assert.deepEqual(scalar_escape(true), {ok: false, error: 'bad'});
+assert.deepEqual(lazy(true), {ok: true, value: false});
+assert.deepEqual(choice(true), {ok: true, value: 2});
+const log = []; assert.deepEqual(order(log, true), {ok: false, error: 'bad'}); assert.deepEqual(log, [1]);
+assert.equal(converted({ok: true, value: 6}), 6);
+assert.throws(() => converted({ok: false, error: 'bad'}), e => e === 'bad');
+assert.equal(User.Ok(3).__enum, 'User'); assert.equal(user(Status.Good(3)), 3);
+assert.deepEqual(await async_nested(false), {ok: true, value: 11});
+assert.deepEqual(await async_nested(true), {ok: false, error: 'bad'});
+"#
+        );
+        let result = std::process::Command::new("node")
+            .args(["--input-type=module", "-e", &js])
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}\n{out}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+
+    #[test]
     fn exception_native_frames_and_wysiwyg() {
         let out = parse_check_and_emit(
             r#"
@@ -96,9 +255,9 @@ const assert = (v) => { if (!v) throw new Error("assertion failed"); };
 assert(delegated(false) === 7);
 try { delegated(true); throw new Error("not thrown"); } catch (e) { assert(e === "bad"); }
 try { raised(true); throw new Error("not raised"); } catch (e) { assert(e === "bad"); }
-assert(as_data(true).__case === "Err" && as_data(true).error === "bad");
+assert(as_data(true).ok === false && as_data(true).error === "bad");
 assert(recovered(true) === 0 && recovered(false) === 8);
-assert(result_early(true).__case === "Err" && result_early(false).value === 8);
+assert(result_early(true).ok === false && result_early(false).value === 8);
 assert(typed(new SyntaxError("s")) === 2);
 const e = new TypeError("t"); try { typed(e); throw new Error("lost type"); } catch (actual) { assert(actual === e); }
 assert(await awaiting() === "async");
@@ -586,7 +745,7 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
     #[test]
     fn emit_unsafe_expression() {
         let out = parse_and_emit("const r = unsafe { JSON.parse('{}') };");
-        assert!(out.contains("__case: \"Ok\""), "got: {}", out);
+        assert!(out.contains("ok: true"), "got: {}", out);
         assert!(out.contains("JSON.parse('{}')"), "got: {}", out);
     }
 
@@ -1202,7 +1361,11 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
         let out = parse_check_and_emit("const t = \"hi\".getType();");
         assert!(out.contains("__deka_type_of(\"hi\")"), "got: {}", out);
         // The descriptor helper and its interning cache are emitted.
-        assert!(out.contains("function __deka_type_of(v)"), "got: {}", out);
+        assert!(
+            out.contains("function __deka_type_of(v,result=false)"),
+            "got: {}",
+            out
+        );
         assert!(out.contains("__deka_type_cache"), "got: {}", out);
         // Never touch JS prototypes, the struct factory, or globalThis.
         assert!(!out.contains("prototype"), "got: {}", out);
@@ -1351,11 +1514,11 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
             "const result = Result.Ok(1);\nconst option = Option.Some(2);\nconst none = Option.None;",
         );
         assert!(
-            out.contains("Ok: (value) => ({ __enum: \"Result\""),
+            out.contains("Ok: (value) => ({ ok: true"),
             "Result.Ok should return a plain ephemeral value: {out}"
         );
         assert!(
-            out.contains("Err: (error) => ({ __enum: \"Result\""),
+            out.contains("Err: (error) => ({ ok: false"),
             "Result.Err should return a plain ephemeral value: {out}"
         );
         assert!(
@@ -1760,7 +1923,9 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
         // envelope carries __enum exactly like the prelude's Result.
         let out = parse_and_emit("const r = bridge crypto.random_bytes(16)");
         assert!(
-            out.contains("__deka_to_result(__deka_host(\"crypto\", \"random_bytes\", [16]))"),
+            out.contains(
+                "__deka_result_from_host(__deka_host(\"crypto\", \"random_bytes\", [16]))"
+            ),
             "got: {}",
             out
         );
@@ -1778,7 +1943,9 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
         // emitted chain tags the envelope through the shared helper.
         let out = parse_and_emit("const r = await bridge fs.read_file(path)");
         assert!(
-            out.contains("await __deka_host(\"fs\", \"read_file\", [path]).then(__deka_to_result)"),
+            out.contains(
+                "await __deka_host(\"fs\", \"read_file\", [path]).then(__deka_result_from_host)"
+            ),
             "got: {}",
             out
         );
@@ -1797,13 +1964,21 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
             "const a = bridge crypto.random_bytes(8)\nconst b = await bridge fs.mkdirs(\"out\")",
         );
         assert!(
-            out.contains("__deka_to_result(__deka_host("),
+            out.contains("__deka_result_from_host(__deka_host("),
             "got: {}",
             out
         );
-        assert!(out.contains(".then(__deka_to_result)"), "got: {}", out);
+        assert!(
+            out.contains(".then(__deka_result_from_host)"),
+            "got: {}",
+            out
+        );
         assert!(!out.contains("function("), "got: {}", out);
-        assert!(!out.contains("=>"), "got: {}", out);
+        assert_eq!(
+            out.matches("const __deka_result_from_host =").count(),
+            1,
+            "{out}"
+        );
     }
 }
 

@@ -114,6 +114,14 @@ impl<'a> Checker<'a> {
     }
 
     pub(super) fn check_expr(&mut self, expr: &ast::Expr<'a>) -> Type<'a> {
+        let ty = self.check_expr_erasure(expr);
+        if channels(&ty, "Result").is_some() {
+            self.exception_forms.result_values.insert(expr as *const _);
+        }
+        ty
+    }
+
+    fn check_expr_erasure(&mut self, expr: &ast::Expr<'a>) -> Type<'a> {
         let usage = std::mem::take(&mut self.exception_use);
         let expected = self.exception_expected.take();
         let ptr = expr as *const ast::Expr<'a>;

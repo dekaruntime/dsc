@@ -290,6 +290,7 @@ fn dsc_result_ctor(expr: &Expr, case: DscResultCase) -> bool {
     let Expr::Object(obj) = strip_parens(body) else { return false };
     let mut saw_enum = false;
     let mut saw_case = false;
+    let mut saw_ok = false;
     for prop in &obj.props {
         let PropOrSpread::Prop(prop) = prop else { return false };
         // The payload field is emitted as an ES6 shorthand (`value` / `error`).
@@ -305,6 +306,13 @@ fn dsc_result_ctor(expr: &Expr, case: DscResultCase) -> bool {
         }
         let Prop::KeyValue(kv) = &**prop else { return false };
         let PropName::Ident(key) = &kv.key else { return false };
+        if key.sym == "ok" {
+            if !matches!(&*kv.value, Expr::Lit(Lit::Bool(value)) if value.value == (case == DscResultCase::Ok)) {
+                return false;
+            }
+            saw_ok = true;
+            continue;
+        }
         let Expr::Lit(Lit::Str(value)) = &*kv.value else { return false };
         let value = value.value.as_str();
         if key.sym == "__enum" && value == Some("Result") {
@@ -321,7 +329,7 @@ fn dsc_result_ctor(expr: &Expr, case: DscResultCase) -> bool {
             return false;
         }
     }
-    saw_enum && saw_case
+    (saw_enum && saw_case) || saw_ok
 }
 
 /// Extract `EXPR` from `(function () { return (EXPR); })()`.
@@ -399,6 +407,9 @@ fn dsc_case_test(test: &Expr, scrut: &str, case: DscResultCase) -> bool {
         return false;
     }
     let MemberProp::Ident(prop) = &member.prop else { return false };
+    if prop.sym == "ok" {
+        return matches!(&*bin.right, Expr::Lit(Lit::Bool(value)) if value.value == (case == DscResultCase::Ok));
+    }
     if prop.sym != "__case" {
         return false;
     }
@@ -895,6 +906,22 @@ return __deka_match_result_10;
 }
 "##;
         let out = optimize(source);
+        let erased = source
+            .replace(
+                "__enum: \"Result\", __case: \"Ok\", name: \"Ok\", value",
+                "ok: true, value",
+            )
+            .replace(
+                "__enum: \"Result\", __case: \"Err\", name: \"Err\", error",
+                "ok: false, error",
+            )
+            .replace(".__case === \"Ok\"", ".ok === true")
+            .replace(".__case === \"Err\"", ".ok === false");
+        assert_eq!(
+            optimize(&erased),
+            out,
+            "boolean Result discriminants must retain the bundled optimization"
+        );
         assert!(
             !out.contains("__deka_match_scrutinee"),
             "match state machine must go:\n{out}"

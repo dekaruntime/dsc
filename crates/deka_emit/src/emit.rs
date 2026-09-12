@@ -1027,7 +1027,7 @@ fn json_encode(tree: &deka_syntax::typeck::DescriptorTree, value: &str) -> Strin
                             "{{ {}: {{ case: {}, values: [{}] }} }}",
                             json_string(name),
                             json_string(case),
-                            json_encode(payload, &format!("{value}.value"))
+                            json_encode(payload, &format!("{value}.{}", if *name == "Result" && *case == "Err" { "error" } else { "value" }))
                         ),
                         None => format!(
                             "{{ {}: {{ case: {} }} }}",
@@ -1039,10 +1039,8 @@ fn json_encode(tree: &deka_syntax::typeck::DescriptorTree, value: &str) -> Strin
                 })
                 .collect::<Vec<_>>()
                 .join(" ");
-            format!(
-                "(() => {{ switch ({value}.__case) {{ {} default: return undefined; }} }})()",
-                arms
-            )
+            let discriminant = if *name == "Result" { format!("{value}.ok ? \"Ok\" : \"Err\"") } else { format!("{value}.__case") };
+            format!("(() => {{ switch ({discriminant}) {{ {arms} default: return undefined; }} }})()")
         }
         T::Union { members } => {
             let arms = members
@@ -1081,6 +1079,7 @@ fn json_predicate(tree: &deka_syntax::typeck::DescriptorTree, value: &str) -> St
             _ => "true".to_string(),
         },
         T::Struct { name, .. } => format!("{value}?.__deka_struct === {}", json_string(name)),
+        T::Enum { name: "Result", .. } => format!("typeof {value}?.ok === \"boolean\""),
         T::Enum { name, .. } => format!("{value}?.__enum === {}", json_string(name)),
         T::Newtype { name, .. } => format!("{value}?.__deka_newtype === {}", json_string(name)),
         T::Option { .. } => format!("{value}?.__enum === \"Option\""),
@@ -1167,7 +1166,7 @@ fn json_decode(tree: &deka_syntax::typeck::DescriptorTree, value: &str) -> Strin
                 ));
             }
             format!(
-                "{value} && typeof {value} === \"object\" && {value}[{}] ? {} : undefined",
+                "{value} && typeof {value} === \"object\" && {value}[{}] ? ({} : undefined) : undefined",
                 json_string(name),
                 arms.join(" : ")
             )
@@ -1314,6 +1313,8 @@ struct Emitter<'a> {
     closure_sources: HashMap<String, HashSet<String>>,
     unwrap_id: usize,
     match_id: usize,
+    lifted_values: HashMap<*const Expr<'a>, String>,
+    melted_results: HashMap<*const Expr<'a>, (String, String, String)>,
     /// Newtype operator rewrites lowered by the typechecker.
     operator_rewrites: HashMap<*const Expr<'a>, deka_syntax::typeck::OperatorRewrite<'a>>,
     /// Primitive extension call sites lowered by the typechecker to
@@ -1400,6 +1401,8 @@ impl<'a> Emitter<'a> {
             closure_sources: HashMap::new(),
             unwrap_id: 0,
             match_id: 0,
+            lifted_values: HashMap::new(),
+            melted_results: HashMap::new(),
             operator_rewrites: HashMap::new(),
             method_calls: HashMap::new(),
             type_of_calls: HashSet::new(),
@@ -1925,7 +1928,11 @@ impl<'a> Emitter<'a> {
     /// binding need no closure; a factory with neither a local binding nor a
     /// covering closure is a build error — hydration must never fall back to
     /// a lookalike object.
-    fn build_binding_spreads(&self, binding: &str, value: &Expr<'a>) -> Result<Vec<String>, String> {
+    fn build_binding_spreads(
+        &self,
+        binding: &str,
+        value: &Expr<'a>,
+    ) -> Result<Vec<String>, String> {
         let mut names = HashSet::new();
         if let Some(block) = self.build_blocks.get(&(value as *const Expr<'a>)) {
             build_factory_names(&block.descriptor, &mut names);
@@ -2367,6 +2374,15 @@ impl<'a> Emitter<'a> {
         demand.newtype = self.uses_newtype;
         demand.type_of = uses_typeof;
         demand.enums = self.uses_prelude_enums;
+        for stmt in self.program.statements {
+            if self.should_emit_stmt(stmt) {
+                visit_stmt_exprs(stmt, &mut |expr| {
+                    if matches!(expr, Expr::Bridge { .. }) {
+                        demand.host_result = true;
+                    }
+                });
+            }
+        }
         // Brand-tag branches of `__deka_type_of` are gated by what the
         // program can produce, not by what this module imports: values cross
         // module boundaries without their type binding (function returns), so
@@ -2539,6 +2555,40 @@ impl<'a> Emitter<'a> {
     // Statements
     // ------------------------------------------------------------------
     fn emit_stmt(&mut self, stmt: &Stmt<'a>) -> Result<(), String> {
+        let saved = self.lifted_values.clone();
+        let operand = match stmt {
+            Stmt::Const { value, .. }
+            | Stmt::Let { value, .. }
+            | Stmt::Expr { expr: value, .. } => Some(value),
+            Stmt::Return { value, .. } => value.as_ref(),
+            Stmt::UnwrapLet { scrutinee, .. } => Some(scrutinee),
+            Stmt::Export {
+                decl: ExportDecl::Const { value, .. },
+                ..
+            } => Some(value),
+            Stmt::If { condition, .. } => Some(condition),
+            Stmt::ForOf { iterable, .. } => Some(iterable),
+            _ => None,
+        };
+        if let Some(value) = operand {
+            let handles_match = matches!(
+                stmt,
+                Stmt::Const { .. } | Stmt::Let { .. } | Stmt::Expr { .. } | Stmt::Return { .. }
+            );
+            if (!handles_match || !matches!(peel_exception_parens(value), Expr::Match { .. }))
+                && self.exception_form(value) != Some(deka_syntax::typeck::ExceptionEmit::Throw)
+                && needs_lifting(value)
+            {
+                let emitted = self.lift_value(value)?;
+                self.lifted_values.insert(value as *const _, emitted);
+            }
+        }
+        let result = self.emit_stmt_inner(stmt);
+        self.lifted_values = saved;
+        result
+    }
+
+    fn emit_stmt_inner(&mut self, stmt: &Stmt<'a>) -> Result<(), String> {
         match stmt {
             Stmt::Try {
                 body,
@@ -2651,7 +2701,7 @@ impl<'a> Emitter<'a> {
                 self.emit_expr(scrutinee)?;
                 self.out.push_str(";\n");
                 self.out.push_str(&format!(
-                    "if ({temp}.__case === \"Some\" || {temp}.__case === \"Ok\") {{ {name} = {temp}.value; }} else {{\n"
+                    "if ({temp}.__case === \"Some\" || {temp}.ok === true) {{ {name} = {temp}.value; }} else {{\n"
                 ));
                 match alternative {
                     deka_syntax::UnwrapAlternative::Block(stmts) => {
@@ -2670,9 +2720,8 @@ impl<'a> Emitter<'a> {
                             }
                             self.out.push_str(&format!("if ({condition}) {{\n"));
                             self.emit_pattern_bindings(&arm.pattern, &temp, 0)?;
-                            self.out.push_str(&format!("{name} = "));
-                            self.emit_expr(&arm.body)?;
-                            self.out.push_str(";\n}\n");
+                            self.emit_handling_arm(arm, Some(name), Some(&temp))?;
+                            self.out.push_str("}\n");
                         }
                         if !arms.is_empty() {
                             self.out
@@ -2701,17 +2750,17 @@ impl<'a> Emitter<'a> {
                     if i > 0 {
                         self.out.push_str(", ");
                     }
-                    self.emit_param(param, !is_async)?;
+                    self.emit_param(
+                        param,
+                        !is_async && !params.iter().any(default_needs_lifting),
+                    )?;
                 }
                 self.out.push_str(") {\n");
-                if *is_async {
+                if *is_async || params.iter().any(default_needs_lifting) {
                     self.emit_default_param_assignments(params, 1)?;
                 }
                 self.with_fn_scope(name, |s| {
-                    for stmt in body.iter() {
-                        s.emit_stmt(stmt)?;
-                        s.out.push('\n');
-                    }
+                    s.emit_body(body)?;
                     Ok(())
                 })?;
                 write_indent(&mut self.out, 0);
@@ -2788,17 +2837,17 @@ impl<'a> Emitter<'a> {
                             if i > 0 {
                                 self.out.push_str(", ");
                             }
-                            self.emit_param(param, !is_async)?;
+                            self.emit_param(
+                                param,
+                                !is_async && !params.iter().any(default_needs_lifting),
+                            )?;
                         }
                         self.out.push_str(") {\n");
-                        if *is_async {
+                        if *is_async || params.iter().any(default_needs_lifting) {
                             self.emit_default_param_assignments(params, 1)?;
                         }
                         self.with_fn_scope(name, |s| {
-                            for stmt in body.iter() {
-                                s.emit_stmt(stmt)?;
-                                s.out.push('\n');
-                            }
+                            s.emit_body(body)?;
                             Ok(())
                         })?;
                         write_indent(&mut self.out, 0);
@@ -2928,10 +2977,7 @@ impl<'a> Emitter<'a> {
             Stmt::Block { body, .. } => {
                 write_indent(&mut self.out, 0);
                 self.out.push_str("{\n");
-                for stmt in body.iter() {
-                    self.emit_stmt(stmt)?;
-                    self.out.push('\n');
-                }
+                self.emit_body(body)?;
                 write_indent(&mut self.out, 0);
                 self.out.push('}');
             }
@@ -2942,6 +2988,21 @@ impl<'a> Emitter<'a> {
                 body,
                 ..
             } => {
+                if condition.as_ref().is_some_and(needs_lifting)
+                    || step.as_ref().is_some_and(needs_lifting)
+                    || init.as_ref().is_some_and(|init| match init {
+                        ForInit::Const { value, .. }
+                        | ForInit::Let { value, .. }
+                        | ForInit::Expr(value) => needs_lifting(value),
+                    })
+                {
+                    return self.emit_lifted_for(
+                        init.as_ref(),
+                        condition.as_ref(),
+                        step.as_ref(),
+                        body,
+                    );
+                }
                 write_indent(&mut self.out, 0);
                 self.out.push_str("for (");
                 if let Some(init) = init {
@@ -2956,10 +3017,7 @@ impl<'a> Emitter<'a> {
                     self.emit_expr(step)?;
                 }
                 self.out.push_str(") {\n");
-                for stmt in body.iter() {
-                    self.emit_stmt(stmt)?;
-                    self.out.push('\n');
-                }
+                self.emit_body(body)?;
                 write_indent(&mut self.out, 0);
                 self.out.push('}');
             }
@@ -2981,10 +3039,7 @@ impl<'a> Emitter<'a> {
                 self.out.push_str(" of ");
                 self.emit_expr(iterable)?;
                 self.out.push_str(") {\n");
-                for stmt in body.iter() {
-                    self.emit_stmt(stmt)?;
-                    self.out.push('\n');
-                }
+                self.emit_body(body)?;
                 write_indent(&mut self.out, 0);
                 self.out.push('}');
             }
@@ -3413,8 +3468,8 @@ impl<'a> Emitter<'a> {
     /// leaves the enclosing function.
     fn emit_stmt_in_unwrap(&mut self, stmt: &'a Stmt<'a>, binding: &str) -> Result<(), String> {
         if let Stmt::Expr { expr, .. } = stmt {
-            self.out.push_str(&format!("{binding} = "));
-            self.emit_expr(expr)?;
+            let value = self.lift_value(expr)?;
+            self.out.push_str(&format!("{binding} = {value}"));
             self.out.push_str(";\n");
             return Ok(());
         }
@@ -3424,6 +3479,10 @@ impl<'a> Emitter<'a> {
     }
 
     fn emit_expr(&mut self, expr: &Expr<'a>) -> Result<(), String> {
+        if let Some(value) = self.lifted_values.get(&(expr as *const _)) {
+            self.out.push_str(value);
+            return Ok(());
+        }
         use deka_syntax::typeck::ExceptionEmit;
         match self.exception_forms.get(&(expr as *const _)).copied() {
             Some(ExceptionEmit::Ok) => {
@@ -3463,7 +3522,9 @@ impl<'a> Emitter<'a> {
             }
             Some(ExceptionEmit::FromResult) => {
                 if let Expr::Call { args, .. } = expr {
-                    self.out.push_str("((r) => { if (r.__case === \"Err\") { throw r.error; } return r.value; })(");
+                    self.out.push_str(
+                        "((r) => { if (r.ok === false) { throw r.error; } return r.value; })(",
+                    );
                     self.emit_expr(&args[0])?;
                     self.out.push(')');
                     return Ok(());
@@ -3603,6 +3664,13 @@ impl<'a> Emitter<'a> {
                     self.out.push_str("__deka_type_of(");
                     if let Expr::FieldAccess { object, .. } = &**callee {
                         self.emit_expr(object)?;
+                        if self
+                            .exception_forms
+                            .result_values
+                            .contains(&(*object as *const _))
+                        {
+                            self.out.push_str(", true");
+                        }
                     }
                     self.out.push(')');
                     return Ok(());
@@ -3937,17 +4005,17 @@ impl<'a> Emitter<'a> {
                     if i > 0 {
                         self.out.push_str(", ");
                     }
-                    self.emit_param(param, !is_async)?;
+                    self.emit_param(
+                        param,
+                        !is_async && !params.iter().any(default_needs_lifting),
+                    )?;
                 }
                 self.out.push_str(") {\n");
-                if *is_async {
+                if *is_async || params.iter().any(default_needs_lifting) {
                     self.emit_default_param_assignments(params, 1)?;
                 }
                 self.with_fn_scope("fn", |s| {
-                    for stmt in body.iter() {
-                        s.emit_stmt(stmt)?;
-                        s.out.push('\n');
-                    }
+                    s.emit_body(body)?;
                     Ok(())
                 })?;
                 self.out.push('}');
@@ -3982,9 +4050,10 @@ impl<'a> Emitter<'a> {
                 self.out.push_str("if (");
                 self.out.push_str(param.name);
                 self.out.push_str(" === undefined) { ");
+                let value = self.lift_value(param.default_value.as_ref().unwrap())?;
                 self.out.push_str(param.name);
                 self.out.push_str(" = ");
-                self.emit_expr(param.default_value.as_ref().unwrap())?;
+                self.out.push_str(&value);
                 self.out.push_str("; }\n");
             }
         }
@@ -4225,12 +4294,8 @@ impl<'a> Emitter<'a> {
     }
 
     fn emit_unsafe(&mut self, source: &str, bare: bool) -> Result<(), String> {
-        // deka#622 finding F: splice the shared Result constructors from
-        // `crate::prelude` (deka#582) instead of transcribing an unbranded
-        // `{ __case }` literal. The generated match tests `__case` today, but
-        // anything that keys on the `__enum` brand (union member `Result(r)`,
-        // `.getType()`, exhaustiveness) must see the exact shape
-        // `Result.Ok`/`Result.Err` produce — same as `__deka_to_result`.
+        // All construction sites use the shared Result representation,
+        // including raw-JS boundaries and explicit exception conversion.
         //
         // dsc#60: the Err payload expression depends on the form. The
         // annotated form `unsafe<T> { }` types as `Result<T, JsError>`
@@ -4244,21 +4309,32 @@ impl<'a> Emitter<'a> {
         // is normalized to the thrown value's string representation here, at
         // the boundary, so errors-as-values (`Err` carries diagnostic text)
         // holds on every path.
-        let err_payload = if bare {
-            "(err instanceof Error ? (err.message || String(err)) : String(err))"
+        let err_payload = unsafe_error_payload(bare);
+        let (invocation, is_async) = self.unsafe_invocation(source);
+        let fn_kw = if is_async {
+            "async function"
         } else {
-            "(err instanceof Error ? err : new Error(String(err)))"
+            "function"
         };
+        self.out.push('(');
+        self.out.push_str(fn_kw);
+        self.out.push_str("() { try { return (");
+        self.out.push_str(crate::prelude::RESULT_OK);
+        self.out.push_str(")(");
+        self.out.push_str(&invocation);
+        self.out.push_str("); } catch (err) { return (");
+        self.out.push_str(crate::prelude::RESULT_ERR);
+        self.out.push_str(")(");
+        self.out.push_str(err_payload);
+        self.out.push_str("); } })()");
+
+        Ok(())
+    }
+
+    fn unsafe_invocation(&self, source: &str) -> (String, bool) {
         let trimmed = source.trim();
         if trimmed.is_empty() {
-            self.out.push_str("(function() { try { return (");
-            self.out.push_str(crate::prelude::RESULT_OK);
-            self.out.push_str(")(undefined); } catch (err) { return (");
-            self.out.push_str(crate::prelude::RESULT_ERR);
-            self.out.push_str(")(");
-            self.out.push_str(err_payload);
-            self.out.push_str("); } })()");
-            return Ok(());
+            return ("undefined".into(), false);
         }
 
         // A DekaScript struct literal spliced into the raw JavaScript does not
@@ -4293,38 +4369,22 @@ impl<'a> Emitter<'a> {
             format!("({fn_kw}() {{ return (\n{trimmed}\n); }})()")
         };
 
-        let awaited = if is_async {
+        let invocation = if is_async {
             format!("await {inner}")
         } else {
             inner
         };
 
-        self.out.push('(');
-        self.out.push_str(fn_kw);
-        self.out.push_str("() { try { return (");
-        self.out.push_str(crate::prelude::RESULT_OK);
-        self.out.push_str(")(");
-        self.out.push_str(&awaited);
-        self.out.push_str("); } catch (err) { return (");
-        self.out.push_str(crate::prelude::RESULT_ERR);
-        self.out.push_str(")(");
-        self.out.push_str(err_payload);
-        self.out.push_str("); } })()");
-
-        Ok(())
+        (invocation, is_async)
     }
 
     fn emit_bridge(&mut self, kind: &str, action: &str, args: &[Expr<'a>]) -> Result<(), String> {
-        // deka#578: the catalog decides sync vs async (rfd#27 decision 2) —
-        // the bridge does not. Sync ops (`bridge crypto.random_bytes(n)`)
-        // dispatch to a plain value; async ops (`await bridge
-        // fs.read_file(path)`) dispatch to a Promise that the source-level
-        // `await` resolves. The host-side `__deka_host` returns the matching
-        // shape; `__deka_to_result` (injected with the other host bindings)
-        // tags the envelope exactly like the prelude's Result constructors.
+        // The catalog owns sync/async dispatch. Normalize with a compiler-
+        // owned helper so older installed runtimes cannot reintroduce the
+        // former tagged Result representation.
         let is_async = deka_syntax::bridge_op_is_async(kind, action);
         if !is_async {
-            self.out.push_str("__deka_to_result(");
+            self.out.push_str("__deka_result_from_host(");
         }
         self.out.push_str("__deka_host(");
         self.out.push_str(&json_string(kind));
@@ -4339,7 +4399,7 @@ impl<'a> Emitter<'a> {
         }
         self.out.push_str("])");
         if is_async {
-            self.out.push_str(".then(__deka_to_result)");
+            self.out.push_str(".then(__deka_result_from_host)");
         } else {
             self.out.push(')');
         }
@@ -4360,8 +4420,9 @@ impl<'a> Emitter<'a> {
                 payload: Some(payload),
                 ..
             } => {
+                let payload = self.lift_value(payload)?;
                 self.out.push_str("throw ");
-                self.emit_expr(payload)?;
+                self.out.push_str(&payload);
                 self.out.push_str(";\n");
                 Ok(())
             }
@@ -4392,13 +4453,14 @@ impl<'a> Emitter<'a> {
                 return Ok(());
             }
         }
+        let value = self.lift_value(&arm.body)?;
         if arm.bodyless {
             self.out.push_str("return ");
         } else if let Some(result) = result {
             self.out.push_str(result);
             self.out.push_str(" = ");
         }
-        self.emit_expr(&arm.body)?;
+        self.out.push_str(&value);
         self.out.push_str(";\n");
         Ok(())
     }
@@ -4416,8 +4478,9 @@ impl<'a> Emitter<'a> {
         // The protected region contains only the invocation. A handler that
         // throws is observed by its caller, never by its sibling handler.
         self.out
-            .push_str(&format!("{label}: {{\nlet {value};\ntry {{ {value} = "));
-        self.emit_expr(scrutinee)?;
+            .push_str(&format!("{label}: {{\nlet {value};\ntry {{\n"));
+        let scrutinee_value = self.lift_value(scrutinee)?;
+        self.out.push_str(&format!("{value} = {scrutinee_value}"));
         self.out.push_str(&format!("; }} catch ({error}) {{\n"));
         self.emit_exception_arms(arms, "Throw", &error, &label, result)?;
         self.out.push_str(&format!("throw {error};\n}}\n"));
@@ -4477,13 +4540,17 @@ impl<'a> Emitter<'a> {
         ) {
             return self.emit_exception_match(scrutinee, arms, result);
         }
+        if self.emit_melted_match(scrutinee, arms, result)? {
+            return Ok(());
+        }
+        let scrutinee_value = self.lift_value(scrutinee)?;
         let id = self.next_match_id();
         let scrutinee_var = format!("__deka_match_scrutinee_{id}");
         write_indent(&mut self.out, 0);
         self.out.push_str("const ");
         self.out.push_str(&scrutinee_var);
         self.out.push_str(" = ");
-        self.emit_expr(scrutinee)?;
+        self.out.push_str(&scrutinee_value);
         self.out.push_str(";\n");
 
         for (i, arm) in arms.iter().enumerate() {
@@ -4531,7 +4598,7 @@ impl<'a> Emitter<'a> {
         scrutinee: &Expr<'a>,
         arms: &[deka_syntax::MatchArm<'a>],
     ) -> Result<String, String> {
-        let result = format!("__deka_match_result_{}", self.match_id + 1);
+        let result = format!("__deka_match_result_{}", self.next_unwrap_id());
         write_indent(&mut self.out, 0);
         self.out.push_str("let ");
         self.out.push_str(&result);
@@ -4546,7 +4613,7 @@ impl<'a> Emitter<'a> {
         arms: &[deka_syntax::MatchArm<'a>],
     ) -> Result<(), String> {
         if arms.iter().any(|arm| arm.bodyless) {
-            return Err("rfd#62: bodyless match nested in an expression needs statement lifting; use a statement-level match in this stage".into());
+            return Err("internal error: bodyless match reached expression emission without statement lifting".into());
         }
         if matches!(
             self.exception_form(scrutinee),
@@ -4661,6 +4728,8 @@ impl<'a> Emitter<'a> {
                     closure_sources: HashMap::new(),
                     unwrap_id: 0,
                     match_id: 0,
+                    lifted_values: HashMap::new(),
+            melted_results: HashMap::new(),
                     operator_rewrites: HashMap::new(),
                     method_calls: HashMap::new(),
                     type_of_calls: HashSet::new(),
@@ -4697,6 +4766,20 @@ impl<'a> Emitter<'a> {
                     .copied()
                 {
                     if let deka_syntax::typeck::UnionMemberTest::EnumCase(enum_name) = test {
+                        if enum_name == "Result" {
+                            let mut condition = format!("typeof {scrutinee_var}?.ok === \"boolean\" && {scrutinee_var}.ok === {}", *name == "Ok");
+                            if let Some(payload) = payload {
+                                let field = if *name == "Err" { "error" } else { "value" };
+                                condition.push_str(&format!(
+                                    " && {}",
+                                    self.match_condition(
+                                        payload,
+                                        &format!("{scrutinee_var}.{field}")
+                                    )
+                                ));
+                            }
+                            return condition;
+                        }
                         return format!(
                             "{} && {}.__case === \"{}\"",
                             self.union_member_condition(&deka_syntax::typeck::UnionMemberTest::Enum(
@@ -4708,7 +4791,21 @@ impl<'a> Emitter<'a> {
                     }
                     return self.union_member_condition(&test, scrutinee_var);
                 }
-                let mut conditions = vec![format!("{}.__case === \"{}\"", scrutinee_var, name)];
+                let result_case = self
+                    .exception_forms
+                    .result_patterns
+                    .contains(&(pattern as *const _))
+                    || (!self.exception_forms.checked
+                        && matches!(*name, "Ok" | "Err")
+                        && !self
+                            .enums
+                            .values()
+                            .any(|meta| meta.cases.iter().any(|case| case == name)));
+                let mut conditions = vec![if result_case {
+                    format!("{scrutinee_var}.ok === {}", *name == "Ok")
+                } else {
+                    format!("{}.__case === \"{}\"", scrutinee_var, name)
+                }];
                 if let Some(payload) = payload {
                     let payload_access = if *name == "Err" {
                         format!("{}.error", scrutinee_var)
@@ -4751,10 +4848,9 @@ impl<'a> Emitter<'a> {
                     format!("{}.length === {}", scrutinee_var, elements.len()),
                 ];
                 for (index, element) in elements.iter().enumerate() {
-                    conditions.push(self.match_condition(
-                        element,
-                        &format!("{}[{}]", scrutinee_var, index),
-                    ));
+                    conditions.push(
+                        self.match_condition(element, &format!("{}[{}]", scrutinee_var, index)),
+                    );
                 }
                 conditions.join(" && ")
             }
@@ -4804,6 +4900,10 @@ impl<'a> Emitter<'a> {
                 // never matches the factory tag (dsc#51).
                 let brand = self.struct_brand(name);
                 format!("{}?.__deka_struct === \"{}\"", scrutinee_var, brand)
+            }
+            deka_syntax::typeck::UnionMemberTest::Enum("Result")
+            | deka_syntax::typeck::UnionMemberTest::EnumCase("Result") => {
+                format!("typeof {scrutinee_var}?.ok === \"boolean\"")
             }
             deka_syntax::typeck::UnionMemberTest::Enum(name) => {
                 format!("{}.__enum === \"{}\"", scrutinee_var, name)
@@ -5194,7 +5294,11 @@ fn rewrite_struct_literals_in_js(
                     out.push_str(&raw[copy_from..start]);
                     out.push_str(word);
                     out.push_str("({");
-                    let inner = rewrite_struct_literals_in_js(&raw[next + 1..after - 1], depth + 1, is_struct);
+                    let inner = rewrite_struct_literals_in_js(
+                        &raw[next + 1..after - 1],
+                        depth + 1,
+                        is_struct,
+                    );
                     out.push_str(&inner);
                     out.push_str("})");
                     i = after;
@@ -5879,3 +5983,5 @@ fn peel_exception_parens<'e, 'a>(expr: &'e Expr<'a>) -> &'e Expr<'a> {
         other => other,
     }
 }
+
+include!("lifting.rs");

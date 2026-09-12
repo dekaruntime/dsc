@@ -167,18 +167,17 @@ if (!ioResponse.ok || !ioResponse.output?.code?.includes('import { echo }')) {
   throw new Error(`stdlib io import inside function failed: ${JSON.stringify(ioResponse)}`);
 }
 
-// Resolver-owned package imports must remain available to the browser host.
-// The browser compiler has no filesystem resolver, so only imports that would
-// shadow a language prelude binding may be rejected by the native compiler.
+// Match the native ABI contract: a moduleBase rewrites resolved imports;
+// it cannot supply missing package export metadata.
 const packageResponse = compile(
   `import { Widget } from "@acme/widgets"\nconst answer = 42`,
   "package-import.ds",
   { mode: "deka", moduleBase: "/tour/modules" },
 );
-if (!packageResponse.ok || !packageResponse.output?.code?.includes(
-  'import { Widget } from "/tour/modules/@acme/widgets.mjs"',
+if (packageResponse.ok || !packageResponse.diagnostics?.some(
+  diagnostic => diagnostic.message.includes("cannot resolve imported name `Widget`"),
 )) {
-  throw new Error(`resolver-owned package import failed: ${JSON.stringify(packageResponse)}`);
+  throw new Error(`unresolved package import was not rejected: ${JSON.stringify(packageResponse)}`);
 }
 
 // .dsx files are DS + JSX and must be accepted by the browser compiler ABI.
@@ -187,5 +186,36 @@ const dsxResponse = compile(dsxSource, "component.dsx", "deka");
 if (!dsxResponse.ok || !dsxResponse.output?.code) {
   throw new Error(".dsx filename was rejected by browser compiler");
 }
+
+// rfd#62 stage 2a must use the same data and control-flow lowering in WASM.
+const erasureSource = `
+fn data(fail: boolean) Result<number, string> { return fail ? Err("bad") : Ok(7); }
+fn nested(fail: boolean) Result<number, string> { return Ok(1 + (match data(fail) { Ok(v) => v, Err(e) })); }
+fn melted() number { const r = Ok(7); return match r { Ok(v) => v, Err(e) => 0 }; }
+fn source(fail: boolean) Exception<number, string> { if (fail) { return Throw("bad"); } return Ok(7); }
+fn nested_exception(fail: boolean) Exception<number, string> { return Ok(1 + (match source(fail) { Ok(v) => v, Throw(e) })); }
+enum User { Present(number), Absent }
+const user = User.Present(3);
+const option = Some(4);
+`;
+const erasure = compile(erasureSource, "erasure.ds", "deka");
+if (!erasure.ok) throw new Error(`Result erasure WASM compilation failed: ${JSON.stringify(erasure)}`);
+const observed = new Function(`${erasure.output.code}\nreturn [nested(false), nested(true), melted(), nested_exception(false), user.__enum, option.__case];`)();
+const wanted = [{ok: true, value: 8}, {ok: false, error: "bad"}, 7, 8, "User", "Some"];
+if (JSON.stringify(observed) !== JSON.stringify(wanted)) {
+  throw new Error(`Result erasure WASM runtime mismatch: ${JSON.stringify(observed)}`);
+}
+try {
+  new Function(`${erasure.output.code}\nnested_exception(true);`)();
+  throw new Error("WASM emission lost native exception propagation");
+} catch (error) {
+  if (error !== "bad") throw error;
+}
+const wrongChannel = compile(`fn data() Result<number, string> { return Err("bad"); } fn f() Exception<number, string> { return Ok(match data() { Ok(v) => v, Err(e) }); }`, "wrong-channel.ds", "deka");
+if (wrongChannel.ok || !wrongChannel.diagnostics.some(d => d.message.includes("raise it into the exception channel explicitly"))) {
+  throw new Error(`WASM lost nested cross-channel diagnostic: ${JSON.stringify(wrongChannel)}`);
+}
+const pausedOption = compile(`fn noop() void {} const present = Some(noop());`, "option-paused.ds", "deka");
+if (!pausedOption.ok) throw new Error("stage 2a must not reject Option<void>");
 
 console.log("browser WASM parity fixtures passed");

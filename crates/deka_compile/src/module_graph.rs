@@ -2706,7 +2706,7 @@ mod tests {
         assert_eq!(result.modules.len(), 2);
         let main_js = &result.modules[&main];
         assert!(main_js.contains("random_bytes(32)"), "got: {}", main_js);
-        assert!(main_js.contains("__case"), "got: {}", main_js);
+        assert!(main_js.contains(".ok === true"), "got: {}", main_js);
     }
 
     #[test]

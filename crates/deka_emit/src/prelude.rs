@@ -6,10 +6,10 @@
 //! - [`pool_prelude`] — the `globalThis`-guarded form injected by the
 //!   isolate pool bootstrap (`crates/pool/src/isolate_pool/worker_execution.rs`).
 //! - [`to_result_helper`] — the `__deka_to_result` expression (deka#578)
-//!   that tags host-bridge envelopes with the same shapes.
+//!   that normalizes host-bridge envelopes to the same shapes.
 //! - [`RESULT_OK`]/[`RESULT_ERR`] (crate-internal) — spliced directly into
 //!   the emitter's `unsafe { }` Ok/Err arms (deka#622 finding F) so those
-//!   values carry the exact branded shape `Result.Ok`/`Result.Err` produce.
+//!   values carry the exact plain Result shape `Result.Ok`/`Result.Err` produce.
 //! - [`PreludeDemand`] / [`shared_prelude`] — the demand-driven synthesis
 //!   (deka#595): each module records which helpers and which *members* of
 //!   those helpers it needs, the module graph unions the sets, and the
@@ -25,11 +25,12 @@
 
 /// Shared `Result` constructors (deka#582). `pub(crate)` because
 /// `emit_unsafe` splices these expressions into its Ok/Err arms (deka#622
-/// finding F); the values it produces must be the same branded shape
+/// finding F); the values it produces must be the same plain Result shape
 /// `Result.Ok`/`Result.Err` produce, never a second transcription.
-pub(crate) const RESULT_OK: &str = r#"(value) => ({ __enum: "Result", __case: "Ok", name: "Ok", value })"#;
-pub(crate) const RESULT_ERR: &str = r#"(error) => ({ __enum: "Result", __case: "Err", name: "Err", error })"#;
-const OPTION_SOME: &str = r#"(value) => ({ __enum: "Option", __case: "Some", name: "Some", value })"#;
+pub(crate) const RESULT_OK: &str = r#"(value) => ({ ok: true, value })"#;
+pub(crate) const RESULT_ERR: &str = r#"(error) => ({ ok: false, error })"#;
+const OPTION_SOME: &str =
+    r#"(value) => ({ __enum: "Option", __case: "Some", name: "Some", value })"#;
 const OPTION_NONE: &str = r#"({ __enum: "Option", __case: "None", name: "None" })"#;
 
 /// Module-local prelude emitted into compiled modules: frozen namespace
@@ -73,7 +74,7 @@ pub fn pool_prelude() -> String {
 }
 
 /// `__deka_to_result` (deka#578): normalize a `{ ok, value | error }`
-/// bridge envelope into a tagged `Result`. Built from the same constructor
+/// bridge envelope into a plain `Result`. Built from the same constructor
 /// expressions as the prelude, so the envelope shape can never drift from
 /// what `Result.Ok`/`Result.Err` produce.
 pub fn to_result_helper() -> String {
@@ -127,6 +128,8 @@ pub struct PreludeDemand {
     pub type_of: bool,
     /// The enum prelude bindings (`Result`/`Option`/`Ok`/`Err`/`Some`/`None`).
     pub enums: bool,
+    /// Compiler-owned bridge normalization, independent of the runtime version.
+    pub host_result: bool,
     /// The module declares structs. A brand tag can only exist if some
     /// module in the program declares that kind — values cross module
     /// boundaries without their type binding being imported (function
@@ -154,6 +157,7 @@ impl PreludeDemand {
         self.newtype |= other.newtype;
         self.type_of |= other.type_of;
         self.enums |= other.enums;
+        self.host_result |= other.host_result;
         self.declares_structs |= other.declares_structs;
         self.declares_enums |= other.declares_enums;
         self.declares_newtypes |= other.declares_newtypes;
@@ -163,7 +167,7 @@ impl PreludeDemand {
     /// empty and nothing is emitted (the property `__deka_type_of` already
     /// had, generalized to every helper).
     pub fn is_empty(&self) -> bool {
-        self.structs.is_none() && !self.newtype && !self.type_of && !self.enums
+        self.structs.is_none() && !self.newtype && !self.type_of && !self.enums && !self.host_result
     }
 }
 
@@ -215,7 +219,7 @@ pub const NEWTYPE_SYMBOL: &str = "const __p = Symbol.for('deka.nt');";
 /// The descriptor cache backing `__deka_type_of`. Emitted with the helper.
 pub const TYPE_OF_CACHE: &str = "const __deka_type_cache = new Map();";
 
-const TYPE_OF_HEAD: &str = "function __deka_type_of(v){const mk=(k,n)=>{const key=k+\":\"+n;let t=__deka_type_cache.get(key);if(!t){t=Object.freeze({kind:k,name:n,toString(){return this.name;}});__deka_type_cache.set(key,t);}return t;};if(v===null||v===undefined)return mk(\"none\",\"none\");if(v instanceof Uint8Array)return mk(\"bytes\",\"bytes\");const ty=typeof v;if(ty===\"string\"||ty===\"number\"||ty===\"boolean\"||ty===\"function\")return mk(ty,ty);if(Array.isArray(v))return mk(\"array\",\"Array\");";
+const TYPE_OF_HEAD: &str = "function __deka_type_of(v,result=false){const mk=(k,n)=>{const key=k+\":\"+n;let t=__deka_type_cache.get(key);if(!t){t=Object.freeze({kind:k,name:n,toString(){return this.name;}});__deka_type_cache.set(key,t);}return t;};if(v===null||v===undefined)return mk(\"none\",\"none\");if(v instanceof Uint8Array)return mk(\"bytes\",\"bytes\");if(result&&typeof v.ok===\"boolean\")return mk(\"enum\",\"Result\");const ty=typeof v;if(ty===\"string\"||ty===\"number\"||ty===\"boolean\"||ty===\"function\")return mk(ty,ty);if(Array.isArray(v))return mk(\"array\",\"Array\");";
 const TYPE_OF_NEWTYPES: &str = "const nt=v.__deka_newtype;if(nt)return mk(\"newtype\",nt);";
 const TYPE_OF_STRUCTS: &str = "const st=v.__deka_struct;if(st)return mk(\"struct\",st);";
 const TYPE_OF_ENUMS: &str = "const en=v.__enum;if(en)return mk(\"enum\",en);";
@@ -283,6 +287,12 @@ pub fn shared_prelude(demand: &PreludeDemand) -> String {
     if demand.enums {
         out.push_str(&module_prelude());
     }
+    if demand.host_result {
+        out.push_str(&format!(
+            "const __deka_result_from_host = {};\n",
+            to_result_helper()
+        ));
+    }
     out
 }
 
@@ -298,8 +308,8 @@ mod tests {
             module_prelude(),
             concat!(
                 "const Result = Object.freeze({\n",
-                "  Ok: (value) => ({ __enum: \"Result\", __case: \"Ok\", name: \"Ok\", value }),\n",
-                "  Err: (error) => ({ __enum: \"Result\", __case: \"Err\", name: \"Err\", error })\n",
+                "  Ok: (value) => ({ ok: true, value }),\n",
+                "  Err: (error) => ({ ok: false, error })\n",
                 "});\n",
                 "const Option = Object.freeze({\n",
                 "  Some: (value) => ({ __enum: \"Option\", __case: \"Some\", name: \"Some\", value }),\n",

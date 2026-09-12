@@ -1052,10 +1052,7 @@ impl<'a> Checker<'a> {
         if info.type_params.is_empty() {
             Type::Struct { name }
         } else {
-            Type::Generic {
-                base: name,
-                args,
-            }
+            Type::Generic { base: name, args }
         }
     }
 
@@ -2251,6 +2248,11 @@ impl<'a> Checker<'a> {
     }
 
     pub(super) fn check_pattern(&mut self, pattern: &ast::Pattern<'a>, scrutinee_type: &Type<'a>) {
+        if matches!(scrutinee_type, Type::Generic { base: "Result", .. }) {
+            self.exception_forms
+                .result_patterns
+                .insert(pattern as *const _);
+        }
         match pattern {
             ast::Pattern::Wildcard { .. } => {}
             ast::Pattern::Identifier { name, span } => {
@@ -4450,8 +4452,13 @@ impl<'a> Checker<'a> {
 
                 if !hole_positions.is_empty() {
                     // Partial application: `add(1, _)` becomes a function that
-                    // takes the hole arguments and forwards them.
-                    for (i, (expected, arg)) in
+                    // takes the hole arguments and forwards them. Non-hole
+                    // operands execute in that function, including propagation.
+                    let saved_return = self.return_type.replace(substituted_ret.clone());
+                    let saved_catches = std::mem::take(&mut self.exception_catches);
+                    let saved_async = std::mem::replace(&mut self.in_async_function, false);
+                    let saved_function = std::mem::replace(&mut self.in_function, true);
+                    for (_i, (expected, arg)) in
                         substituted_params.iter().zip(args.iter()).enumerate()
                     {
                         if Self::is_hole_expr(arg) {
@@ -4471,6 +4478,10 @@ impl<'a> Checker<'a> {
                             );
                         }
                     }
+                    self.return_type = saved_return;
+                    self.exception_catches = saved_catches;
+                    self.in_async_function = saved_async;
+                    self.in_function = saved_function;
                     let hole_types: Vec<Type<'a>> = hole_positions
                         .iter()
                         .map(|i| substituted_params[*i].clone())

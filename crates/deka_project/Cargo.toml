@@ -6,7 +6,7 @@ description = "DekaScript project layout: module specifiers and ds_modules"
 license.workspace = true
 
 [dependencies]
-deka-modules = "0.1.0"
+deka-modules = "0.2.0"
 
 [dev-dependencies]
 tempfile = "3.14"

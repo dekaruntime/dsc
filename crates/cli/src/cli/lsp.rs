@@ -2,6 +2,7 @@ use core::{CommandSpec, Context, FlagSpec, Registry};
 
 const COMMAND: CommandSpec = CommandSpec {
     name: "lsp",
+    owner: "legacy",
     category: "compiler",
     summary: "language server (stdio)",
     aliases: &[],

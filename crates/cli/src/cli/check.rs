@@ -7,6 +7,7 @@ use deka_project::modules::{LinkEntry, LinkManifest};
 
 const COMMAND: CommandSpec = CommandSpec {
     name: "check",
+    owner: "legacy",
     category: "compiler",
     summary: "typecheck DekaScript",
     aliases: &[],

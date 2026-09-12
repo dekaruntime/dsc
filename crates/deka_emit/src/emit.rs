@@ -4794,13 +4794,7 @@ impl<'a> Emitter<'a> {
                 let result_case = self
                     .exception_forms
                     .result_patterns
-                    .contains(&(pattern as *const _))
-                    || (!self.exception_forms.checked
-                        && matches!(*name, "Ok" | "Err")
-                        && !self
-                            .enums
-                            .values()
-                            .any(|meta| meta.cases.iter().any(|case| case == name)));
+                    .contains(&(pattern as *const _));
                 let mut conditions = vec![if result_case {
                     format!("{scrutinee_var}.ok === {}", *name == "Ok")
                 } else {

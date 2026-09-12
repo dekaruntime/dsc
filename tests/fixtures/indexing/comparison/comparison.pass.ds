@@ -1,0 +1,2 @@
+const a = [7]; const x = 0 >= 0 && 0 < a.length ? a[0] : 0;
+if (x != 7) { panic("wrong comparison proof"); }

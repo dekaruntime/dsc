@@ -448,7 +448,19 @@ impl<'a> Emitter<'a> {
 }
 
 fn default_needs_lifting(param: &deka_syntax::Param<'_>) -> bool {
-    param.default_value.as_ref().is_some_and(needs_lifting)
+    param.default_value.as_ref().is_some_and(|value| {
+        let mut complex_has = false;
+        deka_syntax::visit::walk_expr(value, &mut |expr| {
+            if let Expr::Call { callee, .. } = expr {
+                if matches!(&**callee, Expr::FieldAccess { field: "has", .. })
+                    && has_needs_temporaries(expr)
+                {
+                    complex_has = true;
+                }
+            }
+        });
+        needs_lifting(value) || complex_has
+    })
 }
 
 impl<'a> Emitter<'a> {

@@ -1,0 +1,5 @@
+fn at(a: Array<number>, i: number) number { return a.has(i) ? a[i] : 42; }
+const a = [7];
+if (at(a, 0) != 7 || at(a, 0.5) != 42 || at(a, -1) != 42 || at(a, 1) != 42) { panic("wrong has bounds"); }
+let b = [1]; if (b.has(0)) { b[0] = 8; }
+if (at(b, 0) != 8) { panic("wrong write"); }

@@ -1134,20 +1134,24 @@ impl<'a> Checker<'a> {
             } => {
                 let cond_type = self.check_expr(condition);
                 self.expect_boolean(&cond_type, condition.span());
+                let saved_flow = self.index_flow.clone();
+                self.assume_index_condition(condition);
                 self.scopes.push(HashMap::new());
                 self.mutables.push(HashSet::new());
                 for s in then_body.iter() {
                     self.check_statement(s);
                 }
-                self.scopes.pop();
+                self.pop_value_scope();
                 self.mutables.pop();
                 self.scopes.push(HashMap::new());
                 self.mutables.push(HashSet::new());
+                self.index_flow.restrict_to(&saved_flow);
                 for s in else_body.iter() {
                     self.check_statement(s);
                 }
-                self.scopes.pop();
+                self.pop_value_scope();
                 self.mutables.pop();
+                self.index_flow.restrict_to(&saved_flow);
             }
             ast::Stmt::Block { body, .. } => {
                 self.scopes.push(HashMap::new());
@@ -1155,7 +1159,7 @@ impl<'a> Checker<'a> {
                 for s in body.iter() {
                     self.check_statement(s);
                 }
-                self.scopes.pop();
+                self.pop_value_scope();
                 self.mutables.pop();
             }
             ast::Stmt::For {
@@ -1167,6 +1171,7 @@ impl<'a> Checker<'a> {
             } => {
                 self.scopes.push(HashMap::new());
                 self.mutables.push(HashSet::new());
+                self.index_flow.kill();
                 if let Some(init) = init {
                     self.check_for_init(init);
                 }
@@ -1177,12 +1182,14 @@ impl<'a> Checker<'a> {
                 if let Some(step) = step {
                     self.check_expr(step);
                 }
+                self.assume_index_loop(init.as_ref(), condition.as_ref(), step.as_ref(), body);
                 self.loop_depth += 1;
                 for s in body.iter() {
                     self.check_statement(s);
                 }
                 self.loop_depth -= 1;
-                self.scopes.pop();
+                self.index_flow.kill();
+                self.pop_value_scope();
                 self.mutables.pop();
             }
             ast::Stmt::ForOf {
@@ -1192,6 +1199,7 @@ impl<'a> Checker<'a> {
                 body,
                 ..
             } => {
+                self.index_flow.kill();
                 let iterable_type = self.check_expr(iterable);
                 let element_type = if let Type::Param { name: param } = &iterable_type {
                     match self.lookup_param_bound(param) {
@@ -1234,7 +1242,7 @@ impl<'a> Checker<'a> {
                     self.check_statement(s);
                 }
                 self.loop_depth -= 1;
-                self.scopes.pop();
+                self.pop_value_scope();
                 self.mutables.pop();
             }
             ast::Stmt::Break { span } => {
@@ -1407,7 +1415,7 @@ impl<'a> Checker<'a> {
             }
         }
         self.mutables.pop();
-        self.scopes.pop();
+        self.pop_value_scope();
 
         let bound_type = declared.unwrap_or(bound);
         if is_const {
@@ -1456,7 +1464,7 @@ impl<'a> Checker<'a> {
             self.check_pattern(&arm.pattern, scrutinee_type);
             let arm_type = self.check_expr(&arm.body);
             self.mutables.pop();
-            self.scopes.pop();
+            self.pop_value_scope();
 
             if !self.is_assignable(bound, &arm_type)
                 && !matches!(arm_type, Type::Infer | Type::Error | Type::Never)
@@ -1522,6 +1530,7 @@ impl<'a> Checker<'a> {
         } else {
             self.declare_var(name, final_type);
         }
+        self.index_flow.remember_integer(name, value);
         // A declaration at module scope activates its seed for module-level
         // lookups; nested declarations never touch module pending state.
         if self.scopes.len() == 1 {
@@ -1594,7 +1603,7 @@ impl<'a> Checker<'a> {
         for stmt in body {
             self.check_statement(stmt);
         }
-        self.scopes.pop();
+        self.pop_value_scope();
         self.mutables.pop();
         self.in_function = saved_in_function;
         self.in_async_function = saved_in_async;
@@ -1628,6 +1637,7 @@ impl<'a> Checker<'a> {
         is_async: bool,
         _span: ast::Span,
     ) {
+        self.index_flow.kill();
         // Use the previously collected signature for parameter types so that
         // errors about missing annotations are reported exactly once.
         let (param_types, collected_ret, optional) = match self.globals.get(name).cloned() {
@@ -1688,6 +1698,19 @@ impl<'a> Checker<'a> {
         self.declare_var(name, self_type);
 
         for (p, t) in params.iter().zip(param_types.iter()) {
+            if let Some(default) = &p.default_value {
+                let actual = self.check_exception_use(
+                    default,
+                    super::exceptions::Use::Value,
+                    Some(t.clone()),
+                );
+                if !self.is_assignable(t, &actual) {
+                    self.error_at_expr(
+                        default,
+                        format!("expected default type `{t}`, found type `{actual}`"),
+                    );
+                }
+            }
             self.declare_var(p.name, t.clone());
         }
 
@@ -1759,7 +1782,7 @@ impl<'a> Checker<'a> {
         self.in_function = saved_in_function;
         self.return_type = saved_return_type;
         self.exception_catches = saved_catches;
-        self.scopes.pop();
+        self.pop_value_scope();
         self.mutables.pop();
 
         self.pop_type_params();
@@ -1837,6 +1860,7 @@ impl<'a> Checker<'a> {
         is_async: bool,
         _span: ast::Span,
     ) {
+        self.index_flow.kill();
         if receiver_mutable && self.newtypes.contains_key(receiver_type) {
             self.error_span(
                 _span,
@@ -1932,6 +1956,19 @@ impl<'a> Checker<'a> {
         }
 
         for (p, t) in params.iter().zip(param_types.iter()) {
+            if let Some(default) = &p.default_value {
+                let actual = self.check_exception_use(
+                    default,
+                    super::exceptions::Use::Value,
+                    Some(t.clone()),
+                );
+                if !self.is_assignable(t, &actual) {
+                    self.error_at_expr(
+                        default,
+                        format!("expected default type `{t}`, found type `{actual}`"),
+                    );
+                }
+            }
             self.declare_var(p.name, t.clone());
         }
 
@@ -1951,7 +1988,7 @@ impl<'a> Checker<'a> {
         self.in_async_function = saved_in_async;
         self.return_type = saved_return_type;
         self.exception_catches = saved_catches;
-        self.scopes.pop();
+        self.pop_value_scope();
         self.mutables.pop();
 
         self.pop_type_params();

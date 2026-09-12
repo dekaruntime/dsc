@@ -1,0 +1,19 @@
+--- a/lists-objects-and-indexing.ds
++++ b/lists-objects-and-indexing.ds
+@@ -1,5 +1,5 @@
+ import { echo } from "io"
+ const parts = ["north", "star"]
+-const first = parts[0]
++const first = parts.has(0) ? parts[0] : ""
+ const label = {first: first, count: parts.length}
+ echo(`${label.first}:${label.count}`)
+--- a/arrays.ds
++++ b/arrays.ds
+@@ -8,6 +8,6 @@
+ }
+
+ let values = [1, 2, 3]
+-values[0] = 10
++if (values.has(0)) { values[0] = 10 }
+ echo(string(values.length))
+ echo(string(sum(values)))

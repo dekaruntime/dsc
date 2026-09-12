@@ -658,9 +658,8 @@ impl<'a> Parser<'a> {
 
         let return_type = if self.at(TokenKind::LBrace) {
             None
-        } else if self.eat(TokenKind::Colon) {
-            Some(self.parse_type()?)
         } else {
+            self.reject_return_type_colon();
             Some(self.parse_type()?)
         };
 

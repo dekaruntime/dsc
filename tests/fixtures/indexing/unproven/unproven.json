@@ -1,0 +1,6 @@
+{
+  "title": "Indexing unproven",
+  "stage": "typecheck",
+  "notes": "rfd#65 part 2: explicit index proofs.",
+  "expectedDiagnosticContains": "index not proven in bounds \u2014 test it first: `scores.has(round) ? scores[round] : fallback`"
+}

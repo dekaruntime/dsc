@@ -449,7 +449,7 @@ mod tests {
         let mut project = ProjectState::new();
         project.write(
             "lib.ds",
-            "export fn first<T>(values: Array<T>) Option<T> { return Some(values[0]) }\n",
+            "export fn first<T>(values: Array<T>) Option<T> { return values.has(0) ? Some(values[0]) : None }\n",
         );
         project.write(
             "main.ds",
@@ -473,7 +473,7 @@ mod tests {
         let mut project = ProjectState::new();
         project.write(
             "lib.ds",
-            "export fn head(values: Array<string>) Option<string> { return Some(values[0]) }\n",
+            "export fn head(values: Array<string>) Option<string> { return values.has(0) ? Some(values[0]) : None }\n",
         );
         project.write(
             "main.ds",

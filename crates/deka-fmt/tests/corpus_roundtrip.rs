@@ -33,6 +33,9 @@ fn corpus_files() -> Vec<PathBuf> {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.cache/testsuite-corpus");
     let tour = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.cache/tour");
     let mut files = Vec::new();
+    let local = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
+    collect(&local, "pass.ds", &mut files);
+    collect(&local, "pass.dsx", &mut files);
     collect(&testsuite, "pass.ds", &mut files);
     collect(&testsuite, "pass.dsx", &mut files);
     collect(&tour, "ds", &mut files);

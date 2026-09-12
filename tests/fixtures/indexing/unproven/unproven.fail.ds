@@ -1,0 +1,1 @@
+const scores = [1]; const round = 0; const x = scores[round];

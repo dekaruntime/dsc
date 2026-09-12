@@ -2291,7 +2291,11 @@ impl<'a> Emitter<'a> {
         }
         // Same guarantee for `array_builtin_calls` (deka#561): the emitted
         // rewrite calls `Some`/`None`, which the enum prelude defines.
-        if !self.array_builtin_calls.is_empty() {
+        if self
+            .array_builtin_calls
+            .values()
+            .any(|kind| *kind != deka_syntax::typeck::ArrayAccess::Has)
+        {
             self.uses_prelude_enums = true;
         }
         // And for partial `number_math_calls` (deka#378 step 2): the emitted
@@ -2578,7 +2582,84 @@ impl<'a> Emitter<'a> {
     // ------------------------------------------------------------------
     // Statements
     // ------------------------------------------------------------------
+    fn emit_has_temporaries(&mut self, expressions: Vec<(usize, (String, String))>) {
+        let mut names: Vec<_> = expressions
+            .into_iter()
+            .filter_map(|(ptr, names)| {
+                self.array_builtin_calls
+                    .iter()
+                    .any(|(p, k)| *p as usize == ptr && *k == deka_syntax::typeck::ArrayAccess::Has)
+                    .then_some(names)
+            })
+            .collect();
+        names.sort();
+        names.dedup();
+        for (receiver, index) in names {
+            self.out.push_str(&format!("let {receiver}, {index};\n"));
+        }
+    }
+
+    fn emit_array_has(&mut self, expr: &Expr<'a>, wrap: bool) -> Result<(), String> {
+        let Expr::Call { callee, args, .. } = expr else {
+            unreachable!()
+        };
+        let Expr::FieldAccess { object, .. } = &**callee else {
+            unreachable!()
+        };
+        let complex = has_needs_temporaries(expr);
+        if wrap || complex {
+            self.out.push('(');
+        }
+        let (receiver, index) = has_temporary_names(expr);
+        if complex {
+            self.out.push_str(&format!("{receiver} = "));
+            self.emit_expr(object)?;
+            self.out.push_str(&format!(", {index} = "));
+            self.emit_expr(&args[0])?;
+            self.out.push_str(", ");
+        }
+        self.out.push_str("Number.isInteger(");
+        if complex {
+            self.out.push_str(&index);
+        } else {
+            self.emit_expr(&args[0])?;
+        }
+        self.out.push_str(") && ");
+        if complex {
+            self.out.push_str(&index);
+        } else {
+            self.emit_expr(&args[0])?;
+        }
+        self.out.push_str(" >= 0 && ");
+        if complex {
+            self.out.push_str(&index);
+        } else {
+            self.emit_expr(&args[0])?;
+        }
+        self.out.push_str(" < ");
+        if complex {
+            self.out.push_str(&receiver);
+        } else {
+            self.emit_expr(object)?;
+        }
+        self.out.push_str(".length");
+        if wrap || complex {
+            self.out.push(')');
+        }
+        Ok(())
+    }
+
     fn emit_stmt(&mut self, stmt: &Stmt<'a>) -> Result<(), String> {
+        // Complex predicates evaluate receiver and index exactly once, in source
+        // order. Locals plus a comma expression preserve lazy expression contexts
+        // without an IIFE or runtime helper. `$` cannot collide with DS bindings.
+        let mut expressions = Vec::new();
+        deka_syntax::visit::walk_stmt(stmt, &mut |expr| {
+            if has_needs_temporaries(expr) {
+                expressions.push((expr as *const _ as usize, has_temporary_names(expr)));
+            }
+        });
+        self.emit_has_temporaries(expressions);
         let saved = self.lifted_values.clone();
         let operand = match stmt {
             Stmt::Const { value, .. }
@@ -3808,7 +3889,12 @@ impl<'a> Emitter<'a> {
                 // length guard turns empty-array pop/shift into `None`
                 // instead of `Some(undefined)`.
                 if let Some(kind) = self.array_builtin_calls.get(&expr_ptr) {
+                    if *kind == deka_syntax::typeck::ArrayAccess::Has {
+                        self.emit_array_has(expr, true)?;
+                        return Ok(());
+                    }
                     let produce = match kind {
+                        deka_syntax::typeck::ArrayAccess::Has => unreachable!(),
                         deka_syntax::typeck::ArrayAccess::First => "Some(v[0])",
                         deka_syntax::typeck::ArrayAccess::Last => "Some(v[v.length - 1])",
                         deka_syntax::typeck::ArrayAccess::Pop => "Some(v.pop())",
@@ -4021,7 +4107,13 @@ impl<'a> Emitter<'a> {
                 else_branch,
                 ..
             } => {
-                self.emit_expr(condition)?;
+                if self.array_builtin_calls.get(&(*condition as *const _))
+                    == Some(&deka_syntax::typeck::ArrayAccess::Has)
+                {
+                    self.emit_array_has(condition, false)?;
+                } else {
+                    self.emit_expr(condition)?;
+                }
                 self.out.push_str(" ? ");
                 self.emit_expr(then_branch)?;
                 self.out.push_str(" : ");
@@ -4139,6 +4231,13 @@ impl<'a> Emitter<'a> {
                 self.out.push_str("if (");
                 self.out.push_str(param.name);
                 self.out.push_str(" === undefined) { ");
+                let mut expressions = Vec::new();
+                deka_syntax::visit::walk_expr(param.default_value.as_ref().unwrap(), &mut |expr| {
+                    if has_needs_temporaries(expr) {
+                        expressions.push((expr as *const _ as usize, has_temporary_names(expr)));
+                    }
+                });
+                self.emit_has_temporaries(expressions);
                 let value = self.lift_value(param.default_value.as_ref().unwrap())?;
                 self.out.push_str(param.name);
                 self.out.push_str(" = ");
@@ -6070,3 +6169,22 @@ fn peel_exception_parens<'e, 'a>(expr: &'e Expr<'a>) -> &'e Expr<'a> {
 }
 
 include!("lifting.rs");
+
+// Only bindings and numeric literals are safe to repeat in the inline predicate.
+fn has_stable_operand(expr: &Expr<'_>) -> bool {
+    match expr {
+        Expr::Identifier { .. } | Expr::Number { .. } => true,
+        Expr::Paren { expr, .. } => has_stable_operand(expr),
+        _ => false,
+    }
+}
+fn has_needs_temporaries(expr: &Expr<'_>) -> bool {
+    matches!(expr, Expr::Call { callee, args, .. }
+        if matches!(&**callee, Expr::FieldAccess { object, .. }
+            if !has_stable_operand(object) || args.iter().any(|arg| !has_stable_operand(arg))))
+}
+fn has_temporary_names(expr: &Expr<'_>) -> (String, String) {
+    let span = expr.span();
+    let stem = format!("__deka_index${}_{}", span.byte_start, span.byte_end);
+    (format!("{stem}_array"), format!("{stem}_index"))
+}

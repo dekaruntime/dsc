@@ -65,6 +65,22 @@ mod tests {
     }
 
     #[test]
+    fn indexing_has_emits_inline_and_access_stays_bare() {
+        let out = parse_check_and_emit(
+            "fn f(scores: Array<number>, round: number) number { return scores.has(round) ? scores[round] : 0; }",
+        );
+        assert!(out.contains("return Number.isInteger(round) && round >= 0 && round < scores.length ? scores[round] : 0;"), "{out}");
+        for forbidden in ["globalThis", "=>", "Some", "__deka_index$"] {
+            assert!(!out.contains(forbidden), "{out}");
+        }
+    }
+
+    #[test]
+    fn indexing_hats_fixtures() {
+        run_hats_fixtures("indexing", 6);
+    }
+
+    #[test]
     fn ternary_emits_authored_conditional_expressions() {
         for expression in [
             "a || b ? 1 : 2",
@@ -83,8 +99,12 @@ mod tests {
 
     #[test]
     fn ternary_hats_fixtures() {
-        let root =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/ternary");
+        run_hats_fixtures("ternary", 5);
+    }
+
+    fn run_hats_fixtures(group: &str, expected_count: usize) {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("../../tests/fixtures/{group}"));
         let mut count = 0;
         for entry in std::fs::read_dir(root).unwrap() {
             let dir = entry.unwrap().path();
@@ -118,7 +138,9 @@ mod tests {
                 );
             } else {
                 let out = parse_check_and_emit(&source);
-                assert!(out.contains(" ? "), "{name}: {out}");
+                if group == "ternary" {
+                    assert!(out.contains(" ? "), "{name}: {out}");
+                }
                 // JSX imports the host UI runtime. Check its emitted JS syntax;
                 // execute the pure DS fixtures, including lazy-arm assertions.
                 let mut command = std::process::Command::new("node");
@@ -154,7 +176,7 @@ mod tests {
             }
             count += 1;
         }
-        assert_eq!(count, 5);
+        assert_eq!(count, expected_count);
     }
 
     #[test]

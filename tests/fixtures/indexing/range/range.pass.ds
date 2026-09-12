@@ -1,0 +1,2 @@
+const a = [3, 4]; let sum = 0; for i in 0..a.length { const x = a[i]; sum = sum + x; }
+if (sum != 7) { panic("wrong range sum"); }

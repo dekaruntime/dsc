@@ -1,0 +1,92 @@
+--- a/corpus/data_types/array_length_and_index/array_length_and_index.pass.ds
++++ b/corpus/data_types/array_length_and_index/array_length_and_index.pass.ds
+@@ -1,6 +1,6 @@
+ import { echo } from "io"
+ const items = [10, 20, 30]
+ const len: number = items.length
+-const second: number = items[1]
++const second: number = items.has(1) ? items[1] : 0
+ echo(string(len))
+ echo(string(second))
+--- a/corpus/data_types/array_filter_callback/array_filter_callback.pass.ds
++++ b/corpus/data_types/array_filter_callback/array_filter_callback.pass.ds
+@@ -2,8 +2,8 @@
+ const arr = [1, 2, 3, 4]
+ const evens = arr.filter(fn(x: number) boolean { return x % 2 == 0 })
+ const len: number = evens.length
+-const first: number = evens[0]
+-const second: number = evens[1]
++const first: number = evens.has(0) ? evens[0] : 0
++const second: number = evens.has(1) ? evens[1] : 0
+ echo(string(len))
+ echo(string(first))
+ echo(string(second))
+--- a/corpus/data_types/array_slice_subarray/array_slice_subarray.pass.ds
++++ b/corpus/data_types/array_slice_subarray/array_slice_subarray.pass.ds
+@@ -2,8 +2,8 @@
+ const arr = [1, 2, 3, 4]
+ const sub = arr.slice(1, 3)
+ const len: number = sub.length
+-const first: number = sub[0]
+-const second: number = sub[1]
++const first: number = sub.has(0) ? sub[0] : 0
++const second: number = sub.has(1) ? sub[1] : 0
+ echo(string(len))
+ echo(string(first))
+ echo(string(second))
+--- a/corpus/data_types/array_map_callback/array_map_callback.pass.ds
++++ b/corpus/data_types/array_map_callback/array_map_callback.pass.ds
+@@ -1,4 +1,4 @@
+ import { echo } from "io"
+ const arr = [1, 2, 3]
+ const d = arr.map(fn(x: number) number { return x * 2 })
+-echo(string(d[1]))
++echo(string(d.has(1) ? d[1] : 0))
+--- a/corpus/data_types/array_mutation/array_mutation.pass.ds
++++ b/corpus/data_types/array_mutation/array_mutation.pass.ds
+@@ -1,4 +1,4 @@
+ import { echo } from "io"
+ let items = [1, 2, 3]
+-items[0] = 9
+-echo(string(items[0]))
++if (items.has(0)) { items[0] = 9 }
++echo(string(items.has(0) ? items[0] : 0))
+--- a/corpus/functions/hof_array_of_functions/hof_array_of_functions.pass.ds
++++ b/corpus/functions/hof_array_of_functions/hof_array_of_functions.pass.ds
+@@ -7,6 +7,6 @@
+ }
+ const ops = [mul2, add1]
+ let n = 15
+-n = ops[0](n)
+-n = ops[1](n)
++if (ops.has(0)) { n = ops[0](n) }
++if (ops.has(1)) { n = ops[1](n) }
+ echo(string(n))
+--- a/corpus/modules/collection-element-inferred-export/lib.ds
++++ b/corpus/modules/collection-element-inferred-export/lib.ds
+@@ -1,3 +1,3 @@
+ export fn first(values: Array<string>) {
+-  return values[0]
++  return values.has(0) ? values[0] : ""
+ }
+--- a/corpus/modules/collection-element-inferred-export-negative/lib.ds
++++ b/corpus/modules/collection-element-inferred-export-negative/lib.ds
+@@ -1,3 +1,3 @@
+ export fn first(values: Array<string>) {
+-  return values[0]
++  return values.has(0) ? values[0] : ""
+ }
+--- a/corpus/data_types/const_array_reverse_fail/const_array_reverse_fail.fail.ds
++++ b/corpus/data_types/const_array_reverse_fail/const_array_reverse_fail.fail.ds
+@@ -1,4 +1,4 @@
+ import { echo } from "io"
+ const arr = [1, 2]
+ arr.reverse()
+-echo(string(arr[0]))
++echo(string(arr.has(0) ? arr[0] : 0))
+--- a/corpus/data_types/const_array_index_assignment_fail/const_array_index_assignment_fail.fail.ds
++++ b/corpus/data_types/const_array_index_assignment_fail/const_array_index_assignment_fail.fail.ds
+@@ -1,2 +1,2 @@
+ const arr = [1, 2, 3]
+-arr[0] = 9
++if (arr.has(0)) { arr[0] = 9 }

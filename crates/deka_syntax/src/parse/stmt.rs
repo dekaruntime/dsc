@@ -421,6 +421,55 @@ impl<'a> Parser<'a> {
 
     fn parse_for_statement(&mut self, start: Pos, start_byte: usize) -> Option<Stmt<'a>> {
         self.advance(); // `for`
+        // rfd#65 range spelling lowers to the existing counting-loop AST.
+        if self.at(TokenKind::Identifier) {
+            let name = self.expect_identifier()?;
+            let keyword = self.expect_identifier()?;
+            if keyword != "in" {
+                self.error("expected `in` in range loop");
+                return None;
+            }
+            self.advance();
+            let token = &self.prev;
+            if token.kind != TokenKind::Number || token.text != "0" {
+                self.error("index range must start at `0`");
+                return None;
+            }
+            self.expect(TokenKind::Dot)?;
+            self.expect(TokenKind::Dot)?;
+            let end = self.parse_expression()?;
+            let body = self.parse_block()?;
+            let span = self.span_from(start, start_byte);
+            let id = || Expr::Identifier { name, span };
+            return Some(Stmt::For {
+                init: Some(ForInit::Let {
+                    name,
+                    value: Expr::Number { value: 0.0, span },
+                }),
+                condition: Some(Expr::Binary {
+                    op: crate::ast::BinOp::Lt,
+                    left: alloc(self.arena, id()),
+                    right: alloc(self.arena, end),
+                    span,
+                }),
+                step: Some(Expr::Binary {
+                    op: crate::ast::BinOp::Assign,
+                    left: alloc(self.arena, id()),
+                    right: alloc(
+                        self.arena,
+                        Expr::Binary {
+                            op: crate::ast::BinOp::Add,
+                            left: alloc(self.arena, id()),
+                            right: alloc(self.arena, Expr::Number { value: 1.0, span }),
+                            span,
+                        },
+                    ),
+                    span,
+                }),
+                body,
+                span,
+            });
+        }
         self.expect(TokenKind::LParen)?;
 
         // for-of: `for (const x of iterable) { ... }` or `for (let x of iterable) { ... }`

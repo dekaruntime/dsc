@@ -174,6 +174,8 @@ pub enum NewtypeSide {
 /// are frozen at creation — a runtime pop would throw).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ArrayAccess {
+    /// Integer and bounds predicate; carries a true-branch indexing fact.
+    Has,
     First,
     Last,
     Pop,

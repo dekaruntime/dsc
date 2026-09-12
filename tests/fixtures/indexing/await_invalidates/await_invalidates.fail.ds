@@ -1,0 +1,8 @@
+async fn read(a: Array<number>, i: number, pending: Promise<number>) Promise<number> {
+  if (a.has(i)) {
+    const before = a[i];
+    await pending;
+    return a[i];
+  }
+  return 0;
+}

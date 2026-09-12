@@ -175,53 +175,16 @@ pub fn is_math_module_spec(spec: &str) -> bool {
     deka_project::module_spec::is_closed_stdlib_module_spec(spec)
 }
 
-/// Compiler-side stdlib membership for virtual-import inference.
-///
-/// Not `deka_modules::project_gate::is_stdlib_module_spec`: that gate treats
-/// every `@deka/*` specifier as stdlib and does not include the `ui` / `ui/`
-/// virtual-stdlib bypass (dsc#111/#129). Prefixes come from the shared table.
-pub(crate) fn is_stdlib_module_spec(spec: &str) -> bool {
-    if spec.starts_with("@user/") {
-        return false;
-    }
-    let bare = spec.strip_prefix("@deka/").unwrap_or(spec);
-    is_math_module_spec(spec)
-        || matches!(
-        bare,
-        "json"
-            | "postgres"
-            | "mysql"
-            | "sqlite"
-            | "bytes"
-            | "buffer"
-            | "http"
-            | "tcp"
-            | "tls"
-            | "fs"
-            | "crypto"
-            | "jwt"
-            | "test"
-            | "cookies"
-            | "auth"
-            | "db"
-            | "time"
-            | "io"
-    ) || deka_project::module_spec::STDLIB_SPEC_PREFIXES
-        .iter()
-        .any(|prefix| bare.starts_with(prefix))
-        || bare == "ui"
-        || bare.starts_with("ui/")
-}
+pub(crate) use deka_project::module_spec::is_stdlib_module_spec;
 
 /// Build synthetic signatures for recognized virtual stdlib modules.
 ///
 /// dsc#111 makes every *ordinary* unresolved import a hard error bound to the
 /// `Error` recovery sentinel. The recognized families below are the narrow,
-/// explicit exception: their runtime implementations exist, but this compiler
-/// has no real `ModuleExports` declarations for them yet. Keep this bypass
-/// visible until dsc#129 can replace it with declarations; that work is blocked
-/// while framework work is paused. Each imported value is consequently
-/// unchecked (`Infer`) only for these recognized specifiers.
+/// explicit exception, defined by deka-modules' closed stdlib vocabulary.
+/// Their runtime implementations exist, but this compiler has no real
+/// `ModuleExports` declarations for them yet. Each imported value is unchecked
+/// (`Infer`) only for these recognized specifiers; `ui` is not among them.
 pub fn infer_stdlib_imports_for_source<'a>(
     source: &'a str,
     arena: &'a Bump,
@@ -1817,14 +1780,20 @@ const arrow = unsafe { () => User { name: "Bob" } }
     }
 
     #[test]
-    fn compile_form_import_from_ui_form_uses_documented_virtual_stdlib_bypass() {
-        let result = compile_to_js(
-            "import { Form } from \"ui/form\";\nconst el = <Form action=\"/api/hello\" method=\"post\">Send</Form>;",
-            "test.dsx",
-        )
-        .expect("ui/form remains a documented virtual stdlib import pending dsc#129");
-        assert!(result.js.contains("from \"ui/form\""), "got: {}", result.js);
-        assert!(result.js.contains("Form"), "got: {}", result.js);
+    fn unknown_and_retired_ui_imports_are_not_virtual_stdlib() {
+        for spec in [
+            "@deka/anything",
+            "ui",
+            "ui/button",
+            "ui/form",
+            "@deka/ui/button",
+        ] {
+            assert!(!is_stdlib_module_spec(spec), "{spec}");
+            let source = format!("import {{ missing }} from \"{spec}\"; const value = missing;");
+            let arena = Bump::new();
+            assert!(!infer_stdlib_imports_for_source(&source, &arena).contains_key(spec));
+            assert!(compile_to_js(&source, "test.ds").is_err(), "{spec}");
+        }
     }
 
     #[test]

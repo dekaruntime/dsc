@@ -352,7 +352,10 @@ fn self_contained_graph_dump_keeps_package_paths() {
         &root.join("ds_modules/@deka/io/index.ds"),
         "export fn echo(s: string) {}\n",
     );
-    write(&root.join("deka.json"), "{}\n");
+    write(
+        &root.join("deka.json"),
+        r#"{"dependencies":{"@deka/io":"0.0.0"}}"#,
+    );
     write(
         &root.join("deka.lock"),
         r#"{

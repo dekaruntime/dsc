@@ -848,8 +848,8 @@ mod tests {
 
     #[test]
     fn live_import_unused_by_user_is_dropped_but_injection_still_binds_it() {
-        // End to end through graph shaking (deka#744 F3): the documented
-        // virtual-stdlib bypass (dsc#111/#129) keeps ui/reactive available.
+        // End to end through shaking (deka#744 F3), with explicit imported
+        // signatures instead of the retired virtual-stdlib bypass.
         // Shaking drops the user's unused `live` binding, so the compiler's
         // injected import must still appear.
         let source = "import { signal, live } from \"ui/reactive\";\n\
@@ -864,9 +864,35 @@ mod tests {
             !live.contains("live"),
             "the unused `live` import must not survive shaking: {live:?}"
         );
-        let result = crate::compile_to_js_with_options(
+        use crate::{ModuleExports, Type};
+        let getter = Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Named { name: "number" }),
+            optional: 0,
+        };
+        let mut reactive = ModuleExports::default();
+        reactive.values.insert(
+            "signal",
+            Type::Function {
+                params: vec![Type::Named { name: "number" }],
+                ret: Box::new(Type::Array { elem: Box::new(getter) }),
+                optional: 0,
+            },
+        );
+        reactive.values.insert(
+            "live",
+            Type::Function {
+                params: vec![],
+                ret: Box::new(Type::Named { name: "void" }),
+                optional: 0,
+            },
+        );
+        let imports = HashMap::from([("ui/reactive", &reactive)]);
+        let result = crate::compile_to_js_with_imports_and_options(
             source,
             "page.dsx",
+            &arena,
+            &imports,
             crate::CompileOptions {
                 used_exports: Some(live),
                 ..Default::default()

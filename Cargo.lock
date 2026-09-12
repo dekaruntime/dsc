@@ -367,6 +367,9 @@ dependencies = [
 [[package]]
 name = "core"
 version = "0.48.1"
+dependencies = [
+ "deka-cli-core",
+]
 
 [[package]]
 name = "cpufeatures"
@@ -502,6 +505,12 @@ dependencies = [
  "serde",
  "uuid",
 ]
+
+[[package]]
+name = "deka-cli-core"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4497dd39924474f70880dcc0bf27d807850010a8398147f618e2cebc751d8825"
 
 [[package]]
 name = "deka-fmt"

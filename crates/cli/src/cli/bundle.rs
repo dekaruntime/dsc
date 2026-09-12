@@ -7,6 +7,7 @@ use crate::compile_helper::{is_deka_source_path, print_cli_error};
 
 const COMMAND: CommandSpec = CommandSpec {
     name: "bundle",
+    owner: "legacy",
     category: "compiler",
     summary: "compile and bundle a module graph into a single JavaScript file",
     aliases: &[],

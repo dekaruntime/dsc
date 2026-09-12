@@ -7,6 +7,7 @@ use crate::compile_helper::{compile_dev_plan, is_deka_source_path, print_cli_err
 
 const COMMAND: CommandSpec = CommandSpec {
     name: "plan",
+    owner: "legacy",
     category: "compiler",
     summary: "print build-only dev materialization plan",
     aliases: &[],

@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 const COMMAND: CommandSpec = CommandSpec {
     name: "fmt",
+    owner: "legacy",
     category: "compiler",
     summary: "format DekaScript source or emitted JavaScript",
     aliases: &[],

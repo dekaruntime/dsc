@@ -77,7 +77,7 @@ mod tests {
 
     #[test]
     fn indexing_hats_fixtures() {
-        run_hats_fixtures("indexing", 5);
+        run_hats_fixtures("indexing", 6);
     }
 
     #[test]

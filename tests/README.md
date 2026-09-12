@@ -49,3 +49,14 @@ conversion, native DS-to-DS delegation, typed catches and awaited calls.
 Remaining work: statement lifting for bodyless matches nested within other
 expression operands, such as `Ok(match ...)`. These currently produce an
 explicit emission error instead of returning from an artificial IIFE.
+
+## Ternary conformance (rfd#65, part 1)
+
+`tests/fixtures/ternary/` contains five new Hats-format fixtures, following
+corpus-v0.49.3's exception fixtures: `.pass.ds` / `.pass.dsx` / `.fail.ds`,
+metadata JSON, and exact `.stdout` / exit `.code` for passing programs.
+They are local feature regressions, not a vendored copy of the owner corpus.
+`cargo test -p deka_emit ternary` checks every fixture and executes emitted
+JavaScript with Node.js (also required by the UI runtime tests); JSX output
+is syntax-checked because its imports require the host UI runtime. The fixtures
+can be moved to the owner corpus in a coordinated corpus release.

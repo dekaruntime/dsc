@@ -1,0 +1,6 @@
+{
+  "title": "Ternary non bool condition",
+  "stage": "typecheck",
+  "notes": "rfd#65 part 1: conditional expressions without narrowing facts.",
+  "expectedDiagnosticContains": "expected type `boolean`, found type `number`"
+}

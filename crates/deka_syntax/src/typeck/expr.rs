@@ -925,28 +925,10 @@ impl<'a> Checker<'a> {
                 span,
             } => {
                 let cond_type = self.check_expr(condition);
-                if !Self::is_boolean(&cond_type)
-                    && !cond_type.is_error()
-                    && !matches!(cond_type, Type::Infer)
-                {
-                    self.error_span(
-                        *span,
-                        format!("ternary condition must be boolean, found type `{cond_type}`"),
-                    );
-                }
+                self.expect_boolean(&cond_type, condition.span());
                 let then_type = self.check_expr(then_branch);
                 let else_type = self.check_expr(else_branch);
-                if self.is_assignable(&then_type, &else_type) {
-                    then_type
-                } else if self.is_assignable(&else_type, &then_type) {
-                    else_type
-                } else {
-                    self.error_span(
-                        *span,
-                        format!("ternary branches have incompatible types `{then_type}` and `{else_type}`"),
-                    );
-                    Type::Error
-                }
+                self.unify_ternary_arms(then_type, else_type, *span)
             }
             ast::Expr::TemplateLiteral { parts, .. } => {
                 // Interpolations are ordinary expressions: check them so an
@@ -2095,7 +2077,7 @@ impl<'a> Checker<'a> {
                 // `never` is assignable to anything, nothing is assignable to
                 // `never`, so seeding from a `never` arm rejected every arm
                 // after it and made the result depend on arm order (deka#407).
-                Some(Type::Never) => result_type = Some(arm_type),
+                Some(Type::Never) => result_type = self.unify_arm_types(&Type::Never, &arm_type),
                 Some(expected) => {
                     // rfd#56 phase 2: over a union-bounded parameter, an arm
                     // returning the narrowed member (a different concrete
@@ -2107,7 +2089,7 @@ impl<'a> Checker<'a> {
                     let narrowed_member = scrutinee_union_bound
                         .as_ref()
                         .is_some_and(|bound| self.is_assignable(bound, &arm_type));
-                    if !self.is_assignable(expected, &arm_type) && !narrowed_member {
+                    if self.unify_arm_types(expected, &arm_type).is_none() && !narrowed_member {
                         self.error_at_expr(
                             &arm.body,
                             super::with_union_narrowing_hint(

@@ -1,0 +1,3 @@
+fn view(visible: boolean) Component {
+    return <div title={visible ? "shown" : "hidden"}>{visible ? <span>yes</span> : <b>no</b>}</div>;
+}

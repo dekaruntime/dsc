@@ -1,0 +1,5 @@
+{
+  "title": "Ternary jsx",
+  "stage": "run",
+  "notes": "rfd#65 part 1: conditional expressions without narrowing facts."
+}

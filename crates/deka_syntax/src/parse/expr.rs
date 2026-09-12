@@ -179,15 +179,16 @@ impl<'a> Parser<'a> {
             }
 
             // Ternary conditional: `cond ? then : else`. Low precedence,
-            // right-associative, and binds looser than `||`.
-            if next_kind == TokenKind::Question && min_prec <= 2 {
+            // right-associative, between assignment and `||`. Both arms
+            // accept assignment expressions, as in JavaScript.
+            if next_kind == TokenKind::Question && min_prec <= 1 {
                 self.skip_newlines();
                 self.advance(); // `?`
-                let then_branch = alloc(self.arena, self.parse_expr(2)?);
+                let then_branch = alloc(self.arena, self.parse_expr(0)?);
                 self.skip_newlines();
                 self.expect(TokenKind::Colon)?;
                 self.skip_newlines();
-                let else_branch = alloc(self.arena, self.parse_expr(2)?);
+                let else_branch = alloc(self.arena, self.parse_expr(0)?);
                 let span = self.span_from(start, start_byte);
                 left = Expr::Ternary {
                     condition: alloc(self.arena, left),

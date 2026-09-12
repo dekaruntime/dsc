@@ -222,17 +222,7 @@ impl<'a> Checker<'a> {
                 };
                 let left = self.check_exception_use(then_branch, branch_use, expected.clone());
                 let right = self.check_exception_use(else_branch, branch_use, expected);
-                return if self.is_assignable(&left, &right) {
-                    left
-                } else if self.is_assignable(&right, &left) {
-                    right
-                } else {
-                    self.error_span(
-                        *span,
-                        format!("ternary branches have incompatible types `{left}` and `{right}`"),
-                    );
-                    Type::Error
-                };
+                return self.unify_ternary_arms(left, right, *span);
             }
             ast::Expr::Call {
                 callee,

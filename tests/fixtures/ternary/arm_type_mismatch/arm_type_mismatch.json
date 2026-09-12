@@ -1,0 +1,6 @@
+{
+  "title": "Ternary arm type mismatch",
+  "stage": "typecheck",
+  "notes": "rfd#65 part 1: conditional expressions without narrowing facts.",
+  "expectedDiagnosticContains": "ternary arm has type `string`, expected type `number`"
+}

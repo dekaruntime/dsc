@@ -1,0 +1,5 @@
+fn choose(flag: boolean) number { return flag ? 7 : 9; }
+const value = true || false ? choose(true) : choose(false);
+if (value != 7) { panic("conditional precedence or selection changed"); }
+const lazy = false ? panic("unselected arm ran") : 4;
+if (lazy != 4) { panic("wrong fallback"); }

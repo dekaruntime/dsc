@@ -152,10 +152,11 @@ impl<'a> Parser<'a> {
                 let is_const = self.current_kind() == TokenKind::Const;
                 self.advance();
 
-                if self.eat(TokenKind::LBracket) {
+                let rejected_nested = self.reject_nested_tuple_pattern();
+                if rejected_nested || self.eat(TokenKind::LBracket) {
                     let mut names = Vec::new();
                     self.skip_newlines();
-                    while !self.at(TokenKind::RBracket) {
+                    while !rejected_nested && !self.at(TokenKind::RBracket) {
                         names.push(self.expect_identifier()?);
                         self.skip_newlines();
                         if !self.eat(TokenKind::Comma) {
@@ -163,7 +164,9 @@ impl<'a> Parser<'a> {
                         }
                         self.skip_newlines();
                     }
-                    self.expect(TokenKind::RBracket)?;
+                    if !rejected_nested {
+                        self.expect(TokenKind::RBracket)?;
+                    }
                     let ty = if self.eat(TokenKind::Colon) {
                         Some(self.parse_type()?)
                     } else {
@@ -1238,7 +1241,13 @@ impl<'a> Parser<'a> {
         if !self.at(TokenKind::RParen) {
             loop {
                 let (param_start, param_start_byte) = self.span_start();
-                let name = self.expect_identifier()?;
+                self.skip_newlines();
+                let name = if self.reject_nested_tuple_pattern() {
+                    // Recovery only: parse() discards the AST on diagnostics.
+                    ""
+                } else {
+                    self.expect_identifier()?
+                };
                 let ty = if self.eat(TokenKind::Colon) {
                     Some(self.parse_type()?)
                 } else {

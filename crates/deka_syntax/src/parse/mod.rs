@@ -315,6 +315,56 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Reject a nested binding pattern once, at the first inner pattern.
+    /// Consume the whole outer pattern to avoid cascading parser errors. Flat
+    /// patterns are left untouched, including in positions that reject them.
+    fn reject_nested_tuple_pattern(&mut self) -> bool {
+        if !self.at(TokenKind::LBracket) {
+            return false;
+        }
+        let mut depth = 0;
+        let mut inner = None;
+        let mut inner_end = None;
+        let mut outer_end = None;
+        for (offset, token) in self.tokens[self.pos..].iter().enumerate() {
+            match token.kind {
+                TokenKind::LBracket => {
+                    depth += 1;
+                    if depth == 2 && inner.is_none() {
+                        inner = Some(token.span);
+                    }
+                }
+                TokenKind::RBracket => {
+                    if depth == 2 && inner_end.is_none() {
+                        inner_end = Some(token.span.byte_end);
+                    }
+                    depth -= 1;
+                    if depth == 0 {
+                        outer_end = Some(self.pos + offset);
+                        break;
+                    }
+                }
+                TokenKind::Eof => break,
+                _ => {}
+            }
+        }
+        let (Some(inner), Some(inner_end), Some(outer_end)) = (inner, inner_end, outer_end) else {
+            return false;
+        };
+        self.errors.push(
+            Diagnostic::error(
+                inner.start.line,
+                inner.start.column,
+                "nested tuple patterns are not supported; destructure in two steps: `const [pair, label] = ...` then `const [x, y] = pair`",
+            )
+            .with_underline(inner_end - inner.byte_start),
+        );
+        while self.pos <= outer_end {
+            self.advance();
+        }
+        true
+    }
+
     fn synchronize(&mut self) {
         while !self.at_end() && !self.at(TokenKind::Semicolon) && !self.at(TokenKind::RBrace) {
             self.advance();
@@ -419,6 +469,82 @@ mod tests {
             for e in &result.errors {
                 assert!(e.line >= 1 && e.column >= 1, "unpositioned: {e:?}");
             }
+        }
+    }
+
+    #[test]
+    fn nested_tuple_patterns_teach_at_the_inner_pattern() {
+        let mut messages = Vec::new();
+        for (source, line, column, length) in [
+            ("const [[x, y], label] = f();", 1, 8, 6),
+            ("let [label, [x, y]] = f();", 1, 13, 6),
+            ("fn f([[x, y], label]) {}", 1, 7, 6),
+            ("const f = fn ([[x, y], label]) {};", 1, 16, 6),
+            ("const [[[x, y], z], label] = f();", 1, 8, 11),
+            ("let [[[x, y], z], label] = f();", 1, 6, 11),
+            ("fn f([[[x, y], z], label]) {}", 1, 7, 11),
+            ("const [\n  [x, y],\n  label\n] = f();", 2, 3, 6),
+            ("const [[x, y], [z, w]] = f();", 1, 8, 6),
+            ("fn f(\n  [[x, y], label]\n) {}", 2, 4, 6),
+            ("fn f(prefix: number, [label, [x, y]]) {}", 1, 30, 6),
+            ("interface F { fn f([[x, y], label]) }", 1, 21, 6),
+            (r#"summon { f([[x, y], label]) number } from "./f.mjs""#, 1, 13, 6),
+        ] {
+            let arena = Bump::new();
+            let result = parse(source, &arena);
+            assert!(result.program.is_none(), "{source}");
+            assert_eq!(result.errors.len(), 1, "{source}: {:?}", result.errors);
+            let error = &result.errors[0];
+            assert_eq!(
+                (error.line, error.column, error.underline_length),
+                (line, column, length),
+                "{source}"
+            );
+            assert_eq!(error.severity, crate::diagnostics::Severity::Error);
+            messages.push(error.message.clone());
+        }
+        // One golden for the wording; every position shares that diagnostic.
+        insta::assert_snapshot!(messages[0], @"nested tuple patterns are not supported; destructure in two steps: `const [pair, label] = ...` then `const [x, y] = pair`");
+        assert!(messages.iter().all(|message| message == &messages[0]));
+    }
+
+    #[test]
+    fn flat_tuple_parameter_behavior_is_unchanged() {
+        // Main does not support arrow functions or tuple fn parameters. Keep
+        // those existing diagnostics; #200 must not add either feature.
+        for (source, column, count, message) in [
+            ("const f = ([k, v]) => k;", 20, 1, "expected `;` or newline, found ``=>``"),
+            ("fn f([k, v]) {}", 6, 2, "expected identifier, found ``[``"),
+        ] {
+            let arena = Bump::new();
+            let result = parse(source, &arena);
+            assert!(result.program.is_none(), "{source}");
+            assert_eq!(result.errors.len(), count, "{source}: {:?}", result.errors);
+            assert_eq!(result.errors[0].message, message, "{source}");
+            assert_eq!((result.errors[0].line, result.errors[0].column), (1, column));
+        }
+    }
+
+    #[test]
+    fn flat_tuple_bindings_are_unchanged() {
+        for (source, expected_const) in [
+            ("const [k, v]: [number, string] = [1, \"value\"];", true),
+            ("let [k, v]: [number, string] = [1, \"value\"];", false),
+        ] {
+            let arena = Bump::new();
+            let result = parse(source, &arena);
+            assert!(result.errors.is_empty(), "{:?}", result.errors);
+            let program = result.program.unwrap();
+            let Stmt::TupleBinding {
+                names, is_const, ..
+            } = &program.statements[0]
+            else {
+                panic!("expected tuple binding");
+            };
+            assert_eq!(*names, ["k", "v"]);
+            assert_eq!(*is_const, expected_const);
+            let checked = crate::check_program(&program, source);
+            assert!(checked.errors.is_empty(), "{:?}", checked.errors);
         }
     }
 

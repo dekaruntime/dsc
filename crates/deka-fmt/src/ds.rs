@@ -68,6 +68,13 @@ impl<'src> Formatter<'src> {
         while self.comment_cursor < self.comments.len()
             && self.comments[self.comment_cursor].line < line
         {
+            // Standalone comments may follow the final statement in a file
+            // or block, where there is no next-statement separator. Start
+            // their own line on the first pass instead of attaching them to
+            // the statement and letting the next pass add an inline space.
+            if !self.at_line_start {
+                self.newline();
+            }
             let text = self.comments[self.comment_cursor].text.clone();
             self.write(&text);
             self.newline();
@@ -697,7 +704,9 @@ impl<'src> Formatter<'src> {
             // Comments between the last statement and the closing brace.
             this.emit_comments_before(end_line);
         });
-        self.newline();
+        if !self.at_line_start {
+            self.newline();
+        }
         self.write("}");
     }
 
@@ -2183,6 +2192,72 @@ mod tests {
         assert_eq!(once, twice);
         assert!(once.contains("// header"));
         assert!(once.contains("// note"));
+    }
+
+    // dsc#193: the new tour lessons exposed a shared EOF-comment boundary,
+    // independent of the expression preceding it. Keep each reduced surface
+    // here so the older CI tour pin still guards the regression.
+    fn eof_comment_round_trips(source: &str) {
+        parse_ds(source);
+        let once = format_ds(source).unwrap();
+        parse_ds(&once);
+        assert_eq!(once, format_ds(&once).unwrap(), "not idempotent");
+        assert!(once.ends_with("\n// after\n"), "got: {once}");
+    }
+
+    #[test]
+    fn eof_comment_after_call_is_idempotent() {
+        eof_comment_round_trips("show(\"\")\n// after\n");
+    }
+
+    #[test]
+    fn eof_comment_after_has_ternary_is_idempotent() {
+        eof_comment_round_trips(
+            "show(items.has(i) ? items[i] : \"outside\")\n// after\n",
+        );
+    }
+
+    #[test]
+    fn eof_comment_after_option_field_is_idempotent() {
+        eof_comment_round_trips("show(profile.score)\n// after\n");
+    }
+
+    #[test]
+    fn eof_comment_after_exception_match_is_idempotent() {
+        eof_comment_round_trips(
+            "show(match resume(saved) { Ok(value) => value, Throw(error) => error })\n// after\n",
+        );
+    }
+
+    #[test]
+    fn eof_comment_after_option_match_is_idempotent() {
+        eof_comment_round_trips(
+            "show(match name { Some(value) => value, None => \"friend\" })\n// after\n",
+        );
+    }
+
+    #[test]
+    fn eof_comment_after_bodyless_match_is_idempotent() {
+        eof_comment_round_trips(
+            "const value = match run() { Ok(value) => value, Throw(error) }\n// after\n",
+        );
+    }
+
+    #[test]
+    fn standalone_comment_boundaries_are_idempotent() {
+        for source in [
+            "const x = 1\n// after\n",
+            "const x = 1\n// first\n// after\n",
+            "const x = 1 // inline\n// after\n",
+            "// after\n",
+            "fn f() {\n  return 1\n  // after\n}\n",
+        ] {
+            parse_ds(source);
+            let once = format_ds(source).unwrap();
+            parse_ds(&once);
+            assert_eq!(once, source);
+            assert_eq!(once, format_ds(&once).unwrap());
+        }
     }
 
     #[test]

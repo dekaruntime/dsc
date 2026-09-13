@@ -148,7 +148,7 @@ fn emit_ds_file(
         .strip_prefix(input_root)
         .map_err(|_| "failed to preserve source tree".to_string())?;
     let output = output_root.join(rel).with_extension("js");
-    let js = build_module(source, cwd, false, false, false)?;
+    let js = build_module(source, cwd, false, false, false, false)?;
     write_generated_js(&output, &js)
 }
 

@@ -69,3 +69,41 @@ fn single_file_and_project_check_reject_ordinary_unresolved_imports() {
         );
     }
 }
+
+#[test]
+fn check_help_lists_dev() {
+    let output = Command::new(cli_bin())
+        .args(["check", "--help"])
+        .output()
+        .expect("run check help");
+    assert!(output.status.success());
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(text.contains("--dev"), "missing --dev: {text}");
+}
+
+#[test]
+fn check_dev_typechecks_dsx() {
+    let project = tempfile::tempdir().expect("tempdir");
+    let source = project.path().join("card.dsx");
+    fs::write(
+        &source,
+        "export fn Card() ReactNode {\n  return <p>hello</p>;\n}\n",
+    )
+    .expect("source fixture");
+
+    let output = Command::new(cli_bin())
+        .args(["check", "--dev", source.to_str().unwrap()])
+        .current_dir(project.path())
+        .output()
+        .expect("run dsc check --dev");
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

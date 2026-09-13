@@ -69,6 +69,7 @@ fn run(context: &Context) -> Result<(), String> {
         .copied()
         .unwrap_or(false);
     let client = context.args.flags.get("--client").copied().unwrap_or(false);
+    let dev = context.args.flags.get("--dev").copied().unwrap_or(false);
 
     let entry = match (input.is_file(), input.is_dir()) {
         (true, _) => {
@@ -90,7 +91,7 @@ fn run(context: &Context) -> Result<(), String> {
         _ => return Err(format!("input path does not exist: {}", input.display())),
     };
 
-    let js = transpile::build_bundle(&entry, &context.env.cwd, treeshake, client)?;
+    let js = transpile::build_bundle(&entry, &context.env.cwd, treeshake, client, dev)?;
     transpile::write_generated_js(&output, &js)?;
     stdio::success(&format!(
         "bundled {} -> {}",
@@ -101,7 +102,7 @@ fn run(context: &Context) -> Result<(), String> {
 }
 
 fn usage() -> &'static str {
-    "usage: dsc bundle <file-or-directory> --out <file.js> [--treeshake] [--client]\n\nCompiles the input, bundles the resolved module graph into a single\nJavaScript file, and optimizes it.\n  --out <file.js>: required output file\n  --treeshake: minify the bundled JavaScript\n  --client: fail the build if the graph can reach ui/server\n\nExamples:\n  dsc bundle app/main.ds --out dist/app.js\n  dsc bundle app --out dist/app.js --treeshake"
+    "usage: dsc bundle <file-or-directory> --out <file.js> [--treeshake] [--client] [--dev]\n\nCompiles the input, bundles the resolved module graph into a single\nJavaScript file, and optimizes it.\n  --out <file.js>: required output file\n  --treeshake: minify the bundled JavaScript\n  --client: fail the build if the graph can reach ui/server\n  --dev: emit jsxDEV with DS source locations\n\nExamples:\n  dsc bundle app/main.ds --out dist/app.js\n  dsc bundle app --out dist/app.js --treeshake"
 }
 
 #[cfg(test)]

@@ -123,7 +123,41 @@ fn help_exits_zero_and_prints_usage() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    for expected in ["--out", "--treeshake", "--client", "Examples:"] {
+    for expected in ["--out", "--treeshake", "--client", "--dev", "Examples:"] {
         assert!(text.contains(expected), "missing {expected}: {text}");
     }
+}
+
+#[test]
+fn bundle_dev_emits_jsxdev() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    write(&root.join("deka.json"), r#"{"jsxDevRuntime":"./dev.mjs"}"#);
+    write(
+        &root.join("dev.mjs"),
+        "export function jsxDEV(type, props, key) { return { type, props, key }; }\nexport const Fragment = \"fragment\";\n",
+    );
+    let source = root.join("card.dsx");
+    write(
+        &source,
+        "export fn Card() ReactNode {\n  return <p>hello</p>;\n}\n",
+    );
+    let out = root.join("bundle.js");
+    let output = bundle(&[
+        "bundle",
+        "--dev",
+        source.to_str().unwrap(),
+        "--out",
+        out.to_str().unwrap(),
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let emitted = fs::read_to_string(&out).expect("bundle output");
+    assert!(
+        emitted.contains("jsxDEV"),
+        "bundle --dev must emit jsxDEV: {emitted}"
+    );
 }

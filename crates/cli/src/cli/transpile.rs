@@ -51,6 +51,11 @@ pub fn register(registry: &mut Registry) {
         aliases: &[],
         description: "inline each module's prelude so files can load in separate scopes",
     });
+    registry.add_flag(core::FlagSpec {
+        name: "--dev",
+        aliases: &[],
+        description: "emit jsxDEV with DS source locations (React development runtime)",
+    });
     registry.add_param(ParamSpec {
         name: "--out",
         description: "output .js file (file) or output directory (preserve)",
@@ -102,6 +107,7 @@ fn run(context: &Context) -> Result<(), String> {
         .get("--self-contained")
         .copied()
         .unwrap_or(false);
+    let dev = context.args.flags.get("--dev").copied().unwrap_or(false);
 
     match (input.is_file(), input.is_dir()) {
         (true, _) => transpile_file(
@@ -111,6 +117,7 @@ fn run(context: &Context) -> Result<(), String> {
             treeshake,
             client,
             self_contained,
+            dev,
             &context.env.cwd,
         ),
         (_, true) => transpile_directory(
@@ -120,6 +127,7 @@ fn run(context: &Context) -> Result<(), String> {
             treeshake,
             client,
             self_contained,
+            dev,
             &context.env.cwd,
         ),
         _ => Err(format!("input path does not exist: {}", input.display())),
@@ -127,7 +135,7 @@ fn run(context: &Context) -> Result<(), String> {
 }
 
 fn usage() -> &'static str {
-    "usage: dsc transpile <file-or-directory> [--preserve|--bundle] [--treeshake] [--client] [--out <path>]\n\nModes:\n  file: writes adjacent <name>.js by default; --out selects the output file\n  directory: --preserve is the default and mirrors .ds paths as .js paths\n  directory --bundle: requires --out <file.js> and emits one resolved graph\n  --treeshake: minify emitted JavaScript in either mode\n  --client: fail the build if the graph can reach ui/server\n  --self-contained: inline per-module prelude (isolate ESM loader)\n\nExamples:\n  dsc transpile app/main.ds\n  dsc transpile app --preserve --out generated\n  dsc transpile app --bundle --out dist/app.js --treeshake\n  dsc transpile island.dsx --bundle --client --out dist/island.js"
+    "usage: dsc transpile <file-or-directory> [--preserve|--bundle] [--treeshake] [--client] [--dev] [--out <path>]\n\nModes:\n  file: writes adjacent <name>.js by default; --out selects the output file\n  directory: --preserve is the default and mirrors .ds paths as .js paths\n  directory --bundle: requires --out <file.js> and emits one resolved graph\n  --treeshake: minify emitted JavaScript in either mode\n  --client: fail the build if the graph can reach ui/server\n  --self-contained: inline per-module prelude (isolate ESM loader)\n  --dev: emit jsxDEV with DS source locations\n\nExamples:\n  dsc transpile app/main.ds\n  dsc transpile app --preserve --out generated\n  dsc transpile app --bundle --out dist/app.js --treeshake\n  dsc transpile island.dsx --bundle --client --out dist/island.js"
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -174,6 +182,7 @@ pub(crate) fn transpile_entry_file(
         false,
         false,
         false,
+        false,
         cwd,
     )
 }
@@ -185,6 +194,7 @@ fn transpile_file(
     treeshake: bool,
     client: bool,
     self_contained: bool,
+    dev: bool,
     cwd: &Path,
 ) -> Result<(), String> {
     require_ds(input)?;
@@ -194,7 +204,7 @@ fn transpile_file(
     if self_contained && mode != TranspileMode::Bundle {
         if let Some(output) = out {
             if out_is_graph_dir(output) {
-                return write_self_contained_graph(input, output, cwd, treeshake, client);
+                return write_self_contained_graph(input, output, cwd, treeshake, client, dev);
             }
         }
     }
@@ -205,9 +215,9 @@ fn transpile_file(
         return Err("output path must differ from the .ds input path".to_string());
     }
     let js = if mode == TranspileMode::Bundle {
-        build_bundle(input, cwd, treeshake, client)?
+        build_bundle(input, cwd, treeshake, client, dev)?
     } else {
-        build_module(input, cwd, treeshake, client, self_contained)?
+        build_module(input, cwd, treeshake, client, self_contained, dev)?
     };
     write_generated_js(&output, &js)?;
     stdio::success(&format!(
@@ -224,8 +234,9 @@ fn write_self_contained_graph(
     cwd: &Path,
     treeshake: bool,
     client: bool,
+    dev: bool,
 ) -> Result<(), String> {
-    let (entry, modules) = compile_graph_modules(input, cwd, client, true)?;
+    let (entry, modules) = compile_graph_modules(input, cwd, client, true, dev)?;
     let project_root = find_project_root(cwd, input)
         .or_else(|| input.parent().map(Path::to_path_buf))
         .unwrap_or_else(|| PathBuf::from("."));
@@ -260,6 +271,7 @@ fn transpile_directory(
     treeshake: bool,
     client: bool,
     self_contained: bool,
+    dev: bool,
     cwd: &Path,
 ) -> Result<(), String> {
     let sources = collect_ds_sources(input)?;
@@ -276,7 +288,7 @@ fn transpile_directory(
                 return Err("directory --bundle --out must name a .js file".to_string());
             }
             let entry = directory_entry(input, &sources)?;
-            let js = build_bundle(&entry, cwd, treeshake, client)?;
+            let js = build_bundle(&entry, cwd, treeshake, client, dev)?;
             write_generated_js(output, &js)?;
             stdio::success(&format!(
                 "transpiled {} -> {}",
@@ -296,7 +308,7 @@ fn transpile_directory(
                     .strip_prefix(input)
                     .map_err(|_| "failed to preserve source tree".to_string())?;
                 let output = output_root.join(rel).with_extension("js");
-                let js = build_module(source, cwd, treeshake, client, self_contained)?;
+                let js = build_module(source, cwd, treeshake, client, self_contained, dev)?;
                 write_generated_js(&output, &js)?;
             }
             stdio::success(&format!(
@@ -331,8 +343,9 @@ pub(crate) fn build_module(
     treeshake: bool,
     client: bool,
     self_contained: bool,
+    dev: bool,
 ) -> Result<String, String> {
-    let mut js = compile_source_js(input, cwd, client, self_contained)?;
+    let mut js = compile_source_js(input, cwd, client, self_contained, dev)?;
     // On-disk preserve mode rewrites relative `.ds` imports to `.js` peers.
     // `--self-contained` is for the isolate ESM loader, which resolves `.ds`
     // specifiers from memory — rewriting those to `.js` makes Deno ENOENT.
@@ -350,6 +363,7 @@ pub(crate) fn build_bundle(
     cwd: &Path,
     treeshake: bool,
     client: bool,
+    dev: bool,
 ) -> Result<String, String> {
     let entry = fs::canonicalize(input)
         .map_err(|err| format!("failed to resolve {}: {err}", input.display()))?;
@@ -362,6 +376,7 @@ pub(crate) fn build_bundle(
         &loader,
         GraphCompileOptions {
             client,
+            dev,
             ..Default::default()
         },
     )
@@ -470,8 +485,14 @@ mod react_tests {
     fn bundle_preserves_react_children_and_project_runtime() {
         let tmp = tempfile::tempdir().unwrap();
         let entry = tmp.path().join("page.dsx");
-        fs::write(tmp.path().join("deka.json"), r#"{"jsxRuntime":"./runtime.mjs"}"#).unwrap();
-        fs::write(tmp.path().join("runtime.mjs"), r#"
+        fs::write(
+            tmp.path().join("deka.json"),
+            r#"{"jsxRuntime":"./runtime.mjs"}"#,
+        )
+        .unwrap();
+        fs::write(
+            tmp.path().join("runtime.mjs"),
+            r#"
 export const Fragment = "fragment";
 export function jsx(type, props, key) {
   void 0 !== key && (key = "" + key);
@@ -479,20 +500,36 @@ export function jsx(type, props, key) {
   return {type, props, key};
 }
 export const jsxs = jsx;
-"#).unwrap();
-        fs::write(&entry, r#"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            &entry,
+            r#"
 interface Props { message: string }
 export fn Greeting(props: Props) ReactNode {
   return <><section key="g"><span>Hello</span><span>{props.message}</span></section></>;
 }
-"#).unwrap();
+"#,
+        )
+        .unwrap();
         for treeshake in [false, true] {
-            let js = build_bundle(&entry, tmp.path(), treeshake, false).unwrap();
-            assert!(!js.contains("ui/jsx") && !js.contains("ui/reactive"), "{js}");
+            let js = build_bundle(&entry, tmp.path(), treeshake, false, false).unwrap();
+            assert!(
+                !js.contains("ui/jsx") && !js.contains("ui/reactive"),
+                "{js}"
+            );
             let output = tmp.path().join("bundle.mjs");
             fs::write(&output, format!("{js}\nconst node = Greeting({{message: 'survives'}});\nif (node.props.children.props.children[1].props.children !== 'survives') throw Error('children dropped');\nif (node.props.children.key !== 'g') throw Error('key dropped');\n")).unwrap();
-            let run = std::process::Command::new("node").arg(output).output().unwrap();
-            assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+            let run = std::process::Command::new("node")
+                .arg(output)
+                .output()
+                .unwrap();
+            assert!(
+                run.status.success(),
+                "{}",
+                String::from_utf8_lossy(&run.stderr)
+            );
         }
     }
 }

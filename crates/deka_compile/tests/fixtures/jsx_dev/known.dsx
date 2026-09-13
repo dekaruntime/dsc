@@ -1,0 +1,4 @@
+// The opening element must remain at line 3, column 10.
+export fn Card() ReactNode {
+  return <p>hello</p>;
+}

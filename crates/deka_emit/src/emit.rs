@@ -480,6 +480,7 @@ pub fn emit_js_with_options<'a>(
         false,
         None,
         deka_syntax::program_needs_hydration_ids(program, imports),
+        false,
     )?
     .js)
 }
@@ -534,8 +535,10 @@ pub fn emit_js_module_with_options<'a>(
     detached: bool,
     jsx_runtime: Option<String>,
     inject_deka_id: bool,
+    dev: bool,
 ) -> Result<ModuleEmit, String> {
     let mut emitter = Emitter::new(program);
+    emitter.dev = dev;
     emitter.configure_jsx_names(source);
     emitter.module_base = module_base;
     emitter.source_path = file_path.to_string();
@@ -585,9 +588,11 @@ pub fn emit_dev_entry<'a>(
     file_path: &str,
     module_root: Option<PathBuf>,
     jsx_runtime: Option<String>,
+    dev: bool,
 ) -> Result<String, String> {
     let mut emitter = Emitter::new(program);
     if let Some(runtime) = jsx_runtime { emitter.jsx_runtime = runtime; }
+    emitter.dev = dev;
     emitter.configure_jsx_names(source);
     emitter.module_base = module_base;
     emitter.source_path = file_path.to_string();
@@ -1320,7 +1325,8 @@ struct Emitter<'a> {
     /// When set, only these top-level names are emitted (graph shaking).
     live_names: Option<HashSet<String>>,
     jsx_runtime: String,
-    jsx_helpers: [String; 3],
+    jsx_helpers: [String; 4],
+    dev: bool,
     /// When true (module-graph emission), the shared runtime prelude is NOT
     /// inlined into this module's output. The module graph synthesizes it
     /// once per program from the union of per-module [`Self::demand`]
@@ -1385,7 +1391,8 @@ impl<'a> Emitter<'a> {
             jsx_roots: 0,
             live_names: None,
             jsx_runtime: "@js/react/jsx-runtime".to_string(),
-            jsx_helpers: ["jsx".into(), "jsxs".into(), "Fragment".into()],
+            jsx_helpers: ["jsx".into(), "jsxs".into(), "Fragment".into(), "jsxDEV".into()],
+            dev: false,
             detached: false,
             inject_deka_id: false,
             demand: crate::prelude::PreludeDemand::default(),
@@ -1465,7 +1472,8 @@ impl<'a> Emitter<'a> {
         if self.needs_jsx_helper() {
             if !first { self.out.push('\n'); }
             first = false;
-            let helpers: Vec<String> = ["jsx", "jsxs", "Fragment"].iter().zip(&self.jsx_helpers)
+            let names: &[(&str, usize)] = if self.dev { &[("jsxDEV", 3), ("Fragment", 2)] } else { &[("jsx", 0), ("jsxs", 1), ("Fragment", 2)] };
+            let helpers: Vec<String> = names.iter().map(|(name, index)| (name, &self.jsx_helpers[*index]))
                 .map(|(name, local)| if *name == local { local.clone() } else { format!("{name} as {local}") }).collect();
             self.out.push_str("import { ");
             self.out.push_str(&helpers.join(", "));
@@ -4056,8 +4064,8 @@ impl<'a> Emitter<'a> {
             Expr::JsxElement { element, .. } => {
                 self.emit_jsx_element(element)?;
             }
-            Expr::JsxFragment { children, .. } => {
-                self.emit_jsx_fragment(children)?;
+            Expr::JsxFragment { children, span } => {
+                self.emit_jsx_fragment(children, *span)?;
             }
             Expr::JsxText { value, .. } => {
                 self.out.push('"');
@@ -4854,6 +4862,7 @@ impl<'a> Emitter<'a> {
                     live_names: None,
                     jsx_runtime: self.jsx_runtime.clone(),
                     jsx_helpers: self.jsx_helpers.clone(),
+                    dev: self.dev,
                     detached: false,
                     inject_deka_id: false,
                     demand: crate::prelude::PreludeDemand::default(),
@@ -5143,19 +5152,30 @@ impl<'a> Emitter<'a> {
             props.push(format!("\"children\": [{}]", child_values.join(", ")));
         }
         let helper = usize::from(child_values.len() > 1);
-        self.out.push_str(&self.jsx_helpers[helper]);
+        self.out.push_str(&self.jsx_helpers[if self.dev { 3 } else { helper }]);
         self.out.push('(');
         self.out.push_str(&tag_expr);
         self.out.push_str(", {");
         self.out.push_str(&props.join(", "));
         self.out.push('}');
-        if let Some(key) = key {
+        if self.dev {
+            self.emit_jsx_dev_args(key.as_deref(), helper == 1, element.span);
+        } else if let Some(key) = key {
             self.out.push_str(", ");
             self.out.push_str(&key);
         }
         self.out.push(')');
         self.exit_jsx_node();
         Ok(())
+    }
+
+    /// JSX spans point at the opening `<` in DS source, including Fragments.
+    fn emit_jsx_dev_args(&mut self, key: Option<&str>, is_static: bool, span: deka_syntax::Span) {
+        self.out.push_str(&format!(
+            ", {}, {}, {{fileName: {}, lineNumber: {}, columnNumber: {}}}, this",
+            key.unwrap_or("undefined"), is_static, json_string(&self.source_path),
+            span.start.line, span.start.column,
+        ));
     }
 
     fn emit_jsx_child(&mut self, child: &Expr<'a>) -> Result<String, String> {
@@ -5166,7 +5186,7 @@ impl<'a> Emitter<'a> {
         Ok(buf)
     }
 
-    fn emit_jsx_fragment(&mut self, children: &[Expr<'a>]) -> Result<(), String> {
+    fn emit_jsx_fragment(&mut self, children: &[Expr<'a>], span: deka_syntax::Span) -> Result<(), String> {
         self.enter_jsx_node();
         let mut child_values = Vec::new();
         for child in children.iter() {
@@ -5174,7 +5194,7 @@ impl<'a> Emitter<'a> {
         }
 
         let helper = usize::from(child_values.len() > 1);
-        self.out.push_str(&self.jsx_helpers[helper]);
+        self.out.push_str(&self.jsx_helpers[if self.dev { 3 } else { helper }]);
         self.out.push('(');
         self.out.push_str(&self.jsx_helpers[2]);
         self.out.push_str(", {");
@@ -5186,7 +5206,11 @@ impl<'a> Emitter<'a> {
             self.out.push_str(&child_values.join(", "));
             self.out.push(']');
         }
-        self.out.push_str("})");
+        self.out.push('}');
+        if self.dev {
+            self.emit_jsx_dev_args(None, helper == 1, span);
+        }
+        self.out.push(')');
         self.exit_jsx_node();
         Ok(())
     }

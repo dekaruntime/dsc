@@ -150,6 +150,8 @@ impl ProjectState {
 
         let options = GraphCompileOptions {
             jsx_runtime: None,
+            jsx_dev_runtime: None,
+            dev: false,
             client: false,
             module_base: self.module_base.clone(),
             // Virtual in-memory project: paths are already project-relative,

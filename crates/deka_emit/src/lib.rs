@@ -2642,6 +2642,63 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
     }
 
     #[test]
+    fn emit_automemo_over_usecontext_value() {
+        // Lane C × D: a useContext result is a tracked input (same as useState).
+        // The hook call itself is not memoizable; a pure expression over the
+        // result is, with the context value in deps. A default makes the
+        // provider-presence proof vacuously green.
+        let out = parse_check_and_emit(
+            "const LocaleContext = createContext<string>(\"en\");\n\
+             fn Page() ReactNode {\n\
+               const locale = useContext(LocaleContext);\n\
+               const label = locale + \"!\";\n\
+               return <p>{label}</p>;\n\
+             }",
+        );
+        assert!(
+            out.contains("import { createContext, useContext, useMemo } from \"@js/react\";"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("const locale = useContext(LocaleContext);"),
+            "useContext call is not memoizable itself, got: {out}"
+        );
+        assert!(
+            !out.contains("useMemo(function() { return useContext"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("const label = useMemo(function() { return locale + \"!\"; }, [locale]);"),
+            "context value is a tracked input, got: {out}"
+        );
+
+        // Provider-presence is about JSX wrapping, not memo sites: a no-default
+        // consumer under <Ctx.Provider> still proves when the same component
+        // also auto-memoizes a derived const.
+        let wrapped = parse_check_and_emit(
+            "const ThemeContext = createContext<string>();\n\
+             fn Page() ReactNode {\n\
+               const theme = useContext(ThemeContext);\n\
+               const label = theme + \"!\";\n\
+               return <p>{label}</p>;\n\
+             }\n\
+             fn App() ReactNode {\n\
+               return <ThemeContext.Provider value={\"dark\"}><Page /></ThemeContext.Provider>;\n\
+             }",
+        );
+        assert!(
+            wrapped.contains(
+                "const label = useMemo(function() { return theme + \"!\"; }, [theme]);"
+            ),
+            "got: {wrapped}"
+        );
+        assert!(
+            wrapped.contains("ThemeContext.Provider") && wrapped.contains("\"value\": \"dark\""),
+            "provider proof still green with memo wrappers, got: {wrapped}"
+        );
+    }
+
+    #[test]
     fn emit_useref_is_byte_idiomatic() {
         let out = parse_check_and_emit(
             "fn Counter() ReactNode {\n\

@@ -246,6 +246,154 @@ log(claims().subject("hello "))
 }
 
 #[test]
+fn summoned_url_survives_two_hop_forward() {
+    let dir = fixture();
+    fs::write(
+        dir.path().join("parse.mjs"),
+        "export function parse_http_url(url) { return { host: 'example.com' }; }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("url.ds"),
+        r#"
+interface Url { host: string }
+summon { parse_http_url(url: string) Exception<Url, JsError> } from "./parse.mjs"
+export fn parse_url(url: string) Exception<Url, JsError> { return parse_http_url(url) }
+export fn host_of(u: Url) string { return u.host }
+"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("mid.ds"),
+        r#"
+import { parse_url, host_of } from "./url.ds"
+export fn forwarded(s: string) string {
+  return match (parse_url(s)) { Ok(u) => host_of(u), Throw(e) => "" }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("main.ds"),
+        r#"
+import { forwarded } from "./mid.ds"
+summon { total log(value: string) void } from "./log.mjs"
+log(forwarded("https://example.com"))
+"#,
+    )
+    .unwrap();
+    run(dir.path(), "main.ds", "example.com\n");
+}
+
+#[test]
+fn summon_fn_type_uses_canonical_interface() {
+    let dir = fixture();
+    fs::write(
+        dir.path().join("parse.mjs"),
+        "export function parse_http_url(url) { return { host: 'example.com' }; }\nexport function apply_host(f, u) { return f(u); }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("url.ds"),
+        r#"
+interface Url { host: string }
+summon {
+  parse_http_url(url: string) Exception<Url, JsError>,
+  total apply_host(f: fn(Url) string, u: Url) string
+} from "./parse.mjs"
+export fn parse_url(url: string) Exception<Url, JsError> { return parse_http_url(url) }
+export fn host_of(u: Url) string { return u.host }
+export fn run(s: string) string {
+  return match (parse_url(s)) { Ok(u) => apply_host(host_of, u), Throw(e) => "" }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("main.ds"),
+        r#"
+import { run } from "./url.ds"
+summon { total log(value: string) void } from "./log.mjs"
+log(run("https://example.com"))
+"#,
+    )
+    .unwrap();
+    run(dir.path(), "main.ds", "example.com\n");
+}
+
+#[test]
+fn local_url_accepts_imported_summon_payload() {
+    let dir = fixture();
+    fs::write(
+        dir.path().join("parse.mjs"),
+        "export function parse_http_url(url) { return { host: 'example.com' }; }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("url.ds"),
+        r#"
+interface Url { host: string }
+summon { parse_http_url(url: string) Exception<Url, JsError> } from "./parse.mjs"
+export fn parse_url(url: string) Exception<Url, JsError> { return parse_http_url(url) }
+"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("mid.ds"),
+        r#"
+import { parse_url } from "./url.ds"
+interface Url { host: string }
+fn host_of(u: Url) string { return u.host }
+export fn forwarded(s: string) string {
+  return match (parse_url(s)) { Ok(u) => host_of(u), Throw(e) => "" }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("main.ds"),
+        r#"
+import { forwarded } from "./mid.ds"
+summon { total log(value: string) void } from "./log.mjs"
+log(forwarded("https://example.com"))
+"#,
+    )
+    .unwrap();
+    run(dir.path(), "main.ds", "example.com\n");
+}
+
+#[test]
+fn same_name_different_module_urls_are_rejected() {
+    let dir = fixture();
+    fs::write(
+        dir.path().join("a.ds"),
+        "interface Url { host: string }\nexport fn parse_a() Url { return { host: \"example.com\" } }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("b.ds"),
+        "interface Url { port: number }\nexport fn take_b(u: Url) number { return u.port }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("main.ds"),
+        "import { parse_a } from \"./a.ds\"\nimport { take_b } from \"./b.ds\"\nconst n = take_b(parse_a())\n",
+    )
+    .unwrap();
+    let errors = compile_module_graph(
+        &dir.path().join("main.ds"),
+        &FsModuleLoader::new(dir.path().into()),
+    )
+    .unwrap_err();
+    assert!(
+        errors.iter().any(|d| d
+            .message
+            .contains("expected argument type `Url`, found type `Url`")),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn recursive_interface_arguments_terminate_and_check_nonrecursive_fields() {
     let dir = fixture();
     fs::write(dir.path().join("accept.ds"), "interface Claims { next?: Claims; sub: string }\nexport fn accept(c: Claims) string { return c.sub }\n").unwrap();

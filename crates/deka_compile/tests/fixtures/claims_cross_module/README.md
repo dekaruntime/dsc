@@ -22,3 +22,10 @@ The existing `export { Claims }` spelling exports an erased type binding.
 A private interface carried by a public function signature needs no explicit
 export to permit field access. Direct `export interface` syntax is tracked
 separately in dsc#185; JSX attribute validation remains dsc#118's scope.
+
+Summon signatures that mention a local interface keep that declaration's
+identity (dsc#206). A two-hop forward of `Exception<Url, JsError>` therefore
+compares as the same `Url` as a `host_of(u: Url)` in the declaring module.
+A same-shape local `Url` may still structurally satisfy an imported payload;
+two different modules' `Url` declarations with incompatible members do not,
+even though both print as `Url`.

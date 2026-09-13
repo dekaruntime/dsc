@@ -1,7 +1,7 @@
 // ui/client — walk-and-attach hydrate. Never import ui/server.
 // Registry is created lazily on first registerIsland.
 
-import { isComponentNode, Fragment } from "./jsx.js";
+import { isComponentNode, Fragment } from "./node.js";
 import { isLive, effect } from "./reactive.js";
 
 let registry;

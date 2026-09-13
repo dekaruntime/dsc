@@ -199,7 +199,7 @@ mod tests {
     #[test]
     fn interactive_component_is_squiggled_at_unhydrated_dsx_tag() {
         let source = "import { signal } from \"ui/reactive\"\n\
-fn Counter() Component { return <button onClick={clicked}>0</button> }\n\
+fn Counter() ReactNode { return <button onClick={clicked}>0</button> }\n\
 fn clicked() {}\n\
 const page = <Counter />\n";
         let diagnostics = analyze(source, &AnalysisContext::new("file:///workspace/page.dsx"));

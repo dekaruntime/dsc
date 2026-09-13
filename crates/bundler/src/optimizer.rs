@@ -20,7 +20,7 @@ use swc_ecma_codegen::{Emitter, text_writer::JsWriter};
 use swc_ecma_minifier::optimize;
 use swc_ecma_minifier::option::{CompressOptions, MangleOptions, MinifyOptions};
 use swc_ecma_parser::{EsSyntax, Parser, StringInput, Syntax, lexer::Lexer};
-use swc_ecma_transforms_base::resolver;
+use swc_ecma_transforms_base::{fixer::fixer, resolver};
 
 /// Optimize already-emitted ESM without resolving or bundling imports.
 ///
@@ -105,7 +105,13 @@ pub(crate) fn minify_module(
             mangle_name_cache: Default::default(),
         },
     ) {
-        Program::Module(module) => module,
+        Program::Module(module) => {
+            // Compression removes ParenExpr nodes. Restore syntax-required
+            // parentheses before codegen (React's key coercion uses `&& (key = …)`).
+            let mut program = Program::Module(module);
+            fixer(None).process(&mut program);
+            match program { Program::Module(module) => module, _ => unreachable!() }
+        },
         Program::Script(_) => unreachable!("module optimization returned a script"),
     }
 }
@@ -1007,7 +1013,6 @@ export function mine(children) {
     #[test]
     fn pinned_ui_emit_optimizes_clean() {
         for (name, source) in [
-            ("jsx", deka_ui::JSX),
             ("router", deka_ui::ROUTER),
             ("form", deka_ui::FORM),
             ("suspense", deka_ui::SUSPENSE),

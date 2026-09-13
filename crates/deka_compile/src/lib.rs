@@ -369,9 +369,35 @@ pub struct DevPlanSlot {
     pub entry: String,
 }
 
+/// Read the nearest project manifest. Runtime paths belong to the project,
+/// never to the compiler's vendor layout.
+fn project_jsx_runtime(file_path: &str) -> Result<Option<String>, Vec<Diagnostic>> {
+    for dir in std::path::Path::new(file_path).ancestors().skip(1) {
+        let manifest = dir.join("deka.json");
+        if !manifest.is_file() {
+            continue;
+        }
+        let read = || -> Result<Option<String>, String> {
+            let value: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(&manifest).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
+            match value.get("jsxRuntime") {
+                None => Ok(None),
+                Some(serde_json::Value::String(s)) if !s.trim().is_empty() => Ok(Some(s.clone())),
+                _ => Err("deka.json jsxRuntime must be a non-empty module specifier".into()),
+            }
+        };
+        return read().map_err(|message| vec![Diagnostic::error(0, 0, message)]);
+    }
+    Ok(None)
+}
+
 /// Options controlling compiler emission and module resolution.
 #[derive(Debug, Default, Clone)]
 pub struct CompileOptions {
+    /// React automatic JSX runtime; disk projects read `jsxRuntime` from deka.json.
+    pub jsx_runtime: Option<String>,
     /// Foreign module bytes supplied by a virtual host, keyed by relative specifier.
     /// Filesystem compilation reads these afresh when no virtual source is supplied.
     pub foreign_modules: HashMap<String, String>,
@@ -438,6 +464,7 @@ fn build_dev_plan<'a>(
     file_path: &str,
     module_base: Option<String>,
     module_root: Option<&Path>,
+    jsx_runtime: Option<String>,
 ) -> Result<DevPlan, Vec<Diagnostic>> {
     let mut slots = Vec::new();
     for stmt in program.statements {
@@ -468,6 +495,7 @@ fn build_dev_plan<'a>(
             &id,
             file_path,
             module_root.map(Path::to_path_buf),
+            jsx_runtime.clone(),
         )
         .map_err(|message| {
             vec![Diagnostic::error(
@@ -624,6 +652,11 @@ pub fn compile_to_js_with_imports_and_options<'a>(
         return Err(typeck_result.errors);
     }
 
+    let jsx_runtime = match options.jsx_runtime {
+        Some(runtime) if runtime.trim().is_empty() => return Err(vec![Diagnostic::error(0, 0, "jsxRuntime must be a non-empty module specifier")]),
+        Some(runtime) => Some(runtime),
+        None => project_jsx_runtime(file_path)?,
+    };
     let mut dev_plan = build_dev_plan(
         &program,
         source,
@@ -632,6 +665,7 @@ pub fn compile_to_js_with_imports_and_options<'a>(
         file_path,
         options.module_base.clone(),
         options.module_root.as_deref(),
+        jsx_runtime.clone(),
     )?;
 
     let emitted = emit_js_module_with_options(
@@ -650,7 +684,6 @@ pub fn compile_to_js_with_imports_and_options<'a>(
         &typeck_result.number_math_calls,
         &typeck_result.static_type_calls,
         &typeck_result.super_trees,
-        &typeck_result.jsx_optional_props,
         &typeck_result.enum_case_patterns,
         &typeck_result.union_type_patterns,
         &typeck_result.dev_blocks,
@@ -659,6 +692,7 @@ pub fn compile_to_js_with_imports_and_options<'a>(
         options.module_root.clone(),
         options.used_exports.as_ref(),
         options.detached_prelude,
+        jsx_runtime,
     )
     .map_err(|message| vec![Diagnostic::error(0, 0, message)])?;
 
@@ -704,6 +738,39 @@ pub fn format_diagnostics(diagnostics: &[Diagnostic]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn react_runtime_override_is_verbatim_and_component_emission_has_no_wrapper() {
+        let source = "interface Props { title: string } export fn Card(props: Props) ReactNode { return <p>{props.title}</p>; }";
+        let js = compile_to_js_with_options(
+            source,
+            "card.dsx",
+            CompileOptions {
+                jsx_runtime: Some("@js/custom/runtime".into()),
+                module_base: Some("/stdlib".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .js;
+        assert_eq!(
+            js,
+            concat!(
+                "\"use strict\";\nimport { jsx, jsxs, Fragment } from \"@js/custom/runtime\";\n\n\n",
+                "export function Card(props) {\nreturn jsx(\"p\", {\"data-deka-id\": \"card:Card/i0\", \"children\": props.title});\n}"
+            )
+        );
+        let errors = compile_to_js_with_options(
+            source,
+            "card.dsx",
+            CompileOptions {
+                jsx_runtime: Some(" ".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(errors[0].message.contains("non-empty module specifier"));
+    }
 
     #[test]
     fn compile_const_number() {
@@ -1664,7 +1731,7 @@ const arrow = unsafe { () => User { name: "Bob" } }
         assert!(
             result
                 .js
-                .contains("import { jsx, jsxs, Fragment } from \"ui/jsx\""),
+                .contains("import { jsx, jsxs, Fragment } from \"@js/react/jsx-runtime\""),
             "got: {}",
             result.js
         );

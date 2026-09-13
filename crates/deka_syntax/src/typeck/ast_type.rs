@@ -51,6 +51,7 @@ impl<'a> Checker<'a> {
     ) -> Type<'a> {
         match ty {
             ast::Type::Named { name, span } => match *name {
+                "ReactNode" => Type::react_node(),
                 "number" | "string" | "boolean" | "never" | "void" | "bytes" | "Component"
                 | "JsError" | "SyntaxError" | "TypeError" | "RangeError" | "Error" | "Type" => {
                     Type::Named { name }
@@ -101,7 +102,17 @@ impl<'a> Checker<'a> {
             },
 
             ast::Type::Generic { base, args, span } => {
-                if base == &"Option" {
+                if base == &"Component" {
+                    if args.len() != 1 {
+                        self.error_span(*span, "Component takes one props interface or struct: Component<Props>");
+                        return Type::Error;
+                    }
+                    let props = self.resolve_ast_type_rec(&args[0], seen);
+                    if !matches!(props, Type::Interface { .. } | Type::Struct { .. }) {
+                        self.error_span(*span, "Component props are a checked interface or struct; declare Props and use Component<Props>");
+                    }
+                    Type::Generic { base: "Component", args: vec![props] }
+                } else if base == &"Option" {
                     if args.len() == 1 {
                         let inner = self.resolve_ast_type_rec(&args[0], seen);
                         self.checked_option(inner, *span)

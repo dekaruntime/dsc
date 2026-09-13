@@ -1,5 +1,5 @@
-// ui/jsx — ComponentNode factories. Must stay tiny and must never import
-// ui/server. Function tags are not invoked here; the renderer calls them.
+// Private node data for the existing ui/server, ui/client and ui/form APIs.
+// JSX emission uses the configured React runtime and never constructs these nodes.
 
 export const Fragment = Symbol.for("deka.ui.Fragment");
 
@@ -25,7 +25,7 @@ export function normalizeJsxChildren(children) {
   return [children];
 }
 
-function createComponentNode(tag, props) {
+export function createComponentNode(tag, props) {
   const input = props ?? {};
   const { children, ...rest } = input;
   const node = {
@@ -41,9 +41,3 @@ function createComponentNode(tag, props) {
   });
   return Object.freeze(node);
 }
-
-export function jsx(tag, props) {
-  return createComponentNode(tag, props);
-}
-
-export const jsxs = jsx;

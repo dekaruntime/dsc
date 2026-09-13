@@ -388,6 +388,7 @@ impl<'a> Checker<'a> {
                             | "bytes"
                             | "never"
                             | "Component"
+                            | "ReactNode"
                             | "Promise"
                             | "Type"
                     )
@@ -1521,7 +1522,9 @@ impl<'a> Checker<'a> {
                     ),
                 );
             }
-            expected
+            if let (Type::Named { name: "Component" }, Type::Function { params, .. }) = (&expected, &value_type) {
+                if params.len() == 1 { Type::Generic { base: "Component", args: params.clone() } } else { expected }
+            } else { expected }
         } else {
             value_type
         };

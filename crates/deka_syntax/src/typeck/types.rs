@@ -71,6 +71,19 @@ pub enum Type<'a> {
 }
 
 impl<'a> Type<'a> {
+    pub fn react_node() -> Self { Type::Opaque { name: "ReactNode", identity: usize::MAX } }
+    pub fn is_react_node(&self) -> bool { matches!(self, Type::Opaque { name: "ReactNode", identity: usize::MAX }) }
+
+    /// Component is nominal in diagnostics and an ordinary function at calls.
+    pub fn function_contract(&self) -> Self {
+        match self {
+            Type::Generic { base: "Component", args } if args.len() == 1 => Type::Function {
+                params: vec![args[0].clone()], ret: Box::new(Type::react_node()), optional: 0,
+            },
+            _ => self.clone(),
+        }
+    }
+
     pub fn is_error(&self) -> bool {
         matches!(self, Type::Error)
     }

@@ -21,6 +21,38 @@ Commands (`check`, `transpile`, `fmt`, `lsp`, `summon`) are registered in `crate
 - `dsc check --as-package <dir>` typechecks a local package through a scratch consumer + `.deka/links.json`. Registry install stays on `deka`.
 - `dsc summon infer <module.mjs>` scaffolds a DRAFT summon block from a vendored module (`--out` writes a file). Review before committing; see [SUMMON.md](SUMMON.md).
 
+## JSX and React
+
+`.dsx` files emit React's automatic runtime: children belong in props, static
+multiple children use `jsxs`, and `key` is argument three. Set `jsxRuntime` in
+the nearest `deka.json` to the runtime module specifier your host resolves:
+
+```json
+{ "jsxRuntime": "@js/react/jsx-runtime" }
+```
+
+That is the default. A local module path can be used while package subpath
+acquisition is being integrated. Preserved emission and `dsc bundle` use the
+same lowering; the compiler does not embed a React vendor path or provide
+`ui/jsx` / automatic `ui/reactive.live` adapters.
+
+```deka
+interface Props { title: string }
+fn Card(props: Props) ReactNode { return <p>{props.title}</p>; }
+const View: Component<Props> = Card;
+```
+
+`Component<Props>` is a nominally diagnosed props-to-`ReactNode` function
+contract and emits an ordinary JavaScript function with no wrapper. Props are
+a checked interface or struct; JSX results use the opaque `ReactNode` type.
+A bare `Component` annotation on a binding infers its props from the checked
+function. Components evaluate dynamic expressions during render. State and
+hooks require a future amendment.
+
+The only injected prop is `data-deka-id`. `ref` and event handlers pass through
+as ordinary props; omitted optional props stay omitted. JSX spread attributes
+remain unsupported. Event-handler hydration diagnostics still apply.
+
 ## WASM
 
 A deka subset of features, this dsc compiler, and the deka lsp are compiled to WASM and made available open source via [web-ide-kit](https://github.com/dekaruntime/web-ide-kit).

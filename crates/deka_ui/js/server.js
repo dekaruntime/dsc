@@ -1,7 +1,7 @@
 // ui/server — render ComponentNodes to HTML. Never imported from ui/jsx.
 // Function tags are invoked here. Text and attributes are escaped.
 
-import { Fragment, isComponentNode } from "./jsx.js";
+import { Fragment, isComponentNode } from "./node.js";
 import { isLive } from "./reactive.js";
 import { Suspense } from "./suspense.js";
 

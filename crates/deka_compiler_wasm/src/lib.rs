@@ -261,6 +261,8 @@ pub(crate) struct Diagnostic {
 
 #[derive(Debug, Deserialize)]
 struct CompileRequestOptions {
+    #[serde(rename = "jsxRuntime")]
+    jsx_runtime: Option<String>,
     mode: String,
     #[serde(rename = "moduleBase")]
     module_base: Option<String>,
@@ -273,6 +275,7 @@ fn compile_request(source: &str, filename: &str, options_json: &str) -> String {
     };
 
     let compile_options = deka_compile::CompileOptions {
+        jsx_runtime: options.jsx_runtime,
         foreign_modules: std::collections::HashMap::new(),
         package_name: None,
         module_base: options.module_base,

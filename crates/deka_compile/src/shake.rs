@@ -14,7 +14,6 @@ use deka_syntax::{ExportDecl, Expr, Program, Stmt};
 
 /// Compiler-provided UI specifiers. These are not `.ds` files.
 pub const UI_SPECIFIERS: &[&str] = &[
-    "ui/jsx",
     "ui/reactive",
     "ui/client",
     "ui/server",
@@ -847,7 +846,7 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_child_without_source_import_still_lowers_live_helper() {
+    fn dynamic_child_is_render_time_expression() {
         let source = "export fn Page(name: string) { return <p>{name}</p>; }";
         let arena = Bump::new();
         let program = parse_program(&arena, source);
@@ -863,12 +862,12 @@ mod tests {
         )
         .expect("compile failed");
         assert!(
-            result.js.contains("import { live } from \"/runtime/ui/reactive.mjs\""),
+            !result.js.contains("ui/reactive"),
             "emit-time helper lowering does not require a source UI import: {}",
             result.js
         );
         assert!(
-            result.js.contains("live(function() { return name; })"),
+            result.js.contains("\"children\": name"),
             "{}",
             result.js
         );
@@ -937,7 +936,7 @@ mod tests {
             result.js
         );
         assert!(
-            result.js.contains("import { live } from \"ui/reactive\""),
+            !result.js.contains("ui/reactive"),
             "the injected live binding must survive even though the user's import was dropped: {}",
             result.js
         );
@@ -947,7 +946,7 @@ mod tests {
             result.js
         );
         assert!(
-            result.js.contains("live(function()"),
+            !result.js.contains("live(function()"),
             "the dynamic child must still use the injected helper: {}",
             result.js
         );

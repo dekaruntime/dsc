@@ -254,6 +254,8 @@ impl ModuleLoader for FsModuleLoader {
 /// Options for compiling a module graph.
 #[derive(Debug, Default, Clone)]
 pub struct GraphCompileOptions {
+    /// React automatic runtime override for virtual hosts. Disk projects use deka.json.
+    pub jsx_runtime: Option<String>,
     /// When true, any import-graph path to `ui/server` is a compile error.
     pub client: bool,
     /// Base URL for bare stdlib module specifiers. When set, known stdlib
@@ -275,7 +277,7 @@ struct GraphModule {
     source: String,
     /// Resolved dependency path for each import specifier in this module.
     dependencies: HashMap<String, PathBuf>,
-    /// Compiler-provided specifiers (`ui/jsx`, …) that are not `.ds` files.
+    /// Compiler-provided specifiers (`ui/server`, …) that are not `.ds` files.
     virtual_imports: Vec<String>,
 }
 
@@ -973,6 +975,7 @@ pub fn compile_module_graph_with_options(
         }
         let compile_options = CompileOptions {
             foreign_modules,
+            jsx_runtime: options.jsx_runtime.clone(),
             package_name: loader.package_name(&path),
             used_exports: plan.live.get(&path).cloned().flatten(),
             client: options.client,
@@ -1312,6 +1315,34 @@ mod tests {
     }
 
     #[test]
+    fn react_component_keeps_private_props_across_modules() {
+        let component = PathBuf::from("/project/card.dsx");
+        let entry = PathBuf::from("/project/page.dsx");
+        for (value, succeeds) in [("\"ok\"", true), ("42", false)] {
+            let loader = InMemoryLoader {
+                    files: HashMap::from([
+                        (component.clone(), "alias Title = string; interface Props { title: Title } export const Card: Component<Props> = fn(props: Props) ReactNode { return <p>{props.title}</p>; };".into()),
+                        (entry.clone(), format!("import {{ Card }} from \"./card.dsx\"; alias Title = number; export const page = <Card title={{{value}}} />;")),
+                    ]),
+                    aliases: HashMap::from([((entry.clone(), "./card.dsx".into()), component.clone())]),
+                };
+            let result = compile_module_graph_with_options(
+                &entry,
+                &loader,
+                GraphCompileOptions {
+                    jsx_runtime: Some("@js/custom/runtime".into()),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(result.is_ok(), succeeds, "{result:?}");
+            if let Ok(graph) = result {
+                assert!(graph.modules[&entry].contains("@js/custom/runtime"));
+                assert!(graph.modules[&component].contains("@js/custom/runtime"));
+            }
+        }
+    }
+
+    #[test]
     fn graph_compiles_relative_imports() {
         let root = PathBuf::from("/project");
         let math = root.join("math.ds");
@@ -1638,6 +1669,7 @@ mod tests {
                 client: false,
                 module_base: Some("https://hats.dump.invalid/modules".to_string()),
                 module_root: None,
+                jsx_runtime: None,
             },
         )
         .expect("virtual stdlib imports remain available pending dsc#129");
@@ -2882,12 +2914,12 @@ mod tests {
         let mut files = HashMap::new();
         files.insert(
             child.clone(),
-            "export fn Counter() Component {\n  return <button onClick={clicked}>0</button>\n}\nfn clicked() {}\n"
+            "export fn Counter() ReactNode {\n  return <button onClick={clicked}>0</button>\n}\nfn clicked() {}\n"
                 .to_string(),
         );
         files.insert(
             wrapper.clone(),
-            "import { Counter } from \"./counter.dsx\"\nexport fn Wrapper() Component { return <Counter /> }\n"
+            "import { Counter } from \"./counter.dsx\"\nexport fn Wrapper() ReactNode { return <Counter /> }\n"
                 .to_string(),
         );
         files.insert(
@@ -2929,12 +2961,12 @@ mod tests {
         let mut files = HashMap::new();
         files.insert(
             child.clone(),
-            "export fn Counter() Component {\n  return <button onClick={clicked}>0</button>\n}\nfn clicked() {}\n"
+            "export fn Counter() ReactNode {\n  return <button onClick={clicked}>0</button>\n}\nfn clicked() {}\n"
                 .to_string(),
         );
         files.insert(
             wrapper.clone(),
-            "import { Counter } from \"./counter.dsx\"\nexport fn Wrapper() Component { return <Counter /> }\n"
+            "import { Counter } from \"./counter.dsx\"\nexport fn Wrapper() ReactNode { return <Counter /> }\n"
                 .to_string(),
         );
         files.insert(

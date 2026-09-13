@@ -658,6 +658,9 @@ impl FsResolver {
 
 impl Resolve for FsResolver {
     fn resolve(&self, base: &FileName, specifier: &str) -> Result<Resolution, anyhow::Error> {
+        if matches!(specifier, "ui/jsx" | "@deka/ui/jsx") {
+            anyhow::bail!("ui/jsx is retired; configure jsxRuntime with a React automatic runtime");
+        }
         if let Some(filename) = resolve_ui_specifier(base, specifier, false)? {
             return Ok(Resolution {
                 filename,
@@ -874,6 +877,9 @@ impl DekaResolver {
 
 impl Resolve for DekaResolver {
     fn resolve(&self, base: &FileName, specifier: &str) -> Result<Resolution, anyhow::Error> {
+        if matches!(specifier, "ui/jsx" | "@deka/ui/jsx") {
+            anyhow::bail!("ui/jsx is retired; configure jsxRuntime with a React automatic runtime");
+        }
         if let Some(filename) = resolve_ui_specifier(base, specifier, self.client)? {
             return Ok(Resolution {
                 filename,

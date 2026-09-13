@@ -477,10 +477,10 @@ pub fn emit_js_with_options<'a>(
         file_path,
         None,
         live_names,
-        false,
-        None,
+        false,   // detached
+        None,    // jsx_runtime
+        false,   // dev
         deka_syntax::program_needs_hydration_ids(program, imports),
-        false,
     )?
     .js)
 }
@@ -534,8 +534,8 @@ pub fn emit_js_module_with_options<'a>(
     live_names: Option<&HashSet<String>>,
     detached: bool,
     jsx_runtime: Option<String>,
-    inject_deka_id: bool,
     dev: bool,
+    inject_deka_id: bool,
 ) -> Result<ModuleEmit, String> {
     let mut emitter = Emitter::new(program);
     emitter.dev = dev;

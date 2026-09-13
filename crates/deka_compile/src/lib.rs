@@ -722,10 +722,10 @@ pub fn compile_to_js_with_imports_and_options<'a>(
         options.used_exports.as_ref(),
         options.detached_prelude,
         jsx_runtime,
+        options.dev,
         options
             .inject_deka_id
             .unwrap_or_else(|| program_needs_hydration_ids(&program, imports)),
-        options.dev,
     )
     .map_err(|message| vec![Diagnostic::error(0, 0, message)])?;
 

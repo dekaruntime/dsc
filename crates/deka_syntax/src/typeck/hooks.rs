@@ -1951,6 +1951,71 @@ fn collect_expr_frees<'a>(expr: &ast::Expr<'a>) -> Vec<(&'a str, ast::Span)> {
     walker.frees
 }
 
+/// Identifier-shaped tokens in a raw `unsafe` body, skipping string
+/// literals and comments so a string like `"data-theme"` does not look
+/// like a capture of `data` or `theme`.
+fn for_each_js_ident<'a>(source: &'a str, mut f: impl FnMut(&'a str)) {
+    let mut chars = source.char_indices().peekable();
+    while let Some((i, ch)) = chars.next() {
+        match ch {
+            '/' => match chars.peek().map(|&(_, next)| next) {
+                Some('/') => {
+                    chars.next();
+                    for (_, next) in chars.by_ref() {
+                        if next == '\n' {
+                            break;
+                        }
+                    }
+                }
+                Some('*') => {
+                    chars.next();
+                    while let Some((_, next)) = chars.next() {
+                        if next == '*' && chars.peek().map(|&(_, n)| n) == Some('/') {
+                            chars.next();
+                            break;
+                        }
+                    }
+                }
+                _ => {}
+            },
+            '"' | '\'' | '`' => {
+                let quote = ch;
+                while let Some((_, next)) = chars.next() {
+                    if next == '\\' {
+                        chars.next();
+                        continue;
+                    }
+                    if next == quote {
+                        break;
+                    }
+                }
+            }
+            c if is_js_ident_start(c) => {
+                let start = i;
+                let mut end = i + c.len_utf8();
+                while let Some(&(j, next)) = chars.peek() {
+                    if is_js_ident_continue(next) {
+                        end = j + next.len_utf8();
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                f(&source[start..end]);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn is_js_ident_start(c: char) -> bool {
+    c.is_ascii_alphabetic() || c == '_' || c == '$'
+}
+
+fn is_js_ident_continue(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == '$'
+}
+
 fn is_trivial_memo_expr(expr: &ast::Expr<'_>) -> bool {
     matches!(
         peel(expr),
@@ -2287,12 +2352,18 @@ impl<'a> CaptureWalker<'a> {
                     self.expr(child);
                 }
             }
+            ast::Expr::Unsafe { source, span, .. } => {
+                // Raw JS is not a DS sub-tree, but the body is spliced
+                // verbatim. Identifier tokens that match component bindings
+                // are captures — including member-call arguments such as
+                // `root.setAttribute("data-theme", theme)` (deka#951).
+                for_each_js_ident(source, |name| self.ident(name, *span));
+            }
             ast::Expr::Number { .. }
             | ast::Expr::BigInt { .. }
             | ast::Expr::String { .. }
             | ast::Expr::Boolean { .. }
             | ast::Expr::None { .. }
-            | ast::Expr::Unsafe { .. }
             | ast::Expr::JsxText { .. } => {}
         }
     }
@@ -2352,6 +2423,57 @@ mod tuple_param_tests {
             panic!("expected function");
         };
         let free = collect_free_idents(params, body);
-        assert_eq!(free.iter().map(|(name, _)| *name).collect::<Vec<_>>(), ["outside"]);
+        assert_eq!(
+            free.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
+            ["outside"]
+        );
+    }
+
+    #[test]
+    fn unsafe_member_call_arguments_are_free_idents() {
+        let arena = bumpalo::Bump::new();
+        let parsed = crate::parse(
+            "fn f() {\n\
+               const _ = unsafe {\n\
+                 var root = globalThis.document && globalThis.document.documentElement\n\
+                 if (root) {\n\
+                   root.setAttribute(\"data-theme\", theme)\n\
+                 }\n\
+                 return 1\n\
+               }\n\
+             }",
+            &arena,
+        );
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let program = parsed.program.unwrap();
+        let ast::Stmt::Function { params, body, .. } = &program.statements[0] else {
+            panic!("expected function");
+        };
+        let free: Vec<_> = collect_free_idents(params, body)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        assert!(
+            free.contains(&"theme"),
+            "theme in setAttribute args must be a capture, got: {free:?}"
+        );
+        assert!(
+            !free.contains(&"data"),
+            "string \"data-theme\" must not tokenize as a capture, got: {free:?}"
+        );
+        assert!(
+            !free.contains(&"_"),
+            "the discarded unsafe binding is bound, got: {free:?}"
+        );
+    }
+
+    #[test]
+    fn js_string_and_comment_tokens_are_not_idents() {
+        let mut names = Vec::new();
+        for_each_js_ident(
+            "foo(\"data-theme\", theme); // scratch\nbar(/* count */ baz)",
+            |name| names.push(name),
+        );
+        assert_eq!(names, ["foo", "theme", "bar", "baz"]);
     }
 }

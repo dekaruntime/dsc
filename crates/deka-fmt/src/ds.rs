@@ -2577,6 +2577,7 @@ print(a + b)
 
     #[test]
     fn unsafe_block_does_not_grow_whitespace_on_reformat() {
+        // Intentional unsafe fixture (RFD 21): raw-JS formatting and round trips.
         let input = r#"const r = unsafe { 1 + 2 }
 console.log(r)"#;
         let once = format_ds(input).unwrap();
@@ -2596,6 +2597,7 @@ console.log(r)"#;
 
     #[test]
     fn unsafe_block_preserves_multiline_body() {
+        // Intentional unsafe fixture (RFD 21): raw-JS formatting and round trips.
         let input = r#"const r = unsafe {
   const x = 1
   x + 2

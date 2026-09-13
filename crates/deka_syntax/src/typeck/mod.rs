@@ -5348,6 +5348,7 @@ mod tests {
 
     #[test]
     fn unsafe_block_match_result_passes() {
+        // Intentional unsafe fixture (RFD 21): bare unsafe Result typing.
         let errors =
             typeck("const r = match (unsafe { console.log(1) }) { Ok(v) => v, Err(e) => e };");
         assert!(errors.is_empty(), "{:?}", errors);
@@ -5355,6 +5356,7 @@ mod tests {
 
     #[test]
     fn bare_unsafe_err_side_is_string() {
+        // Intentional unsafe fixture (RFD 21): bare unsafe Result typing.
         // dsc#103: the bare form's Err payload is the thrown value's string
         // representation (dsc#60), so the Err side types as `string`. Member
         // access on it is a check-time error with a span instead of a runtime

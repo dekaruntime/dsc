@@ -1726,6 +1726,7 @@ mod tests {
 
     #[test]
     fn parse_unsafe_expression() {
+        // Intentional unsafe fixture (RFD 21): raw-JS parsing and nested braces.
         let arena = Bump::new();
         let result = parse("const r = unsafe { JSON.parse('{}') };", &arena);
         assert!(result.errors.is_empty(), "{:?}", result.errors);
@@ -1743,6 +1744,7 @@ mod tests {
 
     #[test]
     fn parse_unsafe_block_with_nested_braces() {
+        // Intentional unsafe fixture (RFD 21): raw-JS parsing and nested braces.
         let arena = Bump::new();
         let result = parse(
             "const r = unsafe { function f() { return 1; } f() };",

@@ -540,6 +540,7 @@ fn math_module_pi_runs_and_math_global_teaches_the_import() {
 
 #[test]
 fn plan_entry_referencing_unsafe_only_helper_executes() {
+    // Intentional unsafe fixture (RFD 21): helper liveness inside raw-JS arrow bodies.
     // dsc#59: a helper reachable only from inside an `unsafe` arrow body was
     // omitted from the build plan's entry, so build-entry execution failed
     // with an unknown-identifier error even though the source typechecks.
@@ -586,6 +587,7 @@ const greeting: string = build {
 
 #[test]
 fn unsafe_err_payloads_cross_as_strings() {
+    // Intentional unsafe fixture (RFD 21): raw-JS emission and boundary behavior.
     // dsc#60/dsc#103: DekaScript's error model is errors-as-values — `Err`
     // carries the diagnostic text. A bare `unsafe { }` types as
     // `Result<Infer, string>`, so the checker and the runtime agree that the

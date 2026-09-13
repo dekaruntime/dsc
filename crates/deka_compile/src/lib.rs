@@ -1411,7 +1411,7 @@ fn load() string {
         use deka_syntax::{check_program_with_imports, collect_module_exports, parse};
         use std::collections::HashMap;
         let arena = Bump::new();
-        let crypto_src = "export fn random_bytes(n: number) Result<string, string> { return unsafe { String(n) } }";
+        let crypto_src = "summon { total string_of(n: number) string } from \"./crypto.mjs\"\nexport fn random_bytes(n: number) Result<string, string> { return Ok(string_of(n)) }";
         let crypto_parse = parse(crypto_src, &arena);
         let crypto_program = crypto_parse.program.unwrap();
         let crypto_exports = collect_module_exports(&crypto_program, &arena);
@@ -1493,6 +1493,7 @@ fn load() string {
     /// spelling to the factory call the syntax denotes.
     #[test]
     fn unsafe_struct_literal_rewrites_to_factory_call() {
+        // Intentional unsafe fixture (RFD 21): raw-JS emission and boundary behavior.
         let source = r#"
 struct User { name: string }
 const direct = unsafe { User { name: "Ada" } }
@@ -1515,6 +1516,7 @@ const arrow = unsafe { () => User { name: "Bob" } }
     /// already valid JavaScript — class declarations, strings, templates.
     #[test]
     fn unsafe_rewrite_preserves_valid_js_named_like_structs() {
+        // Intentional unsafe fixture (RFD 21): raw-JS emission and boundary behavior.
         let source = "struct User { name: string }\n\
                       const c = unsafe { class User { constructor() { this.n = 1 } } ; 5 }\n\
                       const s = unsafe { \"User { not: code }\" }";
@@ -1636,7 +1638,7 @@ const arrow = unsafe { () => User { name: "Bob" } }
         use bumpalo::Bump;
         use deka_syntax::{collect_module_exports, parse, typeck::Type};
         let arena = Bump::new();
-        let source = "export fn random_bytes(n: number) Result<bytes, string> { return unsafe { new Uint8Array(n) } }";
+        let source = "summon { total bytes_of(n: number) bytes } from \"./crypto.mjs\"\nexport fn random_bytes(n: number) Result<bytes, string> { return Ok(bytes_of(n)) }";
         let result = parse(source, &arena);
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         let program = result.program.unwrap();
@@ -1712,6 +1714,7 @@ const arrow = unsafe { () => User { name: "Bob" } }
 
     #[test]
     fn compile_unsafe_expression() {
+        // Intentional unsafe fixture (RFD 21): raw-JS emission and boundary behavior.
         let result = compile_to_js("const r = unsafe { JSON.parse('{}') };", "test.ds")
             .expect("compile should succeed");
         assert!(result.js.contains("ok: true"), "got: {}", result.js);
@@ -1735,6 +1738,7 @@ const arrow = unsafe { () => User { name: "Bob" } }
 
     #[test]
     fn compile_unsafe_async() {
+        // Intentional unsafe fixture (RFD 21): raw-JS emission and boundary behavior.
         let result = compile_to_js("const r = unsafe { await fetch(url) };", "test.ds")
             .expect("compile should succeed");
         assert!(result.js.contains("async function"), "got: {}", result.js);
@@ -2415,6 +2419,7 @@ const arrow = unsafe { () => User { name: "Bob" } }
     /// abort, which would kill this whole test binary.
     #[test]
     fn malformed_input_never_panics_and_diagnostics_are_positioned() {
+        // Intentional unsafe fixture (RFD 21): raw-JS lexer boundaries in malformed-input coverage.
         let mut corpus: Vec<String> = Vec::new();
 
         // Every ASCII character rejected by deka#67 in every position: bare,
@@ -2641,6 +2646,7 @@ const arrow = unsafe { () => User { name: "Bob" } }
     /// opener) rather than just the pinned one-character cases.
     #[test]
     fn truncation_of_multiscript_sources_never_panics() {
+        // Intentional unsafe fixture (RFD 21): raw-JS lexer boundaries in malformed-input coverage.
         let fixture = "const el = <p>Café Yirgacheffe — 日本語 · العربية · ☕</p>\n\
                        const result = unsafe { deka.ui.renderToString(el) }\n\
                        match (result) { Ok(r) => r.html, Err(e) => e }\n"

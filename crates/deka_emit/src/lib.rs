@@ -1039,6 +1039,7 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
 
     #[test]
     fn emit_unsafe_expression() {
+        // Intentional unsafe fixture (RFD 21): raw-JS emission and boundary behavior.
         let out = parse_and_emit("const r = unsafe { JSON.parse('{}') };");
         assert!(out.contains("ok: true"), "got: {}", out);
         assert!(out.contains("JSON.parse('{}')"), "got: {}", out);
@@ -1057,6 +1058,7 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
     /// only come from the `emit_unsafe` splice itself.
     #[test]
     fn emit_unsafe_splices_shared_result_constructors() {
+        // Intentional unsafe fixture (RFD 21): raw-JS emission and boundary behavior.
         let out = parse_and_emit("const r = unsafe { JSON.parse('{}') };");
         assert!(
             out.contains(crate::prelude::RESULT_OK),
@@ -1082,6 +1084,7 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
 
     #[test]
     fn emit_unsafe_async_await() {
+        // Intentional unsafe fixture (RFD 21): raw-JS emission and boundary behavior.
         let out = parse_and_emit("const r = unsafe { await fetch(url) };");
         assert!(
             out.contains("async function"),
@@ -1102,6 +1105,7 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
     /// the checker now types it with.
     #[test]
     fn emit_unsafe_bare_err_payload_is_string() {
+        // Intentional unsafe fixture (RFD 21): raw-JS emission and boundary behavior.
         let out = parse_and_emit("const r = unsafe { throw new Error(\"boom\") };");
         assert!(
             out.contains("(err instanceof Error ? (err.message || String(err)) : String(err))"),
@@ -1126,6 +1130,7 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
 
     #[test]
     fn emit_unsafe_statement_block() {
+        // Intentional unsafe fixture (RFD 21): raw-JS emission and boundary behavior.
         let out = parse_and_emit("const r = unsafe { const x = 1; return x + 2; };");
         assert!(
             out.contains("const x = 1;"),
@@ -1149,6 +1154,7 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
 
     #[test]
     fn emit_unsafe_ignores_string_punctuation_and_keywords() {
+        // Intentional unsafe fixture (RFD 21): raw-JS emission and boundary behavior.
         let out = parse_and_emit("const a = unsafe { \"a;b\" }; const b = unsafe { \"await\" };");
         let flat = squeeze(&out);
         assert!(
@@ -1170,6 +1176,7 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
 
     #[test]
     fn emit_unsafe_ignores_comment_punctuation() {
+        // Intentional unsafe fixture (RFD 21): raw-JS emission and boundary behavior.
         let out = parse_and_emit("const r = unsafe { 1 + 1 /* ; await */ };");
         let flat = squeeze(&out);
         assert!(
@@ -1186,6 +1193,7 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
 
     #[test]
     fn emit_unsafe_ignores_regex_punctuation() {
+        // Intentional unsafe fixture (RFD 21): raw-JS emission and boundary behavior.
         let out = parse_and_emit("const r = unsafe { /a;b/.test(value) };");
         let flat = squeeze(&out);
         assert!(
@@ -1197,6 +1205,7 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
 
     #[test]
     fn emit_unsafe_detects_automatic_semicolon_insertion() {
+        // Intentional unsafe fixture (RFD 21): raw-JS emission and boundary behavior.
         let out = parse_and_emit("const r = unsafe { 1\n2 };");
         let flat = squeeze(&out);
         // Statement wrapper: no `return (`, the body is spliced as statements.
@@ -1212,6 +1221,7 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
     /// scanner picks the wrapper, deka#424 emits its delimiters on own lines.
     #[test]
     fn emit_unsafe_survives_a_trailing_line_comment() {
+        // Intentional unsafe fixture (RFD 21): raw-JS emission and boundary behavior.
         let out = parse_and_emit("const r = unsafe { 1 + 1 // trailing\n };");
         let opens = out.matches('{').count();
         let closes = out.matches('}').count();

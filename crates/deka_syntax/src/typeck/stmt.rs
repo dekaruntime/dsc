@@ -172,6 +172,7 @@ impl<'a> Checker<'a> {
                 _ => self.check_statement(stmt),
             }
         }
+        self.prove_provider_presence();
     }
 
     fn collect_declarations(&mut self) {
@@ -205,7 +206,7 @@ impl<'a> Checker<'a> {
                 if *name == "Type" {
                     self.error_span(*span, BUILTIN_TYPE_DIAGNOSTIC);
                 }
-                if matches!(*name, "Setter" | "Ref") {
+                if matches!(*name, "Setter" | "Ref" | "Context" | "Hook") {
                     self.error_span(*span, format!("`{name}` is a builtin type"));
                 }
                 if self.aliases.insert(name, value.clone()).is_some() {
@@ -1005,6 +1006,9 @@ impl<'a> Checker<'a> {
                 } => (*name, ty.as_ref(), Some(value), false),
                 _ => continue,
             };
+            if let Some(value) = value {
+                let _ = self.seed_create_context_type(value);
+            }
             let seed = if let Some(annot) = ty {
                 self.resolve_ast_type(annot)
             } else if let Some(ast::Expr::Identifier { name: init, .. }) = value {
@@ -1013,6 +1017,8 @@ impl<'a> Checker<'a> {
                     .cloned()
                     .or_else(|| self.scopes[0].get(init).cloned())
                     .unwrap_or(Type::Infer)
+            } else if let Some(value) = value {
+                self.seed_create_context_type(value).unwrap_or(Type::Infer)
             } else {
                 Type::Infer
             };
@@ -1024,10 +1030,27 @@ impl<'a> Checker<'a> {
                 {
                     super::hooks::CaptureClass::UseEffect
                 }
+                Some(ast::Expr::Identifier { name: init, .. })
+                    if *init == "useContext"
+                        || self.capture_scopes[0].get(init)
+                            == Some(&super::hooks::CaptureClass::UseContext) =>
+                {
+                    super::hooks::CaptureClass::UseContext
+                }
+                Some(ast::Expr::Identifier { name: init, .. })
+                    if *init == "createContext"
+                        || self.capture_scopes[0].get(init)
+                            == Some(&super::hooks::CaptureClass::CreateContext) =>
+                {
+                    super::hooks::CaptureClass::CreateContext
+                }
                 _ => super::hooks::CaptureClass::Other,
             };
             self.scopes[0].insert(name, seed);
             self.capture_scopes[0].insert(name, class);
+            if let Some(value) = value {
+                self.bind_context_from_value(name, value);
+            }
             if mutable {
                 self.mutables[0].insert(name);
             }
@@ -1714,6 +1737,7 @@ impl<'a> Checker<'a> {
         } else {
             self.declare_var_class(name, final_type, class);
         }
+        self.bind_context_from_value(name, value);
         self.index_flow.remember_integer(name, value);
         // A declaration at module scope activates its seed for module-level
         // lookups; nested declarations never touch module pending state.
@@ -1919,6 +1943,7 @@ impl<'a> Checker<'a> {
         self.in_function = true;
         self.in_async_function = is_async;
         self.return_type = body_expected_ret.clone();
+        let saved_body = self.current_body.replace(body);
         if is_interactive_component {
             self.interactive_component_depth += 1;
         }
@@ -1930,6 +1955,7 @@ impl<'a> Checker<'a> {
         if is_interactive_component {
             self.interactive_component_depth -= 1;
         }
+        self.current_body = saved_body;
         let body_called_hook = self.pop_hook_frame(hook_frame);
 
         // A function that declares a value-producing return type must actually

@@ -219,7 +219,7 @@ fn collect_dev_stmt_names(stmt: &Stmt<'_>, out: &mut HashSet<String>) {
                 .next()
                 .is_some_and(|ch| ch.is_ascii_uppercase()) =>
         {
-            out.insert(element.tag.to_string());
+            out.insert(element.referenced_name().to_string());
         }
         // An `unsafe` body is raw JS text, invisible to the walker; a helper
         // referenced only inside it must still be retained for the dev entry
@@ -237,7 +237,7 @@ fn runtime_uses_name(program: &Program<'_>, target: &str) -> bool {
         }
         visit_stmt_exprs(stmt, &mut |expr| {
             if matches!(expr, Expr::Identifier { name, .. } if *name == target)
-                || matches!(expr, Expr::JsxElement { element, .. } if element.tag == target)
+                || matches!(expr, Expr::JsxElement { element, .. } if element.referenced_name() == target)
                 || matches!(expr, Expr::Unsafe { source, .. } if js_mentions_name(source, target))
             {
                 used = true;
@@ -344,7 +344,7 @@ fn build_body_uses_name(body: &[Stmt<'_>], target: &str) -> bool {
             if matches!(expr, Expr::Identifier { name, .. } if *name == target)
                 || matches!(expr, Expr::StructLiteral { name, .. } if *name == target)
                 || matches!(expr, Expr::EnumConstructor { enum_name: name, .. } if *name == target)
-                || matches!(expr, Expr::JsxElement { element, .. } if element.tag == target)
+                || matches!(expr, Expr::JsxElement { element, .. } if element.referenced_name() == target)
                 // Raw `unsafe` text must count too: an import used only
                 // inside it still has to be retained for the dev entry
                 // (dsc#59).
@@ -2579,6 +2579,8 @@ impl<'a> Emitter<'a> {
         let mut saw_state = false;
         let mut saw_ref = false;
         let mut saw_effect = false;
+        let mut saw_create = false;
+        let mut saw_context = false;
         for stmt in self.program.statements.iter() {
             if !self.should_emit_stmt(stmt) {
                 continue;
@@ -2591,6 +2593,10 @@ impl<'a> Emitter<'a> {
                         "useState" if !self.user_imported("useState") => saw_state = true,
                         "useRef" if !self.user_imported("useRef") => saw_ref = true,
                         "useEffect" if !self.user_imported("useEffect") => saw_effect = true,
+                        "createContext" if !self.user_imported("createContext") => {
+                            saw_create = true
+                        }
+                        "useContext" if !self.user_imported("useContext") => saw_context = true,
                         _ => {}
                     }
                 }
@@ -2605,6 +2611,12 @@ impl<'a> Emitter<'a> {
         }
         if saw_effect {
             names.push("useEffect");
+        }
+        if saw_create {
+            names.push("createContext");
+        }
+        if saw_context {
+            names.push("useContext");
         }
         names
     }

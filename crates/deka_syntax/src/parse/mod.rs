@@ -2041,6 +2041,29 @@ mod tests {
     }
 
     #[test]
+    fn parse_jsx_context_provider_member() {
+        // rfd#64 lane C: `<Ctx.Provider>` is the one RFD 8 exception.
+        let arena = Bump::new();
+        let result = parse(
+            "const el = <LocaleContext.Provider value={en}>x</LocaleContext.Provider>;",
+            &arena,
+        );
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[0] {
+            Stmt::Const { value, .. } => match value {
+                Expr::JsxElement { element, .. } => {
+                    assert_eq!(element.tag, "LocaleContext.Provider");
+                    assert_eq!(element.context_provider(), Some("LocaleContext"));
+                    assert_eq!(element.attributes[0].name, "value");
+                }
+                other => panic!("expected jsx element, got {other:?}"),
+            },
+            _ => panic!("expected const declaration"),
+        }
+    }
+
+    #[test]
     fn parse_jsx_text_is_verbatim_multi_script() {
         // deka#67 / deka#68: JSX text is raw text, not code. Every script,
         // emoji, combining mark, and code-lexing trigger character must

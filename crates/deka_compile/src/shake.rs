@@ -323,7 +323,7 @@ fn collect_expr_idents(expr: &Expr<'_>, out: &mut HashSet<String>) {
                 .next()
                 .is_some_and(|ch| ch.is_ascii_uppercase())
             {
-                out.insert(element.tag.to_string());
+                out.insert(element.referenced_name().to_string());
             }
         }
         // An `unsafe` body is raw JS spliced as text, so the walker sees no

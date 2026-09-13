@@ -1028,7 +1028,7 @@ impl<'a> Checker<'a> {
                 None => {
                     self.error_span(
                         p.span,
-                        format!("parameter `{}` is missing a type annotation", p.name),
+                        format!("parameter `{}` is missing a type annotation", p.binding),
                     );
                     param_types.push(Type::Error);
                 }
@@ -1056,7 +1056,7 @@ impl<'a> Checker<'a> {
                     );
                 }
             }
-            self.declare_var_class(p.name, t.clone(), Self::param_capture_class(t));
+            self.declare_param(p, t);
         }
 
         let saved_in_function = self.in_function;

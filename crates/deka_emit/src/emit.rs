@@ -2104,7 +2104,7 @@ impl<'a> Emitter<'a> {
                             name: name.to_string(),
                             receiver_name: receiver_name.to_string(),
                             receiver_mutable: *receiver_mutable,
-                            params: params.iter().map(|p| p.name.to_string()).collect(),
+                            params: params.iter().map(|p| p.binding.to_string()).collect(),
                             body: *body,
                             is_async: *is_async,
                         });
@@ -4364,8 +4364,8 @@ impl<'a> Emitter<'a> {
         param: &deka_syntax::Param<'a>,
         emit_default: bool,
     ) -> Result<(), String> {
-        self.out.push_str(param.name);
-        if emit_default {
+        self.out.push_str(&param.binding.to_string());
+        if emit_default || matches!(param.binding, deka_syntax::ParamBinding::Tuple(_)) {
             if let Some(default) = &param.default_value {
                 self.out.push_str(" = ");
                 self.emit_expr(default)?;
@@ -4380,10 +4380,10 @@ impl<'a> Emitter<'a> {
         indent: usize,
     ) -> Result<(), String> {
         for param in params.iter() {
-            if param.default_value.is_some() {
+            if param.default_value.is_some() && param.binding.identifier().is_some() {
                 write_indent(&mut self.out, indent);
                 self.out.push_str("if (");
-                self.out.push_str(param.name);
+                self.out.push_str(&param.binding.to_string());
                 self.out.push_str(" === undefined) { ");
                 let mut expressions = Vec::new();
                 deka_syntax::visit::walk_expr(param.default_value.as_ref().unwrap(), &mut |expr| {
@@ -4393,7 +4393,7 @@ impl<'a> Emitter<'a> {
                 });
                 self.emit_has_temporaries(expressions);
                 let value = self.lift_value(param.default_value.as_ref().unwrap())?;
-                self.out.push_str(param.name);
+                self.out.push_str(&param.binding.to_string());
                 self.out.push_str(" = ");
                 self.out.push_str(&value);
                 self.out.push_str("; }\n");

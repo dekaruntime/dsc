@@ -1516,7 +1516,7 @@ fn export_name_to_string(name: &ExportName<'_>) -> String {
 }
 
 fn param_to_string(param: &Param<'_>) -> String {
-    let mut s = param.name.to_string();
+    let mut s = param.binding.to_string();
     if let Some(ty) = &param.ty {
         s.push_str(": ");
         s.push_str(&type_to_string(ty));
@@ -1987,6 +1987,17 @@ mod tests {
             output,
             "const labels: Array<string> = build {\n  return Ok([\"Ada\"])\n}\n"
         );
+    }
+
+    #[test]
+    fn formats_tuple_parameters() {
+        let source = "fn f([ a,b ]: [number,number]) number { return a+b }";
+        let output = format_ds(source).unwrap();
+        assert!(
+            output.contains("fn f([a, b]: [number, number]) number"),
+            "{output}"
+        );
+        assert_eq!(format_ds(&output).unwrap(), output);
     }
 
     #[test]

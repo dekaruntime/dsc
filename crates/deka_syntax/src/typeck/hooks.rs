@@ -1783,7 +1783,7 @@ fn function_param_names<'a>(program: &'a ast::Program<'a>, name: &str) -> Functi
             } if *fn_name == name => *params,
             _ => continue,
         };
-        let first = params.first().map(|p| p.name);
+        let first = params.first().and_then(|p| p.binding.identifier());
         let children = first == Some("children");
         return FunctionParams { first, children };
     }
@@ -1930,7 +1930,10 @@ fn collect_free_idents<'a>(
     body: &'a [ast::Stmt<'a>],
 ) -> Vec<(&'a str, ast::Span)> {
     let mut walker = CaptureWalker {
-        bound: vec![params.iter().map(|p| p.name).collect()],
+        bound: vec![params
+            .iter()
+            .flat_map(|p| p.binding.names().iter().copied())
+            .collect()],
         seen: HashSet::new(),
         frees: Vec::new(),
     };
@@ -2041,7 +2044,9 @@ impl<'a> CaptureWalker<'a> {
                     if let Some(default) = &param.default_value {
                         self.expr(default);
                     }
-                    self.bind(param.name);
+                    for name in param.binding.names() {
+                        self.bind(name);
+                    }
                 }
                 self.stmts(body);
                 self.pop();
@@ -2060,7 +2065,9 @@ impl<'a> CaptureWalker<'a> {
                         if let Some(default) = &param.default_value {
                             self.expr(default);
                         }
-                        self.bind(param.name);
+                        for name in param.binding.names() {
+                            self.bind(name);
+                        }
                     }
                     self.stmts(body);
                     self.pop();
@@ -2156,7 +2163,9 @@ impl<'a> CaptureWalker<'a> {
                     if let Some(default) = &param.default_value {
                         self.expr(default);
                     }
-                    self.bind(param.name);
+                    for name in param.binding.names() {
+                        self.bind(name);
+                    }
                 }
                 self.stmts(body);
                 self.pop();
@@ -2256,7 +2265,9 @@ impl<'a> CaptureWalker<'a> {
                     if let Some(default) = &param.default_value {
                         self.expr(default);
                     }
-                    self.bind(param.name);
+                    for name in param.binding.names() {
+                        self.bind(name);
+                    }
                 }
                 self.stmts(body);
                 self.pop();
@@ -2321,5 +2332,26 @@ impl<'a> CaptureWalker<'a> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tuple_param_tests {
+    use super::*;
+
+    #[test]
+    fn tuple_parameters_are_bound_in_capture_analysis() {
+        let arena = bumpalo::Bump::new();
+        let parsed = crate::parse(
+            "fn f([a, b]: [number, number]) { const g = fn([c, d]: [number, number]) { return a + b + c + d + outside }; }",
+            &arena,
+        );
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let program = parsed.program.unwrap();
+        let ast::Stmt::Function { params, body, .. } = &program.statements[0] else {
+            panic!("expected function");
+        };
+        let free = collect_free_idents(params, body);
+        assert_eq!(free.iter().map(|(name, _)| *name).collect::<Vec<_>>(), ["outside"]);
     }
 }

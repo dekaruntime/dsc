@@ -2928,6 +2928,65 @@ mod tests {
     }
 
     #[test]
+    fn flat_tuple_parameters_typecheck() {
+        for source in [
+            "fn f([a, b]: [number, number]) number { return a + b } const n = f([1, 2]);",
+            "const f = fn([k, v]: [string, number]) string { const n: number = v; return k }; const k = f([\"x\", 1]);",
+            "fn first<T>([a, b]: [T, number]) T { return a } const s: string = first([\"x\", 1]);",
+            "fn f([a, b]: [number, number] = [1, 2]) number { return a + b } const n = f();",
+            "const entries: Array<[string, number]> = [[\"a\", 1], [\"b\", 2]]; const keys: Array<string> = entries.map(fn([k, v]: [string, number]) string { return k });",
+        ] {
+            let errors = typeck(source);
+            assert!(errors.is_empty(), "{source}: {errors:?}");
+        }
+    }
+
+    #[test]
+    fn flat_tuple_parameter_diagnostics() {
+        for (source, message) in [
+            (
+                "fn f([a]: [number, number]) {}",
+                "tuple has 2 positions, but destructuring binds 1 names",
+            ),
+            (
+                "const f = fn([a, b, c]: [number, number]) {};",
+                "tuple has 2 positions, but destructuring binds 3 names",
+            ),
+            (
+                "fn f([a, b]: Array<number>) {}",
+                "destructuring requires a tuple",
+            ),
+            (
+                "const f = fn([a, b]: number) {};",
+                "destructuring requires a tuple",
+            ),
+            (
+                "fn f([a, a]: [number, number]) {}",
+                "duplicate tuple binding `a`",
+            ),
+            (
+                "fn f([a, b]) {}",
+                "parameter `[a, b]` is missing a type annotation",
+            ),
+            (
+                "const f = fn([a, b]) {};",
+                "parameter `[a, b]` is missing a type annotation",
+            ),
+            (
+                "fn f([a, b]: [number, string]) number { return b }",
+                "expected return type `number`, found type `string`",
+            ),
+            ("fn f([a, b]: [number, string]) {} f([1]);", "tuple"),
+        ] {
+            let errors = typeck(source);
+            assert!(
+                errors.iter().any(|e| e.message.contains(message)),
+                "{source}: {errors:?}"
+            );
+        }
+    }
+
+    #[test]
     fn component_is_a_checked_props_to_react_node_function() {
         for (declaration, props) in [
             ("interface Props { title: string }", "{ title: \"ok\" }"),

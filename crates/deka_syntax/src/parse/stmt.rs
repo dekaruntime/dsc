@@ -1,8 +1,8 @@
 //! Statement parsing.
 
 use crate::ast::{
-    EnumCase, ExportDecl, Expr, ForInit, InterfaceMember, NewtypeRepr, Param, Pos, Program, Stmt,
-    StructField, TemplatePart, Type, TypeParam, alloc, alloc_slice,
+    EnumCase, ExportDecl, Expr, ForInit, InterfaceMember, NewtypeRepr, Param, ParamBinding, Pos, Program,
+    Stmt, StructField, TemplatePart, Type, TypeParam, alloc, alloc_slice,
 };
 use crate::diagnostics::Diagnostic;
 use crate::lexer::TokenKind;
@@ -1242,11 +1242,24 @@ impl<'a> Parser<'a> {
             loop {
                 let (param_start, param_start_byte) = self.span_start();
                 self.skip_newlines();
-                let name = if self.reject_nested_tuple_pattern() {
+                let binding = if self.reject_nested_tuple_pattern() {
                     // Recovery only: parse() discards the AST on diagnostics.
-                    ""
+                    ParamBinding::Identifier("")
+                } else if self.eat(TokenKind::LBracket) {
+                    let mut names = Vec::new();
+                    self.skip_newlines();
+                    while !self.at(TokenKind::RBracket) {
+                        names.push(self.expect_identifier()?);
+                        self.skip_newlines();
+                        if !self.eat(TokenKind::Comma) {
+                            break;
+                        }
+                        self.skip_newlines();
+                    }
+                    self.expect(TokenKind::RBracket)?;
+                    ParamBinding::Tuple(alloc_slice(self.arena, names))
                 } else {
-                    self.expect_identifier()?
+                    ParamBinding::Identifier(self.expect_identifier()?)
                 };
                 let ty = if self.eat(TokenKind::Colon) {
                     Some(self.parse_type()?)
@@ -1259,7 +1272,7 @@ impl<'a> Parser<'a> {
                     None
                 };
                 params.push(Param {
-                    name,
+                    binding,
                     ty,
                     default_value,
                     span: self.span_from(param_start, param_start_byte),

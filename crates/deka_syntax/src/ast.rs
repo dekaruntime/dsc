@@ -268,8 +268,39 @@ pub struct ImportSpec<'a> {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub enum ParamBinding<'a> {
+    Identifier(&'a str),
+    Tuple(&'a [&'a str]),
+}
+
+impl<'a> ParamBinding<'a> {
+    pub fn names(&self) -> &[&'a str] {
+        match self {
+            Self::Identifier(name) => std::slice::from_ref(name),
+            Self::Tuple(names) => names,
+        }
+    }
+
+    pub fn identifier(&self) -> Option<&'a str> {
+        match self {
+            Self::Identifier(name) => Some(name),
+            Self::Tuple(_) => None,
+        }
+    }
+}
+
+impl std::fmt::Display for ParamBinding<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Identifier(name) => f.write_str(name),
+            Self::Tuple(names) => write!(f, "[{}]", names.join(", ")),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct Param<'a> {
-    pub name: &'a str,
+    pub binding: ParamBinding<'a>,
     pub ty: Option<Type<'a>>,
     pub default_value: Option<Expr<'a>>,
     pub span: Span,

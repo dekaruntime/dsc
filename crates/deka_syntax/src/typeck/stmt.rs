@@ -674,7 +674,7 @@ impl<'a> Checker<'a> {
                         None => {
                             self.error_span(
                                 p.span,
-                                format!("parameter `{}` is missing a type annotation", p.name),
+                                format!("parameter `{}` is missing a type annotation", p.binding),
                             );
                             Type::Error
                         }
@@ -922,7 +922,7 @@ impl<'a> Checker<'a> {
                     None => {
                         self.error_span(
                             p.span,
-                            format!("parameter `{}` is missing a type annotation", p.name),
+                            format!("parameter `{}` is missing a type annotation", p.binding),
                         );
                         Type::Error
                     }
@@ -1840,6 +1840,37 @@ impl<'a> Checker<'a> {
         self.pending_module_bindings.remove(name);
     }
 
+    pub(super) fn declare_param(&mut self, param: &ast::Param<'a>, ty: &Type<'a>) {
+        match &param.binding {
+            ast::ParamBinding::Identifier(name) => {
+                self.declare_var_class(name, ty.clone(), Self::param_capture_class(ty));
+            }
+            ast::ParamBinding::Tuple(names) => {
+                let elements = match ty {
+                    Type::Tuple { elements } => {
+                        if names.len() != elements.len() {
+                            self.error_span(param.span, format!("tuple has {} positions, but destructuring binds {} names; bind every position exactly once", elements.len(), names.len()));
+                        }
+                        elements.as_slice()
+                    }
+                    Type::Error => &[],
+                    _ => {
+                        self.error_span(param.span, format!("destructuring requires a tuple, found `{ty}`; annotate the parameter with a tuple type such as [number, string]"));
+                        &[]
+                    }
+                };
+                for (i, name) in names.iter().enumerate() {
+                    if names[..i].contains(name) {
+                        self.error_span(param.span, format!("duplicate tuple binding `{name}`; use a distinct name for each position"));
+                    }
+                    let ty = elements.get(i).cloned().unwrap_or(Type::Error);
+                    let class = Self::param_capture_class(&ty);
+                    self.declare_var_class(name, ty, class);
+                }
+            }
+        }
+    }
+
     pub(super) fn check_function(
         &mut self,
         name: &'a str,
@@ -1869,7 +1900,7 @@ impl<'a> Checker<'a> {
                         None => {
                             self.error_span(
                                 p.span,
-                                format!("parameter `{}` is missing a type annotation", p.name),
+                                format!("parameter `{}` is missing a type annotation", p.binding),
                             );
                             pts.push(Type::Error);
                         }
@@ -1933,7 +1964,7 @@ impl<'a> Checker<'a> {
                     );
                 }
             }
-            self.declare_var_class(p.name, t.clone(), Self::param_capture_class(t));
+            self.declare_param(p, t);
         }
 
         let saved_in_function = self.in_function;
@@ -2201,7 +2232,7 @@ impl<'a> Checker<'a> {
                     );
                 }
             }
-            self.declare_var_class(p.name, t.clone(), Self::param_capture_class(t));
+            self.declare_param(p, t);
         }
 
         let saved_in_function = self.in_function;

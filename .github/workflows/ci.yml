@@ -228,26 +228,12 @@ jobs:
           # (tests/migrations/summon-no-colon-188). Wrong value fails the
           # gate loudly, so this cannot false-green.
           lock_path = ".cache/deka-packages/io/deka.lock"
-          raw = open(lock_path).read()
-          print("lock before:", raw[:800])
-          lock = json.loads(raw)
-          pkgs = lock["packages"]
-          def entries(p):
-              if isinstance(p, dict):
-                  yield from p.items()
-              else:
-                  for e in p:
-                      if isinstance(e, dict):
-                          yield (e.get("name") or e.get("package") or e.get("id"), e)
-                      elif isinstance(e, list) and len(e) == 2:
-                          yield (e[0], e[1])
-          hits = [v for k, v in entries(pkgs) if k == "@deka/io" or (isinstance(v, dict) and "@deka/io" in (v.get("name"), v.get("package"), v.get("id")))]
-          assert len(hits) == 1, f"expected one @deka/io lock entry, found {len(hits)}"
-          entry = hits[0]
-          target = entry.get("fsGraph", entry)
-          keys = [k for k in ("hash", "fsGraphHash", "integrity") if k in target]
-          assert keys, f"no hash field in io entry: {json.dumps(entry)[:400]}"
-          target[keys[0]] = "d7b4daec01ac1fd2e0738e9f100e9c6abea22dd37cf02f9197bb8c15c32da565"
+          lock = json.load(open(lock_path))
+          # packages: name -> [id, source, {entry}, ""] (lockfileVersion 1)
+          val = lock["packages"]["@deka/io"]
+          entry = next(x for x in val if isinstance(x, dict))
+          assert entry["fsGraph"]["algo"] == "sha256"
+          entry["fsGraph"]["hash"] = "d7b4daec01ac1fd2e0738e9f100e9c6abea22dd37cf02f9197bb8c15c32da565"
           json.dump(lock, open(lock_path, "w"), indent=2)
           open(lock_path, "a").write("\n")
           REHASH

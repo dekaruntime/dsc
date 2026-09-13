@@ -58,6 +58,7 @@ mod tests {
             &typeck.enum_case_patterns,
             &typeck.union_type_patterns,
             &typeck.effect_deps,
+            &typeck.memo_sites,
             &std::collections::HashMap::new(),
             &std::collections::HashSet::new(),
             "module.ds",
@@ -2459,6 +2460,245 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
     }
 
     #[test]
+    fn emit_automemo_pure_expression_over_tracked_inputs() {
+        let out = parse_check_and_emit(
+            "fn Counter() ReactNode {\n\
+               const [count, setCount] = useState(0);\n\
+               const doubled = count * 2;\n\
+               const label = \"n=\" + string(count);\n\
+               return <p>{label}</p>;\n\
+             }",
+        );
+        assert!(
+            out.contains("import { useState, useMemo } from \"@js/react\";"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("const doubled = useMemo(function() { return count * 2; }, [count]);"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("useMemo(function() { return \"n=\" + String(count); }, [count])"),
+            "string() is a proven-pure conversion, got: {out}"
+        );
+        assert!(
+            !out.contains("function useMemo") && !out.contains("__deka_useMemo"),
+            "hooks must not be wrapped: {out}"
+        );
+    }
+
+    #[test]
+    fn emit_automemo_skips_trivial_and_hook_calls() {
+        let out = parse_check_and_emit(
+            "fn Counter() ReactNode {\n\
+               const [count, setCount] = useState(0);\n\
+               const n = count;\n\
+               const z = 0;\n\
+               return <p>{string(n)}</p>;\n\
+             }",
+        );
+        assert!(
+            out.contains("import { useState } from \"@js/react\";"),
+            "got: {out}"
+        );
+        assert!(
+            !out.contains("useMemo"),
+            "trivial bindings must not be memoized: {out}"
+        );
+        assert!(out.contains("const n = count;"), "got: {out}");
+        assert!(out.contains("const z = 0;"), "got: {out}");
+    }
+
+    #[test]
+    fn emit_automemo_purity_gate_skips_unsafe() {
+        let out = parse_check_and_emit(
+            "fn Counter() ReactNode {\n\
+               const [count, setCount] = useState(0);\n\
+               const t = unsafe<number> { 1 };\n\
+               return <p>{string(count)}</p>;\n\
+             }",
+        );
+        assert!(
+            !out.contains("useMemo"),
+            "unsafe is not proven effect-free, got: {out}"
+        );
+        assert!(out.contains("const t ="), "got: {out}");
+    }
+
+    #[test]
+    fn emit_automemo_purity_gate_skips_summon() {
+        let out = parse_check_and_emit(
+            "summon { total fn now() number } from \"./t.mjs\";\n\
+             fn Counter() ReactNode {\n\
+               const [count, setCount] = useState(0);\n\
+               const t = now() + count;\n\
+               return <p>{string(t)}</p>;\n\
+             }",
+        );
+        assert!(
+            !out.contains("useMemo"),
+            "summon calls are not proven effect-free, got: {out}"
+        );
+        assert!(
+            out.contains("const t =") && out.contains("now()"),
+            "summoned call stays in the initializer, got: {out}"
+        );
+    }
+
+    #[test]
+    fn emit_automemo_order_stable_skips_conditional_and_after_return() {
+        let out = parse_check_and_emit(
+            "fn Counter() ReactNode {\n\
+               const [count, setCount] = useState(0);\n\
+               const before = count * 2;\n\
+               if (count > 0) {\n\
+                 const inner = count * 3;\n\
+                 setCount(inner);\n\
+               }\n\
+               if (count == 0) {\n\
+                 return <p>{string(before)}</p>;\n\
+               }\n\
+               const after = count * 4;\n\
+               return <p>{string(after)}</p>;\n\
+             }",
+        );
+        assert!(
+            out.contains("const before = useMemo(function() { return count * 2; }, [count]);"),
+            "straight-line const is memoized, got: {out}"
+        );
+        assert!(
+            out.contains("const inner = count * 3;"),
+            "conditional const must not insert a hook, got: {out}"
+        );
+        assert!(
+            !out.contains("useMemo(function() { return count * 3;"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("const after = count * 4;"),
+            "after an early return must not insert a hook, got: {out}"
+        );
+        assert!(
+            !out.contains("useMemo(function() { return count * 4;"),
+            "got: {out}"
+        );
+        assert_eq!(
+            out.matches("useMemo(").count(),
+            1,
+            "exactly one memo hook at a stable position, got: {out}"
+        );
+    }
+
+    #[test]
+    fn emit_autocallback_jsx_prop() {
+        let out = parse_check_and_emit(
+            "fn Counter() ReactNode {\n\
+               const [count, setCount] = useState(0);\n\
+               const handle = fn() { setCount(count + 1) };\n\
+               return <button onClick={handle}>{string(count)}</button>;\n\
+             }",
+        );
+        assert!(
+            out.contains("import { useState, useCallback } from \"@js/react\";"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("const handle = useCallback(function() {")
+                && out.contains("setCount(count + 1)"),
+            "got: {out}"
+        );
+        assert!(out.contains("}, [count]);"), "got: {out}");
+        assert!(
+            !out.contains("useMemo"),
+            "function consts use useCallback, got: {out}"
+        );
+    }
+
+    #[test]
+    fn emit_automemo_result_is_effect_dep() {
+        let out = parse_check_and_emit(
+            "fn Counter() ReactNode {\n\
+               const [count, setCount] = useState(0);\n\
+               const doubled = count * 2;\n\
+               useEffect(fn() Option<fn() void> {\n\
+                 const _n = doubled;\n\
+                 return None;\n\
+               });\n\
+               return <p>{string(count)}</p>;\n\
+             }",
+        );
+        assert!(
+            out.contains("import { useState, useEffect, useMemo } from \"@js/react\";"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("const doubled = useMemo(function() { return count * 2; }, [count]);"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("}, [doubled]);"),
+            "memo result is a reactive capture, got: {out}"
+        );
+    }
+
+    #[test]
+    fn emit_automemo_over_usecontext_value() {
+        // Lane C × D: a useContext result is a tracked input (same as useState).
+        // The hook call itself is not memoizable; a pure expression over the
+        // result is, with the context value in deps. A default makes the
+        // provider-presence proof vacuously green.
+        let out = parse_check_and_emit(
+            "const LocaleContext = createContext<string>(\"en\");\n\
+             fn Page() ReactNode {\n\
+               const locale = useContext(LocaleContext);\n\
+               const label = locale + \"!\";\n\
+               return <p>{label}</p>;\n\
+             }",
+        );
+        assert!(
+            out.contains("import { createContext, useContext, useMemo } from \"@js/react\";"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("const locale = useContext(LocaleContext);"),
+            "useContext call is not memoizable itself, got: {out}"
+        );
+        assert!(
+            !out.contains("useMemo(function() { return useContext"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("const label = useMemo(function() { return locale + \"!\"; }, [locale]);"),
+            "context value is a tracked input, got: {out}"
+        );
+
+        // Provider-presence is about JSX wrapping, not memo sites: a no-default
+        // consumer under <Ctx.Provider> still proves when the same component
+        // also auto-memoizes a derived const.
+        let wrapped = parse_check_and_emit(
+            "const ThemeContext = createContext<string>();\n\
+             fn Page() ReactNode {\n\
+               const theme = useContext(ThemeContext);\n\
+               const label = theme + \"!\";\n\
+               return <p>{label}</p>;\n\
+             }\n\
+             fn App() ReactNode {\n\
+               return <ThemeContext.Provider value={\"dark\"}><Page /></ThemeContext.Provider>;\n\
+             }",
+        );
+        assert!(
+            wrapped.contains(
+                "const label = useMemo(function() { return theme + \"!\"; }, [theme]);"
+            ),
+            "got: {wrapped}"
+        );
+        assert!(
+            wrapped.contains("ThemeContext.Provider") && wrapped.contains("\"value\": \"dark\""),
+            "provider proof still green with memo wrappers, got: {wrapped}"
+        );
+    }
+
+    #[test]
     fn emit_useref_is_byte_idiomatic() {
         let out = parse_check_and_emit(
             "fn Counter() ReactNode {\n\
@@ -2489,14 +2729,21 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
             "got: {out}"
         );
         assert!(
-            out.contains("import { useState } from \"@js/react\";"),
+            out.contains("import { useState, useCallback } from \"@js/react\";"),
             "got: {out}"
         );
         assert!(
             out.contains("const [count, setCount] = useState(0);"),
             "got: {out}"
         );
-        assert!(out.contains("setCount(count + 1)"), "got: {out}");
+        assert!(
+            out.contains("useCallback(function() {") && out.contains("setCount(count + 1)"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("}, [count])"),
+            "inferred callback deps, got: {out}"
+        );
     }
 
     /// SSR of a useState component through real React 19.1.1, matching the
@@ -2540,6 +2787,7 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
             &typeck.enum_case_patterns,
             &typeck.union_type_patterns,
             &typeck.effect_deps,
+            &typeck.memo_sites,
             &std::collections::HashMap::new(),
             &std::collections::HashSet::new(),
             "module.ds",

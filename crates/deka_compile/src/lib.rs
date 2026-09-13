@@ -717,6 +717,7 @@ pub fn compile_to_js_with_imports_and_options<'a>(
         &typeck_result.enum_case_patterns,
         &typeck_result.union_type_patterns,
         &typeck_result.effect_deps,
+        &typeck_result.memo_sites,
         &typeck_result.dev_blocks,
         &options.build_closure_names,
         file_path,

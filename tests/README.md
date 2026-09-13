@@ -71,7 +71,8 @@ exported no-default consumer). Emission coverage lives in `deka_emit`
 `emit_useeffect_alias_imports_resolved_reference`,
 `emit_createcontext_usecontext_provider_is_byte_idiomatic`,
 `emit_usecontext_alias_imports_resolved_reference`,
-`emit_useeffect_infers_context_value_dep`). Imports are keyed off
+`emit_useeffect_infers_context_value_dep`,
+`emit_automemo_over_usecontext_value`). Imports are keyed off
 resolved identifier references, not call-site text.
 
 `useState(None)` without a type argument is a compile error naming Option
@@ -84,8 +85,14 @@ use; setters and refs are omitted; no reactive captures emit `[]`; a capture
 the checker cannot classify is a diagnostic at the capture. Explicit
 dependency arrays are rejected.
 
-Memoization is absent — it belongs to lane D. Provider-presence proof is
-same-module static JSX trees (see the lane C PR).
+Provider-presence proof is same-module static JSX trees (see the lane C PR).
+
+Auto-memoization (lane D) wraps the provable subset: pure expressions over
+tracked inputs (`useMemo`) and JSX/const callbacks (`useCallback`), reusing
+lane B's capture classification (including `useContext` values). Emission
+tests cover memoized and skipped cases, the purity gate, order-stability,
+and a context-value derived const. Writing `useMemo`/`useCallback` in DS is
+a diagnostic.
 
 The React value-import specifier is derived from `jsxRuntime` by dropping a
 final `jsx-runtime` / `jsx-dev-runtime` segment (`@js/react/jsx-runtime` →

@@ -499,6 +499,24 @@ mod tests {
     }
 
     #[test]
+    fn tuple_parameters_require_tuple_annotations() {
+        for source in [
+            "fn f([x, y]: number[]) {}",
+            "const f = fn([x, y]: number[]) {};",
+            "fn f([a, b]: Array<number>) {}",
+            "const f = fn([a, b]: number) {};",
+            "fn f([x, y]: [number, number][]) {}",
+            "fn f([x, y]: [number, number] | number) {}",
+        ] {
+            let arena = Bump::new();
+            let result = parse(source, &arena);
+            assert!(result.program.is_none(), "{source}");
+            assert_eq!(result.errors.len(), 1, "{source}: {:?}", result.errors);
+            assert_eq!(result.errors[0].message, "destructuring parameter requires a tuple type with exact arity — annotate as [number, number], or take the array and index with proofs; expected identifier, found ``[`` for a non-tuple parameter");
+        }
+    }
+
+    #[test]
     fn nested_tuple_patterns_teach_at_the_inner_pattern() {
         let mut messages = Vec::new();
         for (source, line, column, length) in [

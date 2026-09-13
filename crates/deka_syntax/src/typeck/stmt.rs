@@ -1855,7 +1855,7 @@ impl<'a> Checker<'a> {
                     }
                     Type::Error => &[],
                     _ => {
-                        self.error_span(param.span, format!("destructuring requires a tuple, found `{ty}`; annotate the parameter with a tuple type such as [number, string]"));
+                        self.error_span(param.span, "destructuring parameter requires a tuple type with exact arity — annotate as [number, number], or take the array and index with proofs");
                         &[]
                     }
                 };

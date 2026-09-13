@@ -2953,14 +2953,6 @@ mod tests {
                 "tuple has 2 positions, but destructuring binds 3 names",
             ),
             (
-                "fn f([a, b]: Array<number>) {}",
-                "destructuring requires a tuple",
-            ),
-            (
-                "const f = fn([a, b]: number) {};",
-                "destructuring requires a tuple",
-            ),
-            (
                 "fn f([a, a]: [number, number]) {}",
                 "duplicate tuple binding `a`",
             ),

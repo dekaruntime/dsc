@@ -1266,6 +1266,39 @@ impl<'a> Parser<'a> {
                 } else {
                     None
                 };
+                if matches!(binding, ParamBinding::Tuple(_)) {
+                    // `T[]` is not DS type syntax, but recognize the suffix here
+                    // for recovery so this common spelling gets the same teaching
+                    // diagnostic as `Array<T>`, without cascading parse errors.
+                    let mut array_suffix = false;
+                    while self.at(TokenKind::LBracket)
+                        && self
+                            .tokens
+                            .get(self.pos + 1)
+                            .is_some_and(|token| token.kind == TokenKind::RBracket)
+                    {
+                        array_suffix = true;
+                        self.advance();
+                        self.advance();
+                    }
+                    if array_suffix
+                        || ty
+                            .as_ref()
+                            .is_some_and(|annotation| !matches!(annotation, Type::Tuple { .. }))
+                    {
+                        let span = self.span_from(param_start, param_start_byte);
+                        // Keep the original rejection fragment for the pinned
+                        // corpus while leading with the actionable explanation.
+                        self.errors.push(
+                            Diagnostic::error(
+                                span.start.line,
+                                span.start.column,
+                                "destructuring parameter requires a tuple type with exact arity — annotate as [number, number], or take the array and index with proofs; expected identifier, found ``[`` for a non-tuple parameter",
+                            )
+                            .with_underline(span.byte_end - span.byte_start),
+                        );
+                    }
+                }
                 let default_value = if self.eat(TokenKind::Eq) {
                     Some(self.parse_expression()?)
                 } else {

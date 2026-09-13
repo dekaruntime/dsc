@@ -152,6 +152,9 @@ pub struct TypeckResult<'a> {
     /// Identifier references that resolved to compiler-known hook builtins.
     /// Emission keys imports off resolved references, not call-site text.
     pub hook_builtin_refs: HashSet<&'static str>,
+    /// Inferred `useEffect` dependency arrays, keyed by the call expression.
+    /// Names are in source order of first capture. An empty vec is `[]`.
+    pub effect_deps: HashMap<*const ast::Expr<'a>, Vec<&'a str>>,
 }
 
 /// Compiler-owned information for one `build { ... }` initializer.
@@ -803,6 +806,7 @@ pub fn check_program_with_imports<'a>(
         union_type_patterns: checker.union_type_patterns,
         dev_blocks: checker.dev_blocks,
         hook_builtin_refs: checker.hook_builtin_refs,
+        effect_deps: checker.effect_deps,
     }
 }
 
@@ -1921,6 +1925,10 @@ struct Checker<'a> {
     hook_body_called: bool,
     /// Identifier references that resolved to compiler-known hook builtins.
     hook_builtin_refs: HashSet<&'static str>,
+    /// Parallel to `scopes`: how each binding participates in effect deps.
+    capture_scopes: Vec<HashMap<&'a str, hooks::CaptureClass>>,
+    /// Inferred `useEffect` dependency arrays, keyed by the call expression.
+    effect_deps: HashMap<*const ast::Expr<'a>, Vec<&'a str>>,
     /// When true, diagnostics are suppressed. Used during the pre-check
     /// inference pass that resolves forward-referenced function return types.
     infer_only: bool,
@@ -1966,6 +1974,8 @@ impl<'a> Checker<'a> {
             build_factory_kinds: HashMap::new(),
             scopes: vec![HashMap::new()],
             mutables: vec![HashSet::new()],
+            capture_scopes: vec![HashMap::new()],
+            effect_deps: HashMap::new(),
             pending_module_bindings: HashSet::new(),
             type_scopes: Vec::new(),
             param_bounds: Vec::new(),
@@ -2007,6 +2017,8 @@ impl<'a> Checker<'a> {
             .insert("useState", Self::builtin_hook_type(true));
         self.globals
             .insert("useRef", Self::builtin_hook_type(false));
+        self.globals
+            .insert("useEffect", Self::builtin_use_effect_type());
     }
 
     fn seed_imports(&mut self, imports: &HashMap<&str, &ModuleExports<'a>>) {
@@ -2181,29 +2193,63 @@ impl<'a> Checker<'a> {
         self.unwrap_calls.clear();
         self.operator_rewrites.clear();
         self.hook_builtin_refs.clear();
+        self.effect_deps.clear();
     }
 
     // ------------------------------------------------------------------
     // Helpers
     // ------------------------------------------------------------------
 
+    pub(super) fn push_value_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+        self.capture_scopes.push(HashMap::new());
+    }
+
     fn declare_var(&mut self, name: &'a str, ty: Type<'a>) {
+        self.declare_var_class(name, ty, hooks::CaptureClass::Other);
+    }
+
+    pub(super) fn declare_var_class(
+        &mut self,
+        name: &'a str,
+        ty: Type<'a>,
+        class: hooks::CaptureClass,
+    ) {
         self.reject_hook_shadow(name, ast::Span::dummy());
         self.index_flow.shadow(name);
         if self.program.statements.iter().any(|stmt| matches!(stmt, ast::Stmt::Summon { functions, .. } if functions.iter().any(|f| f.name == name))) {
             self.error_span(ast::Span::dummy(), format!("cannot shadow summoned binding `{name}`"));
         }
         self.scopes.last_mut().unwrap().insert(name, ty);
+        self.capture_scopes.last_mut().unwrap().insert(name, class);
     }
 
     fn declare_mutable_var(&mut self, name: &'a str, ty: Type<'a>) {
-        self.reject_hook_shadow(name, ast::Span::dummy());
-        self.index_flow.shadow(name);
-        if self.program.statements.iter().any(|stmt| matches!(stmt, ast::Stmt::Summon { functions, .. } if functions.iter().any(|f| f.name == name))) {
-            self.error_span(ast::Span::dummy(), format!("cannot shadow summoned binding `{name}`"));
-        }
-        self.scopes.last_mut().unwrap().insert(name, ty);
+        self.declare_var_class(name, ty, hooks::CaptureClass::Other);
         self.mutables.last_mut().unwrap().insert(name);
+    }
+
+    pub(super) fn declare_mutable_var_class(
+        &mut self,
+        name: &'a str,
+        ty: Type<'a>,
+        class: hooks::CaptureClass,
+    ) {
+        self.declare_var_class(name, ty, class);
+        self.mutables.last_mut().unwrap().insert(name);
+    }
+
+    pub(super) fn lookup_capture(&self, name: &str) -> Option<hooks::CaptureClass> {
+        self.lookup_capture_depth(name).map(|(_, class)| class)
+    }
+
+    pub(super) fn lookup_capture_depth(&self, name: &str) -> Option<(usize, hooks::CaptureClass)> {
+        for (depth, scope) in self.capture_scopes.iter().enumerate().rev() {
+            if let Some(class) = scope.get(name) {
+                return Some((depth, *class));
+            }
+        }
+        None
     }
 
     fn lookup_var(&self, name: &'a str) -> Option<Type<'a>> {

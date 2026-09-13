@@ -547,7 +547,7 @@ impl<'a> Checker<'a> {
         span: ast::Span,
     ) {
         self.exception_catches.push(Vec::new());
-        self.scopes.push(HashMap::new());
+        self.push_value_scope();
         self.mutables.push(HashSet::new());
         for s in body {
             self.check_statement(s);
@@ -601,7 +601,7 @@ impl<'a> Checker<'a> {
                 _ => Type::Union { members: unique },
             }
         };
-        self.scopes.push(HashMap::new());
+        self.push_value_scope();
         self.mutables.push(HashSet::new());
         self.declare_var(name, catch_type);
         for s in catch_body {

@@ -515,12 +515,8 @@ impl<'a> Checker<'a> {
             ast::Expr::None { .. } => Type::None,
             ast::Expr::Identifier { name, span } => match self.lookup_var(name) {
                 Some(ty) => {
-                    if super::hooks::is_hook_builtin(name) {
-                        self.note_hook_builtin_ref(if *name == "useState" {
-                            "useState"
-                        } else {
-                            "useRef"
-                        });
+                    if let Some(builtin) = super::hooks::hook_builtin_name(name) {
+                        self.note_hook_builtin_ref(builtin);
                     }
                     ty
                 }
@@ -1011,7 +1007,7 @@ impl<'a> Checker<'a> {
         let (body_expected_ret, _final_ret) =
             self.function_return_context(is_async, explicit_ret.clone(), span);
 
-        self.scopes.push(HashMap::new());
+        self.push_value_scope();
         self.mutables.push(HashSet::new());
 
         for (p, t) in params.iter().zip(param_types.iter()) {
@@ -1028,7 +1024,7 @@ impl<'a> Checker<'a> {
                     );
                 }
             }
-            self.declare_var(p.name, t.clone());
+            self.declare_var_class(p.name, t.clone(), Self::param_capture_class(t));
         }
 
         let saved_in_function = self.in_function;
@@ -2155,7 +2151,7 @@ impl<'a> Checker<'a> {
         let mut has_catch_all = false;
 
         for arm in arms {
-            self.scopes.push(HashMap::new());
+            self.push_value_scope();
             self.mutables.push(HashSet::new());
             self.check_pattern(&arm.pattern, &effective_scrutinee);
             // Union type-patterns rebind the operand within the arm
@@ -3220,12 +3216,8 @@ impl<'a> Checker<'a> {
                             }
                         };
                         if callee_type.is_hook_fn() {
-                            if super::hooks::is_hook_builtin(name) {
-                                self.note_hook_builtin_ref(if *name == "useState" {
-                                    "useState"
-                                } else {
-                                    "useRef"
-                                });
+                            if let Some(builtin) = super::hooks::hook_builtin_name(name) {
+                                self.note_hook_builtin_ref(builtin);
                             }
                             self.note_hook_call(name, *span, super::hooks::is_hook_builtin(name));
                         }
@@ -4572,6 +4564,11 @@ impl<'a> Checker<'a> {
         }
         if let ast::Expr::Identifier { name: "useRef", .. } = callee {
             return self.check_use_ref(type_args, args, span);
+        }
+        if let ast::Expr::Identifier { name, .. } = callee {
+            if self.is_use_effect_binding(name) {
+                return self.check_use_effect(expr, type_args, args, span);
+            }
         }
 
         // `panic(msg)` / `deka.panic(msg)`: never-returning lang item (RFD 21).

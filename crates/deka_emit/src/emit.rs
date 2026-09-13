@@ -499,6 +499,7 @@ pub fn emit_js_with_options<'a>(
         enum_case_patterns,
         union_type_patterns,
         &HashMap::new(),
+        &HashMap::new(),
         build_closure_names,
         file_path,
         None,
@@ -548,6 +549,7 @@ pub fn emit_js_module_with_options<'a>(
         *const deka_syntax::Pattern<'a>,
         deka_syntax::typeck::UnionMemberTest<'a>,
     >,
+    effect_deps: &HashMap<*const Expr<'a>, Vec<&'a str>>,
     build_blocks: &HashMap<*const Expr<'a>, deka_syntax::typeck::DevBlock<'a>>,
     // Factories this module's compiler-private `__deka_factories` closure
     // must capture for consumer build hydration (dsc#52). Empty disables the
@@ -585,6 +587,7 @@ pub fn emit_js_module_with_options<'a>(
     emitter.super_decl_trees = super_decl_trees.clone();
     emitter.enum_case_patterns = enum_case_patterns.clone();
     emitter.union_type_patterns = union_type_patterns.clone();
+    emitter.effect_deps = effect_deps.clone();
     emitter.build_blocks = build_blocks.clone();
     for block in build_blocks.values() {
         build_factory_names(&block.descriptor, &mut emitter.build_factory_names);
@@ -638,6 +641,7 @@ pub fn emit_dev_entry<'a>(
     emitter.super_decl_trees = typeck.super_trees.clone();
     emitter.enum_case_patterns = typeck.enum_case_patterns.clone();
     emitter.union_type_patterns = typeck.union_type_patterns.clone();
+    emitter.effect_deps = typeck.effect_deps.clone();
     emitter.emit_dev_entry(slot, body)
 }
 
@@ -1407,6 +1411,8 @@ struct Emitter<'a> {
     /// (deka#595); module bodies then reference the helpers as free
     /// identifiers resolved by the single program prelude.
     detached: bool,
+    /// Inferred `useEffect` dependency arrays, keyed by the call expression.
+    effect_deps: HashMap<*const Expr<'a>, Vec<&'a str>>,
     /// Inject `data-deka-id` on host JSX elements. Set when the compile graph
     /// hydrates islands (`client:*` or interactive-component analysis).
     inject_deka_id: bool,
@@ -1469,6 +1475,7 @@ impl<'a> Emitter<'a> {
             dev: false,
             detached: false,
             inject_deka_id: false,
+            effect_deps: HashMap::new(),
             demand: crate::prelude::PreludeDemand::default(),
         };
         emitter.prepass();
@@ -2571,6 +2578,7 @@ impl<'a> Emitter<'a> {
     fn hook_builtins_used(&self) -> Vec<&'static str> {
         let mut saw_state = false;
         let mut saw_ref = false;
+        let mut saw_effect = false;
         for stmt in self.program.statements.iter() {
             if !self.should_emit_stmt(stmt) {
                 continue;
@@ -2582,6 +2590,7 @@ impl<'a> Emitter<'a> {
                     match *name {
                         "useState" if !self.user_imported("useState") => saw_state = true,
                         "useRef" if !self.user_imported("useRef") => saw_ref = true,
+                        "useEffect" if !self.user_imported("useEffect") => saw_effect = true,
                         _ => {}
                     }
                 }
@@ -2594,7 +2603,27 @@ impl<'a> Emitter<'a> {
         if saw_ref {
             names.push("useRef");
         }
+        if saw_effect {
+            names.push("useEffect");
+        }
         names
+    }
+
+    fn emit_effect_deps(&mut self, call: *const Expr<'a>, need_comma: bool) {
+        let Some(deps) = self.effect_deps.get(&call) else {
+            return;
+        };
+        if need_comma {
+            self.out.push_str(", ");
+        }
+        self.out.push('[');
+        for (i, dep) in deps.iter().enumerate() {
+            if i > 0 {
+                self.out.push_str(", ");
+            }
+            self.out.push_str(dep);
+        }
+        self.out.push(']');
     }
 
     fn configure_jsx_names(&mut self, source: &str) {
@@ -4073,6 +4102,7 @@ impl<'a> Emitter<'a> {
                         }
                         self.emit_expr(arg)?;
                     }
+                    self.emit_effect_deps(expr_ptr, !args.is_empty());
                     self.out.push(')');
                 }
                 let _ = span;
@@ -5001,6 +5031,7 @@ impl<'a> Emitter<'a> {
                     jsx_runtime: self.jsx_runtime.clone(),
                     jsx_helpers: self.jsx_helpers.clone(),
                     dev: self.dev,
+                    effect_deps: HashMap::new(),
                     detached: false,
                     inject_deka_id: false,
                     demand: crate::prelude::PreludeDemand::default(),

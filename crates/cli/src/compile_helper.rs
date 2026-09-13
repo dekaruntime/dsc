@@ -4,9 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use deka_compile::module_graph::{self, GraphCompileOptions};
-use deka_compile::{
-    compile_to_js, compile_to_js_with_options, format_diagnostic, format_diagnostics,
-};
+use deka_compile::{compile_to_js_with_options, format_diagnostic, format_diagnostics};
 
 pub use deka_compile::SourceModuleMeta as ModuleMeta;
 
@@ -16,7 +14,15 @@ pub struct CompileReport {
 }
 
 pub fn compile_or_report(source: &str, input: &str) -> Result<CompileReport, String> {
-    match compile_to_js(source, input) {
+    compile_or_report_with_options(source, input, deka_compile::CompileOptions::default())
+}
+
+pub fn compile_or_report_with_options(
+    source: &str,
+    input: &str,
+    options: deka_compile::CompileOptions,
+) -> Result<CompileReport, String> {
+    match compile_to_js_with_options(source, input, options) {
         Ok(result) => {
             let warnings = result.diagnostics.iter().map(format_diagnostic).collect();
             Ok(CompileReport {
@@ -74,8 +80,9 @@ pub fn compile_source_js(
     cwd: &Path,
     client: bool,
     self_contained: bool,
+    dev: bool,
 ) -> Result<String, String> {
-    let (entry, modules) = compile_graph_modules(input, cwd, client, self_contained)?;
+    let (entry, modules) = compile_graph_modules(input, cwd, client, self_contained, dev)?;
     modules
         .get(&entry)
         .cloned()
@@ -142,6 +149,7 @@ pub fn compile_graph_modules(
     cwd: &Path,
     client: bool,
     self_contained: bool,
+    dev: bool,
 ) -> Result<(PathBuf, HashMap<PathBuf, String>), String> {
     let source = std::fs::read_to_string(input)
         .map_err(|err| format!("failed to read {}: {err}", input.display()))?;
@@ -156,6 +164,7 @@ pub fn compile_graph_modules(
             input_name,
             deka_compile::CompileOptions {
                 module_root: slot_id_root(cwd, input),
+                dev,
                 ..Default::default()
             },
         )
@@ -177,6 +186,7 @@ pub fn compile_graph_modules(
         GraphCompileOptions {
             client,
             module_root: slot_id_root(cwd, input),
+            dev,
             ..Default::default()
         },
     )

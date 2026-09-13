@@ -2,7 +2,9 @@ use core::{CommandSpec, Context, FlagSpec, Registry};
 use std::fs;
 use std::path::Path;
 
-use crate::compile_helper::{compile_or_report, find_project_root, is_deka_source_path};
+use crate::compile_helper::{
+    compile_or_report_with_options, find_project_root, is_deka_source_path,
+};
 use deka_project::modules::{LinkEntry, LinkManifest};
 
 const COMMAND: CommandSpec = CommandSpec {
@@ -44,10 +46,11 @@ fn cmd(context: &Context) {
 }
 
 fn usage() -> &'static str {
-    "usage: dsc check <file.ds>\n       dsc check --as-package <package-directory>\n       dsc check --single-file <file.ds>"
+    "usage: dsc check <file.ds> [--dev]\n       dsc check --as-package <package-directory>\n       dsc check --single-file <file.ds> [--dev]"
 }
 
 fn run(context: &Context) -> Result<(), String> {
+    let dev = context.args.flags.get("--dev").copied().unwrap_or(false);
     if context
         .args
         .flags
@@ -60,7 +63,7 @@ fn run(context: &Context) -> Result<(), String> {
             .positionals
             .first()
             .ok_or_else(|| "usage: dsc check --as-package <package-directory>".to_string())?;
-        return check_as_package(Path::new(dir));
+        return check_as_package(Path::new(dir), dev);
     }
 
     let input = context
@@ -81,16 +84,20 @@ fn run(context: &Context) -> Result<(), String> {
         .get("--single-file")
         .copied()
         .unwrap_or(false);
+    let options = deka_compile::CompileOptions {
+        dev,
+        ..Default::default()
+    };
     let report = if single_file {
-        compile_or_report(&source, input)?
+        compile_or_report_with_options(&source, input, options)?
     } else if let Some(project_root) = find_project_root(&context.env.cwd, path) {
-        check_project_file(path, &project_root, &context.env.cwd)?;
+        check_project_file(path, &project_root, &context.env.cwd, dev)?;
         crate::compile_helper::CompileReport {
             js: String::new(),
             warnings: Vec::new(),
         }
     } else {
-        compile_or_report(&source, input)?
+        compile_or_report_with_options(&source, input, options)?
     };
 
     for warning in &report.warnings {
@@ -101,21 +108,33 @@ fn run(context: &Context) -> Result<(), String> {
     Ok(())
 }
 
-fn check_project_file(path: &Path, project_root: &Path, cwd: &Path) -> Result<(), String> {
+fn check_project_file(
+    path: &Path,
+    project_root: &Path,
+    cwd: &Path,
+    dev: bool,
+) -> Result<(), String> {
     let absolute_path = if path.is_absolute() {
         path.to_path_buf()
     } else {
         cwd.join(path)
     };
     let loader = deka_compile::module_graph::FsModuleLoader::new(project_root.to_path_buf());
-    deka_compile::module_graph::compile_module_graph(&absolute_path, &loader)
-        .map_err(|diagnostics| deka_compile::format_diagnostics(&diagnostics))?;
+    deka_compile::module_graph::compile_module_graph_with_options(
+        &absolute_path,
+        &loader,
+        deka_compile::module_graph::GraphCompileOptions {
+            dev,
+            ..Default::default()
+        },
+    )
+    .map_err(|diagnostics| deka_compile::format_diagnostics(&diagnostics))?;
     Ok(())
 }
 
 /// Typecheck a package the way a consumer would: scratch project + local link
 /// + module graph. Registry install stays on the host (`deka`).
-fn check_as_package(package_dir: &Path) -> Result<(), String> {
+fn check_as_package(package_dir: &Path, dev: bool) -> Result<(), String> {
     let package_dir = fs::canonicalize(package_dir).map_err(|err| {
         format!(
             "package directory does not exist: {} ({err})",
@@ -212,7 +231,14 @@ fn check_as_package(package_dir: &Path) -> Result<(), String> {
 
     let entry = project.join("main.ds");
     let loader = deka_compile::module_graph::FsModuleLoader::new(project.to_path_buf());
-    match deka_compile::module_graph::compile_module_graph(&entry, &loader) {
+    match deka_compile::module_graph::compile_module_graph_with_options(
+        &entry,
+        &loader,
+        deka_compile::module_graph::GraphCompileOptions {
+            dev,
+            ..Default::default()
+        },
+    ) {
         Ok(_) => {
             stdio::success(&format!("checked {name} as an installed consumer"));
             Ok(())

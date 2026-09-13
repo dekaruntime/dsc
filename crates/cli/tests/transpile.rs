@@ -224,9 +224,81 @@ fn help_describes_preserve() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    for expected in ["--preserve", "--bundle", "--treeshake", "--client", "Examples:"] {
+    for expected in [
+        "--preserve",
+        "--bundle",
+        "--treeshake",
+        "--client",
+        "--dev",
+        "Examples:",
+    ] {
         assert!(text.contains(expected), "missing {expected}: {text}");
     }
+}
+
+#[test]
+fn transpile_dev_emits_jsxdev_production_emits_jsx() {
+    // deka#937 greps `dsc transpile --help` for `--dev` and then compiles
+    // `.dsx` with that flag so Fast Refresh gets jsxDEV + DS locations.
+    let temp = tempfile::tempdir().expect("tempdir");
+    let source = temp.path().join("card.dsx");
+    write(
+        &source,
+        "export fn Card() ReactNode {\n  return <p>hello</p>;\n}\n",
+    );
+    let prod = temp.path().join("prod.js");
+    let dev = temp.path().join("dev.js");
+
+    let prod_run = Command::new(cli_bin())
+        .args(["transpile", source.to_str().unwrap(), "--out"])
+        .arg(&prod)
+        .output()
+        .expect("transpile production");
+    assert!(
+        prod_run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&prod_run.stderr)
+    );
+
+    let dev_run = Command::new(cli_bin())
+        .args(["transpile", "--dev", source.to_str().unwrap(), "--out"])
+        .arg(&dev)
+        .output()
+        .expect("transpile --dev");
+    assert!(
+        dev_run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&dev_run.stderr)
+    );
+
+    let prod_js = fs::read_to_string(&prod).expect("production emit");
+    let dev_js = fs::read_to_string(&dev).expect("dev emit");
+    assert!(
+        prod_js.contains("jsx(") || prod_js.contains("jsxs("),
+        "production must call jsx/jsxs: {prod_js}"
+    );
+    assert!(
+        !prod_js.contains("jsxDEV"),
+        "production must not emit jsxDEV: {prod_js}"
+    );
+    assert!(
+        prod_js.contains("jsx-runtime"),
+        "production must import the production runtime: {prod_js}"
+    );
+    assert!(
+        dev_js.contains("jsxDEV"),
+        "transpile --dev must emit jsxDEV: {dev_js}"
+    );
+    assert!(
+        dev_js.contains("jsx-dev-runtime"),
+        "transpile --dev must import the development runtime: {dev_js}"
+    );
+    assert!(
+        dev_js.contains("fileName")
+            && dev_js.contains("lineNumber")
+            && dev_js.contains("columnNumber"),
+        "transpile --dev must carry DS source locations: {dev_js}"
+    );
 }
 
 #[test]
@@ -390,7 +462,9 @@ fn self_contained_graph_dump_keeps_package_paths() {
         out.join("ds_modules/@deka/io/index.js").is_file(),
         "package module must keep ds_modules path, dump was: {:?}",
         fs::read_dir(&out)
-            .map(|d| d.filter_map(|e| e.ok().map(|e| e.path())).collect::<Vec<_>>())
+            .map(|d| d
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .collect::<Vec<_>>())
             .unwrap_or_default()
     );
     assert!(

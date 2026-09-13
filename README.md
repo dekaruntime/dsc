@@ -17,7 +17,7 @@ dsc --help
 Commands (`check`, `transpile`, `fmt`, `lsp`, `summon`) are registered in `crates/cli/src/lib.rs`.
 
 - `dsc` (no command) emits `app/`, `api/`, and `src/` to `dist/`.
-- `dsc transpile <file-or-directory>` writes per-module `.js` (`--preserve`), or one graph with `--bundle`. `--treeshake` minifies.
+- `dsc transpile <file-or-directory>` writes per-module `.js` (`--preserve`), or one graph with `--bundle`. `--treeshake` minifies. `--dev` emits `jsxDEV` with DS source locations.
 - `dsc check --as-package <dir>` typechecks a local package through a scratch consumer + `.deka/links.json`. Registry install stays on `deka`.
 - `dsc summon infer <module.mjs>` scaffolds a DRAFT summon block from a vendored module (`--out` writes a file). Review before committing; see [SUMMON.md](SUMMON.md).
 
@@ -36,8 +36,9 @@ acquisition is being integrated. Preserved emission and `dsc bundle` use the
 same lowering; the compiler does not embed a React vendor path or provide
 `ui/jsx` / automatic `ui/reactive.live` adapters.
 
-Hosts opt into development emission with `CompileOptions.dev = true` or
-`GraphCompileOptions.dev = true`; WASM compile requests accept `"dev": true`.
+Hosts opt into development emission with `dsc transpile --dev`, `dsc check --dev`,
+`dsc bundle --dev`, `CompileOptions.dev = true`, or `GraphCompileOptions.dev = true`;
+WASM compile requests accept `"dev": true`.
 The default remains production. Dev mode imports `jsxDEV` and emits
 `jsxDEV(type, props, key, isStaticChildren, source, this)`, using `undefined`
 when there is no key. `isStaticChildren` is true exactly where production uses

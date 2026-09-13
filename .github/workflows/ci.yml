@@ -229,8 +229,11 @@ jobs:
           # gate loudly, so this cannot false-green.
           lock_path = ".cache/deka-packages/io/deka.lock"
           lock = json.load(open(lock_path))
-          entry = lock["packages"]["@deka/io"]
-          entry["fsGraph"]["hash"] = "d7b4daec01ac1fd2e0738e9f100e9c6abea22dd37cf02f9197bb8c15c32da565"
+          pkgs = lock["packages"]
+          entries = pkgs if isinstance(pkgs, list) else pkgs.values()
+          hits = [e for e in entries if "@deka/io" in (e.get("name"), e.get("package"), e.get("id"))]
+          assert len(hits) == 1, f"expected one @deka/io lock entry, found {len(hits)}: {json.dumps(lock)[:400]}"
+          hits[0]["fsGraph"]["hash"] = "d7b4daec01ac1fd2e0738e9f100e9c6abea22dd37cf02f9197bb8c15c32da565"
           json.dump(lock, open(lock_path, "w"), indent=2)
           open(lock_path, "a").write("\n")
           REHASH

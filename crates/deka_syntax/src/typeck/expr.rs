@@ -1439,7 +1439,21 @@ impl<'a> Checker<'a> {
                 }
             }
             Type::Array { elem } => self.resolve_array_field(field, elem, span),
-            Type::Interface { name } => {
+            Type::Interface { name, identity } => {
+                if let Some(members) = self.interface_members.get(identity) {
+                    return members
+                        .members
+                        .iter()
+                        .find(|(n, _)| *n == field)
+                        .map(|(_, ty)| ty.clone())
+                        .unwrap_or_else(|| {
+                            self.error_span(
+                                span,
+                                format!("interface `{name}` has no field `{field}`"),
+                            );
+                            Type::Error
+                        });
+                }
                 self.resolve_interface_field(name, field)
                     .unwrap_or_else(|| {
                         self.error_span(span, format!("interface `{name}` has no field `{field}`"));
@@ -1598,7 +1612,7 @@ impl<'a> Checker<'a> {
         let Some(Type::Function { params, .. }) = self.lookup_var(tag) else {
             return None;
         };
-        let Some(Type::Interface { name }) = params.first().cloned() else {
+        let Some(Type::Interface { name, .. }) = params.first().cloned() else {
             return None;
         };
         if self.interfaces.contains_key(name) {
@@ -1734,12 +1748,33 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn resolve_interface_field(
+    fn interface_info(&self, name: &str, identity: usize) -> Option<&super::InterfaceInfo<'a>> {
+        self.interface_members
+            .get(&identity)
+            .map(|definition| &definition.info)
+            .or_else(|| {
+                self.interfaces
+                    .get(name)
+                    .filter(|info| info.members.as_ptr() as usize == identity)
+            })
+    }
+
+    pub(super) fn resolve_interface_field(
         &mut self,
         interface_name: &'a str,
         field: &'a str,
     ) -> Option<Type<'a>> {
         let info = self.interfaces.get(interface_name)?;
+        if let Some(members) = self
+            .interface_members
+            .get(&(info.members.as_ptr() as usize))
+        {
+            return members
+                .members
+                .iter()
+                .find(|(n, _)| *n == field)
+                .map(|(_, ty)| ty.clone());
+        }
         for member in info.members.iter() {
             match member {
                 ast::InterfaceMember::Field {
@@ -1802,7 +1837,11 @@ impl<'a> Checker<'a> {
     }
 
     /// Resolve a field's type, recursively searching embedded structs.
-    fn resolve_field_type(&mut self, struct_name: &'a str, field: &'a str) -> Option<Type<'a>> {
+    pub(super) fn resolve_field_type(
+        &mut self,
+        struct_name: &'a str,
+        field: &'a str,
+    ) -> Option<Type<'a>> {
         self.resolve_field_type_from(struct_name, struct_name, field)
     }
 
@@ -2695,7 +2734,9 @@ impl<'a> Checker<'a> {
     /// name for primitives, structs, enums and interfaces.
     fn union_member_name(ty: &Type<'a>) -> Option<&'a str> {
         match ty {
-            Type::Named { name } | Type::Struct { name } | Type::Interface { name } => Some(name),
+            Type::Named { name } | Type::Struct { name } | Type::Interface { name, .. } => {
+                Some(name)
+            }
             _ => None,
         }
     }
@@ -3601,8 +3642,12 @@ impl<'a> Checker<'a> {
         // Interface receiver: dispatch is dynamic; validate against the
         // interface signature and enforce mutable-method requirements inferred
         // from satisfying structs.
-        if let Type::Interface { name: iface_name } = &object_type {
-            let info = self.interfaces.get(iface_name)?;
+        if let Type::Interface {
+            name: iface_name,
+            identity,
+        } = &object_type
+        {
+            let info = self.interface_info(iface_name, *identity)?;
             let method = info.members.iter().find(|m| match m {
                 ast::InterfaceMember::Method { name, .. } => *name == method_name,
                 _ => false,
@@ -3623,13 +3668,28 @@ impl<'a> Checker<'a> {
                 } => (*params, return_type.as_ref()),
                 _ => unreachable!(),
             };
-            let expected_params: Vec<Type<'a>> = params
-                .iter()
-                .map(|p| match &p.ty {
-                    Some(t) => self.resolve_ast_type(t),
-                    None => Type::Error,
+            let resolved = self
+                .interface_members
+                .get(identity)
+                .and_then(|definition| {
+                    definition
+                        .members
+                        .iter()
+                        .find(|(name, _)| *name == method_name)
                 })
-                .collect();
+                .map(|(_, ty)| ty.clone());
+            let expected_params: Vec<Type<'a>> =
+                if let Some(Type::Function { params, .. }) = &resolved {
+                    params.clone()
+                } else {
+                    params
+                        .iter()
+                        .map(|p| match &p.ty {
+                            Some(t) => self.resolve_ast_type(t),
+                            None => Type::Error,
+                        })
+                        .collect()
+                };
             if expected_params.len() != args.len() {
                 self.error_span(
                     span,
@@ -3656,6 +3716,9 @@ impl<'a> Checker<'a> {
                         );
                     }
                 }
+            }
+            if let Some(Type::Function { ret, .. }) = resolved {
+                return Some(*ret);
             }
             return return_type
                 .map(|t| self.resolve_ast_type(t))
@@ -3842,8 +3905,8 @@ impl<'a> Checker<'a> {
                     return None;
                 }
             }
-            Type::Interface { name } => {
-                let info = self.interfaces.get(name)?;
+            Type::Interface { name, identity } => {
+                let info = self.interface_info(name, *identity)?;
                 let declared = info.members.iter().any(|m| match m {
                     ast::InterfaceMember::Method { name: n, .. } => *n == "getType",
                     _ => false,
@@ -3993,8 +4056,8 @@ impl<'a> Checker<'a> {
                     return None;
                 }
             }
-            Type::Interface { name } => {
-                let info = self.interfaces.get(name)?;
+            Type::Interface { name, identity } => {
+                let info = self.interface_info(name, *identity)?;
                 if info.members.iter().any(|m| {
                     matches!(m,
                     ast::InterfaceMember::Method { name: n, .. } if *n == "signature")
@@ -4050,8 +4113,8 @@ impl<'a> Checker<'a> {
                     return None;
                 }
             }
-            Type::Interface { name } => {
-                let Some(info) = self.interfaces.get(name) else {
+            Type::Interface { name, identity } => {
+                let Some(info) = self.interface_info(name, *identity) else {
                     return None;
                 };
                 if info.members.iter().any(|member| {
@@ -4302,9 +4365,8 @@ impl<'a> Checker<'a> {
     /// declared with `mut`.
     fn field_is_mutable(&self, receiver_type: &Type<'a>, field: &str) -> bool {
         match receiver_type {
-            Type::Interface { name } => self
-                .interfaces
-                .get(name)
+            Type::Interface { name, identity } => self
+                .interface_info(name, *identity)
                 .and_then(|info| {
                     info.members.iter().find(|m| match m {
                         ast::InterfaceMember::Field { name: n, .. } => n == &field,
@@ -4323,8 +4385,8 @@ impl<'a> Checker<'a> {
     /// Returns true if the named interface declares any `mut` field. Such
     /// interfaces grant mutation through their parameters, so an immutable
     /// value must not be passed as one (deka#590).
-    fn interface_has_mut_fields(&self, name: &str) -> bool {
-        self.interfaces.get(name).map_or(false, |info| {
+    fn interface_has_mut_fields(&self, name: &str, identity: usize) -> bool {
+        self.interface_info(name, identity).map_or(false, |info| {
             info.members.iter().any(|m| match m {
                 ast::InterfaceMember::Field { mutable, .. } => *mutable,
                 _ => false,
@@ -4678,8 +4740,12 @@ impl<'a> Checker<'a> {
                         // mut fields would let mutation through it succeed
                         // silently. Generalises #591's immutable-receiver
                         // rule from builtins to interface parameters.
-                        if let Type::Interface { name: iface_name } = expected {
-                            if self.interface_has_mut_fields(iface_name)
+                        if let Type::Interface {
+                            name: iface_name,
+                            identity,
+                        } = expected
+                        {
+                            if self.interface_has_mut_fields(iface_name, *identity)
                                 && !self.is_mutable_expr(arg)
                             {
                                 self.error_at_expr(
@@ -4768,7 +4834,7 @@ fn json_shape_error(
             Some(field) => format!("cannot serialize field `{field}` of unknown type `{name}`"),
             None => format!("cannot serialize unknown type `{name}`"),
         }),
-        T::Interface { name } => Err(match field {
+        T::Interface { name, .. } => Err(match field {
             Some(field) => format!("cannot serialize field `{field}` of interface `{name}`"),
             None => format!("cannot serialize interface `{name}`"),
         }),

@@ -50,7 +50,10 @@ pub(super) fn localize_export<'a>(
         match ty {
             Type::Struct { name: n } => Type::Struct { name: name(n) },
             Type::Named { name: n } => Type::Named { name: name(n) },
-            Type::Interface { name: n } => Type::Interface { name: name(n) },
+            Type::Interface { name: n, identity } => Type::Interface {
+                name: name(n),
+                identity: *identity,
+            },
             Type::Newtype { name: n, repr } => Type::Newtype {
                 name: name(n),
                 repr: *repr,
@@ -442,7 +445,7 @@ impl<'a> Checker<'a> {
                                 ast::Pattern::Constructor { name, .. },
                             ) = (&payload_type, *pattern)
                             {
-                                if let Some(member) = members.iter().find(|member| matches!(member, Type::Named { name: n } | Type::Struct { name: n } | Type::Interface { name: n } | Type::Newtype { name: n, .. } if n == name)) {
+                                if let Some(member) = members.iter().find(|member| matches!(member, Type::Named { name: n } | Type::Struct { name: n } | Type::Interface { name: n, .. } | Type::Newtype { name: n, .. } if n == name)) {
                                     payload_type = member.clone();
                                 }
                             }

@@ -72,8 +72,11 @@ impl<'a> Checker<'a> {
                         Type::Struct { name }
                     } else if self.enums.contains_key(name) {
                         Type::Named { name }
-                    } else if self.interfaces.contains_key(name) {
-                        Type::Interface { name }
+                    } else if let Some(info) = self.interfaces.get(name) {
+                        Type::Interface {
+                            name,
+                            identity: info.members.as_ptr() as usize,
+                        }
                     } else if let Some(info) = self.newtypes.get(name).cloned() {
                         Type::Newtype { name, repr: info.repr }
                     } else if let Some(alias) = self.aliases.get(name).cloned() {

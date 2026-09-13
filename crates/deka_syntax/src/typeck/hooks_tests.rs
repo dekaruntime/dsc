@@ -440,6 +440,23 @@ fn useeffect_theme_unsafe_member_call_is_classified() {
 }
 
 #[test]
+fn useeffect_theme_unsafe_template_interpolation_is_classified() {
+    // deka#951 class: a useState value captured only as a template
+    // interpolation inside raw JS is still a reactive capture.
+    assert_ok(
+        "fn Swatch() ReactNode {\n\
+           const [color, setColor] = useState(\"red\")\n\
+           useEffect(fn() Option<fn() void> {\n\
+             const _ = unsafe { el.style = `color: ${color}`; return 1 }\n\
+             return None\n\
+           })\n\
+           setColor(\"blue\")\n\
+           return <p>{color}</p>\n\
+         }",
+    );
+}
+
+#[test]
 fn useeffect_unclassified_capture_inside_unsafe_is_diagnosed() {
     // Fail-closed: a capture the checker cannot classify, even when it sits
     // only in raw JS, is a diagnostic — never a silent `[]`.

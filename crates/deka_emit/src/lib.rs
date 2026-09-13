@@ -2583,6 +2583,63 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
         );
     }
 
+    fn emit_unsafe_template_effect(unsafe_body: &str) -> String {
+        parse_check_and_emit(&format!(
+            "fn Swatch() ReactNode {{\n\
+               const [color, setColor] = useState(\"red\");\n\
+               useEffect(fn() Option<fn() void> {{\n\
+                 const _ = unsafe {{ {unsafe_body} }};\n\
+                 return None;\n\
+               }});\n\
+               setColor(\"blue\");\n\
+               return <p>{{color}}</p>;\n\
+             }}"
+        ))
+    }
+
+    /// deka#951 class via template interpolation: identifiers inside
+    /// `${...}` in an `unsafe` body must be captures, same as a member-call
+    /// argument.
+    #[test]
+    fn emit_useeffect_infers_unsafe_template_interpolation_capture() {
+        let out = emit_unsafe_template_effect("el.style = `color: ${color}`; return 1");
+        assert_eq!(
+            useeffect_dep_arrays(&out),
+            ["[color]"],
+            "template interpolation must infer [color], not []: {out}"
+        );
+    }
+
+    #[test]
+    fn emit_useeffect_infers_nested_template_interpolation_capture() {
+        let out = emit_unsafe_template_effect("el.text = `${`a${color}`}`; return 1");
+        assert_eq!(
+            useeffect_dep_arrays(&out),
+            ["[color]"],
+            "nested template interpolation must infer [color], not []: {out}"
+        );
+    }
+
+    #[test]
+    fn emit_useeffect_infers_escaped_backtick_template_interpolation_capture() {
+        let out = emit_unsafe_template_effect("el.text = `hello \\`world ${color}`; return 1");
+        assert_eq!(
+            useeffect_dep_arrays(&out),
+            ["[color]"],
+            "escaped backtick must not hide the interpolation capture: {out}"
+        );
+    }
+
+    #[test]
+    fn emit_useeffect_plain_string_dollar_brace_is_not_a_capture() {
+        let out = emit_unsafe_template_effect("el.style = \"color: ${color}\"; return 1");
+        assert_eq!(
+            useeffect_dep_arrays(&out),
+            ["[]"],
+            "dollar-brace inside a plain string is literal, deps must stay []: {out}"
+        );
+    }
+
     #[test]
     fn emit_automemo_pure_expression_over_tracked_inputs() {
         let out = parse_check_and_emit(

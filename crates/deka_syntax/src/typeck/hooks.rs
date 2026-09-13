@@ -14,6 +14,8 @@
 //! early return in the immediate body.
 
 use std::collections::{HashMap, HashSet};
+use std::iter::Peekable;
+use std::str::CharIndices;
 
 use super::{types::Type, Checker};
 use crate::ast;
@@ -1951,11 +1953,40 @@ fn collect_expr_frees<'a>(expr: &ast::Expr<'a>) -> Vec<(&'a str, ast::Span)> {
     walker.frees
 }
 
-/// Identifier-shaped tokens in a raw `unsafe` body, skipping string
-/// literals and comments so a string like `"data-theme"` does not look
-/// like a capture of `data` or `theme`.
+/// Identifier-shaped tokens in a raw `unsafe` body. String literals and
+/// comments are skipped so `"data-theme"` is not a capture of `data` or
+/// `theme`. Template literals are not opaque: `${...}` interpolations are
+/// scanned as JS (nested templates such as a template inside `${...}`,
+/// and escaped backticks, included). `${` inside a plain `'...'` /
+/// `"..."` string is literal text and is not scanned.
+///
+/// Token scan, not a JS parse. Amina's PR #221 matrix — the two
+/// over-capture rows are accepted approximations (extra re-renders, never
+/// a stale `[]`); do not "fix" them without a real JS parser:
+///
+/// | case | expected | actual | verdict |
+/// | member-call arg (Theme.dsx) | `[theme]` | `[theme]` | pass |
+/// | string `"data-theme"` | no capture | skipped | pass |
+/// | comment containing an ident | no capture | skipped | pass |
+/// | JS globals (`document`, `console`) | not captured | Skip | pass |
+/// | setter / `useRef` identity | excluded (Stable) | excluded | pass |
+/// | unclassified binding | fail-closed diagnostic | diagnostic | pass |
+/// | property after a dot (`obj.theme` vs unrelated `theme`) | `[obj]` | `[obj, theme]` | OVER-capture (accepted) |
+/// | local shadow (`var theme = 1` inside unsafe vs outer `theme`) | not a capture | `[theme]` | OVER-capture (accepted) |
+/// | template interpolation (`color: ${color}`) | `[color]` | `[color]` | pass |
 fn for_each_js_ident<'a>(source: &'a str, mut f: impl FnMut(&'a str)) {
     let mut chars = source.char_indices().peekable();
+    scan_js_idents(&mut chars, source, &mut f, false);
+}
+
+fn scan_js_idents<'a, F: FnMut(&'a str)>(
+    chars: &mut Peekable<CharIndices<'a>>,
+    source: &'a str,
+    f: &mut F,
+    interpolation: bool,
+) {
+    // `${` already consumed the `{`; depth 1 closes the interpolation.
+    let mut brace_depth: usize = if interpolation { 1 } else { 0 };
     while let Some((i, ch)) = chars.next() {
         match ch {
             '/' => match chars.peek().map(|&(_, next)| next) {
@@ -1978,16 +2009,13 @@ fn for_each_js_ident<'a>(source: &'a str, mut f: impl FnMut(&'a str)) {
                 }
                 _ => {}
             },
-            '"' | '\'' | '`' => {
-                let quote = ch;
-                while let Some((_, next)) = chars.next() {
-                    if next == '\\' {
-                        chars.next();
-                        continue;
-                    }
-                    if next == quote {
-                        break;
-                    }
+            '"' | '\'' => skip_quoted(chars, ch),
+            '`' => scan_template_idents(chars, source, f),
+            '{' if interpolation => brace_depth += 1,
+            '}' if interpolation => {
+                brace_depth -= 1;
+                if brace_depth == 0 {
+                    return;
                 }
             }
             c if is_js_ident_start(c) => {
@@ -2002,6 +2030,38 @@ fn for_each_js_ident<'a>(source: &'a str, mut f: impl FnMut(&'a str)) {
                     }
                 }
                 f(&source[start..end]);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn skip_quoted(chars: &mut Peekable<CharIndices<'_>>, quote: char) {
+    while let Some((_, next)) = chars.next() {
+        if next == '\\' {
+            chars.next();
+            continue;
+        }
+        if next == quote {
+            break;
+        }
+    }
+}
+
+fn scan_template_idents<'a, F: FnMut(&'a str)>(
+    chars: &mut Peekable<CharIndices<'a>>,
+    source: &'a str,
+    f: &mut F,
+) {
+    while let Some((_, ch)) = chars.next() {
+        match ch {
+            '\\' => {
+                chars.next();
+            }
+            '`' => return,
+            '$' if chars.peek().map(|&(_, n)| n) == Some('{') => {
+                chars.next();
+                scan_js_idents(chars, source, f, true);
             }
             _ => {}
         }
@@ -2356,7 +2416,8 @@ impl<'a> CaptureWalker<'a> {
                 // Raw JS is not a DS sub-tree, but the body is spliced
                 // verbatim. Identifier tokens that match component bindings
                 // are captures — including member-call arguments such as
-                // `root.setAttribute("data-theme", theme)` (deka#951).
+                // `root.setAttribute("data-theme", theme)` and template
+                // interpolations such as `color: ${color}` (deka#951).
                 for_each_js_ident(source, |name| self.ident(name, *span));
             }
             ast::Expr::Number { .. }
@@ -2475,5 +2536,64 @@ mod tuple_param_tests {
             |name| names.push(name),
         );
         assert_eq!(names, ["foo", "theme", "bar", "baz"]);
+    }
+
+    fn js_idents(source: &str) -> Vec<&str> {
+        let mut names = Vec::new();
+        for_each_js_ident(source, |name| names.push(name));
+        names
+    }
+
+    #[test]
+    fn js_template_interpolation_idents_are_captures() {
+        assert_eq!(js_idents("`color: ${color}`"), ["color"]);
+    }
+
+    #[test]
+    fn js_nested_template_interpolation_idents_are_captures() {
+        assert_eq!(js_idents("`${`a${b}`}`"), ["b"]);
+    }
+
+    #[test]
+    fn js_escaped_backtick_does_not_end_template() {
+        // `\`` is literal; `world` stays in template text; `${y}` is still
+        // an interpolation; `leftover` is JS after the template closes.
+        assert_eq!(
+            js_idents("`hello \\`world ${y}` leftover"),
+            ["y", "leftover"]
+        );
+    }
+
+    #[test]
+    fn js_plain_string_dollar_brace_is_not_interpolation() {
+        assert_eq!(js_idents("foo(\"color: ${color}\"); bar"), ["foo", "bar"]);
+    }
+
+    #[test]
+    fn unsafe_template_interpolation_idents_are_free() {
+        let arena = bumpalo::Bump::new();
+        let parsed = crate::parse(
+            "fn f() {\n\
+               const _ = unsafe { el.style = `color: ${color}`; return 1 }\n\
+             }",
+            &arena,
+        );
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let program = parsed.program.unwrap();
+        let ast::Stmt::Function { params, body, .. } = &program.statements[0] else {
+            panic!("expected function");
+        };
+        let free: Vec<_> = collect_free_idents(params, body)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        assert!(
+            free.contains(&"color"),
+            "template interpolation must capture color, got: {free:?}"
+        );
+        assert!(
+            !free.contains(&"data"),
+            "plain-string dollar-brace must not be confused with this case, got: {free:?}"
+        );
     }
 }

@@ -39,7 +39,7 @@ mod tests {
         let program = result.program.expect("parse produced no program");
         let typeck = deka_syntax::typeck::check_program(&program, source);
         assert!(typeck.errors.is_empty(), "{:?}", typeck.errors);
-        emit_js_with_options(
+        emit_js_module_with_options(
             &program,
             source,
             &std::collections::HashMap::new(),
@@ -57,11 +57,19 @@ mod tests {
             &typeck.super_trees,
             &typeck.enum_case_patterns,
             &typeck.union_type_patterns,
+            &typeck.effect_deps,
+            &std::collections::HashMap::new(),
             &std::collections::HashSet::new(),
             "module.ds",
             None,
+            None,
+            false,
+            None,
+            false,
+            false,
         )
         .expect("emit failed")
+        .js
     }
 
     #[test]
@@ -2297,6 +2305,84 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
     }
 
     #[test]
+    fn emit_useeffect_infers_deps_and_erases_cleanup() {
+        let out = parse_check_and_emit(
+            "fn Counter() ReactNode {\n\
+               const [count, setCount] = useState(0);\n\
+               const [name, setName] = useState(\"x\");\n\
+               const r = useRef(0);\n\
+               useEffect(fn() Option<fn() void> {\n\
+                 const _a = string(count) + name;\n\
+                 setCount(count);\n\
+                 r.current = 1;\n\
+                 return None;\n\
+               });\n\
+               useEffect(fn() Option<fn() void> {\n\
+                 const _b = name + string(count);\n\
+                 return Some(fn() { setName(\"y\"); });\n\
+               });\n\
+               useEffect(fn() Option<fn() void> { return None; });\n\
+               return <p>{string(count)}</p>;\n\
+             }",
+        );
+        assert!(
+            out.contains("import { useState, useRef, useEffect } from \"@js/react\";"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("useEffect(function() {") && out.contains("}, [count, name]);"),
+            "first-use order count then name, got: {out}"
+        );
+        assert!(
+            out.contains("}, [name, count]);"),
+            "first-use order name then count, got: {out}"
+        );
+        assert!(
+            out.contains("useEffect(function() {\n    return undefined;\n  }, []);")
+                || out.contains("useEffect(function() {\nreturn undefined;\n}, []);"),
+            "empty reactive captures emit [], None erases to undefined, got: {out}"
+        );
+        assert!(
+            out.contains("return (function() {") && out.contains("setName(\"y\")"),
+            "Some(cleanup) erases to the function, got: {out}"
+        );
+        let arrays: Vec<&str> = out
+            .split("useEffect(function()")
+            .skip(1)
+            .filter_map(|chunk| {
+                let start = chunk.find(", [")?;
+                let rest = &chunk[start + 2..];
+                let end = rest.find(']')?;
+                Some(&rest[..=end])
+            })
+            .collect();
+        assert_eq!(arrays, ["[count, name]", "[name, count]", "[]"], "got: {out}");
+        assert!(
+            !out.contains("function useEffect") && !out.contains("__deka_useEffect"),
+            "hooks must not be wrapped: {out}"
+        );
+    }
+
+    #[test]
+    fn emit_useeffect_alias_imports_resolved_reference() {
+        let out = parse_check_and_emit(
+            "fn Counter() ReactNode {\n\
+               const f = useEffect;\n\
+               f(fn() Option<fn() void> { return None; });\n\
+               return <p />;\n\
+             }",
+        );
+        assert!(
+            out.contains("import { useEffect } from \"@js/react\";"),
+            "alias must still emit the resolved builtin import, got: {out}"
+        );
+        assert!(
+            out.contains("const f = useEffect;") && out.contains("f(function() {") && out.contains("}, []);"),
+            "got: {out}"
+        );
+    }
+
+    #[test]
     fn emit_useref_is_byte_idiomatic() {
         let out = parse_check_and_emit(
             "fn Counter() ReactNode {\n\
@@ -2377,6 +2463,7 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
             &typeck.super_trees,
             &typeck.enum_case_patterns,
             &typeck.union_type_patterns,
+            &typeck.effect_deps,
             &std::collections::HashMap::new(),
             &std::collections::HashSet::new(),
             "module.ds",

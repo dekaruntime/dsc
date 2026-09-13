@@ -301,3 +301,154 @@ fn hook_before_return_is_in_order() {
          }",
     );
 }
+
+#[test]
+fn useeffect_in_component_ok() {
+    assert_ok(
+        "fn Counter() ReactNode {\n\
+           const [count, setCount] = useState(0)\n\
+           useEffect(fn() Option<fn() void> {\n\
+             const _s = string(count)\n\
+             return None\n\
+           })\n\
+           return <p>{string(count)}</p>\n\
+         }",
+    );
+}
+
+#[test]
+fn useeffect_colors_enclosing_fn() {
+    assert_ok(
+        "fn useTitle(title: string) {\n\
+           useEffect(fn() Option<fn() void> {\n\
+             const _s = title\n\
+             return None\n\
+           })\n\
+         }\n\
+         fn Heading(title: string) ReactNode {\n\
+           useTitle(title)\n\
+           return <p>{title}</p>\n\
+         }",
+    );
+    assert_teaches(
+        "fn useTitle(title: string) {\n\
+           useEffect(fn() Option<fn() void> { return None })\n\
+         }\n\
+         useTitle(\"x\")",
+        "from a plain function",
+    );
+}
+
+#[test]
+fn useeffect_straight_line() {
+    assert_teaches(
+        "fn Counter() ReactNode {\n\
+           if (true) { useEffect(fn() Option<fn() void> { return None }) }\n\
+           return <p />\n\
+         }",
+        "hooks run in a fixed order every render; move the condition inside the hook",
+    );
+}
+
+#[test]
+fn cannot_shadow_useeffect() {
+    assert_teaches(
+        "fn Counter() ReactNode {\n\
+           const useEffect = fn() { }\n\
+           return <p />\n\
+         }",
+        "cannot shadow compiler-known hook `useEffect`",
+    );
+}
+
+#[test]
+fn useeffect_rejects_explicit_deps() {
+    assert_teaches(
+        "fn Counter() ReactNode {\n\
+           const [count, setCount] = useState(0)\n\
+           useEffect(fn() Option<fn() void> { return None }, [count])\n\
+           return <p />\n\
+         }",
+        "the compiler infers the dependency array",
+    );
+}
+
+#[test]
+fn useeffect_needs_inline_function() {
+    assert_teaches(
+        "fn Counter() ReactNode {\n\
+           const effect = fn() Option<fn() void> { return None }\n\
+           useEffect(effect)\n\
+           return <p />\n\
+         }",
+        "needs an inline function",
+    );
+}
+
+#[test]
+fn useeffect_unclassified_capture() {
+    assert_teaches(
+        "fn Counter() ReactNode {\n\
+           const [count, setCount] = useState(0)\n\
+           const doubled = count * 2\n\
+           useEffect(fn() Option<fn() void> {\n\
+             const _n = doubled\n\
+             return None\n\
+           })\n\
+           return <p>{string(count)}</p>\n\
+         }",
+        "will not guess",
+    );
+}
+
+#[test]
+fn useeffect_stable_captures_are_not_deps() {
+    // Setters and refs are classified; they must not produce a diagnostic
+    // and must not be required as reactive bindings.
+    assert_ok(
+        "fn Counter() ReactNode {\n\
+           const [count, setCount] = useState(0)\n\
+           const r = useRef(0)\n\
+           useEffect(fn() Option<fn() void> {\n\
+             setCount(1)\n\
+             r.current = 1\n\
+             return None\n\
+           })\n\
+           return <p>{string(count)}</p>\n\
+         }",
+    );
+}
+
+#[test]
+fn useeffect_props_and_hook_results_are_reactive() {
+    assert_ok(
+        "fn useLabel() string {\n\
+           const [label, setLabel] = useState(\"hi\")\n\
+           setLabel(\"hi\")\n\
+           return label\n\
+         }\n\
+         fn Counter(name: string) ReactNode {\n\
+           const label = useLabel()\n\
+           useEffect(fn() Option<fn() void> {\n\
+             const _s = name + label\n\
+             return None\n\
+           })\n\
+           return <p>{name}</p>\n\
+         }",
+    );
+}
+
+#[test]
+fn useeffect_cleanup_some_and_none() {
+    assert_ok(
+        "fn Counter() ReactNode {\n\
+           const [count, setCount] = useState(0)\n\
+           useEffect(fn() Option<fn() void> {\n\
+             const _s = string(count)\n\
+             return Some(fn() { setCount(0) })\n\
+           })\n\
+           useEffect(fn() Option<fn() void> { return None })\n\
+           return <p />\n\
+         }",
+    );
+}

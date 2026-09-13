@@ -134,6 +134,7 @@ impl<'a> Checker<'a> {
                 self.index_flow.shadow(name);
             }
         }
+        self.capture_scopes.pop();
     }
 
     /// Fourth proof source (rfd#66): tuple length is fixed by its type.

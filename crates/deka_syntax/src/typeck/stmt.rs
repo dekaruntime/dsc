@@ -940,6 +940,7 @@ impl<'a> Checker<'a> {
                         _ => Type::Infer,
                     };
                     self.scopes[0].insert(name, seed);
+                    self.capture_scopes[0].insert(name, super::hooks::CaptureClass::Other);
                     if !*is_const {
                         self.mutables[0].insert(name);
                     }
@@ -967,7 +968,18 @@ impl<'a> Checker<'a> {
             } else {
                 Type::Infer
             };
+            let class = match value {
+                Some(ast::Expr::Identifier { name: init, .. })
+                    if *init == "useEffect"
+                        || self.capture_scopes[0].get(init)
+                            == Some(&super::hooks::CaptureClass::UseEffect) =>
+                {
+                    super::hooks::CaptureClass::UseEffect
+                }
+                _ => super::hooks::CaptureClass::Other,
+            };
             self.scopes[0].insert(name, seed);
+            self.capture_scopes[0].insert(name, class);
             if mutable {
                 self.mutables[0].insert(name);
             }
@@ -1135,10 +1147,11 @@ impl<'a> Checker<'a> {
                         self.error_span(*span, format!("duplicate tuple binding `{name}`; use a distinct name for each position"));
                     }
                     let ty = elements.get(i).cloned().unwrap_or(Type::Error);
+                    let class = self.classify_initializer(value, &ty);
                     if *is_const {
-                        self.declare_var(name, ty);
+                        self.declare_var_class(name, ty, class);
                     } else {
-                        self.declare_mutable_var(name, ty);
+                        self.declare_mutable_var_class(name, ty, class);
                     }
                     if self.scopes.len() == 1 {
                         self.pending_module_bindings.remove(name);
@@ -1240,7 +1253,7 @@ impl<'a> Checker<'a> {
                 self.expect_boolean(&cond_type, condition.span());
                 let saved_flow = self.index_flow.clone();
                 self.assume_index_condition(condition);
-                self.scopes.push(HashMap::new());
+                self.push_value_scope();
                 self.mutables.push(HashSet::new());
                 self.with_hook_conditional(|this| {
                     for s in then_body.iter() {
@@ -1249,7 +1262,7 @@ impl<'a> Checker<'a> {
                 });
                 self.pop_value_scope();
                 self.mutables.pop();
-                self.scopes.push(HashMap::new());
+                self.push_value_scope();
                 self.mutables.push(HashSet::new());
                 self.index_flow.restrict_to(&saved_flow);
                 self.with_hook_conditional(|this| {
@@ -1262,7 +1275,7 @@ impl<'a> Checker<'a> {
                 self.index_flow.restrict_to(&saved_flow);
             }
             ast::Stmt::Block { body, .. } => {
-                self.scopes.push(HashMap::new());
+                self.push_value_scope();
                 self.mutables.push(HashSet::new());
                 for s in body.iter() {
                     self.check_statement(s);
@@ -1277,7 +1290,7 @@ impl<'a> Checker<'a> {
                 body,
                 ..
             } => {
-                self.scopes.push(HashMap::new());
+                self.push_value_scope();
                 self.mutables.push(HashSet::new());
                 self.index_flow.kill();
                 if let Some(init) = init {
@@ -1339,7 +1352,7 @@ impl<'a> Checker<'a> {
                 } else {
                     iterable_type.collection_element()
                 };
-                self.scopes.push(HashMap::new());
+                self.push_value_scope();
                 self.mutables.push(HashSet::new());
                 self.declare_var(name, element_type);
                 if !*is_const {
@@ -1510,7 +1523,7 @@ impl<'a> Checker<'a> {
 
         // The alternative is checked in its own scope, then the binding is
         // declared -- it cannot see the name it is providing.
-        self.scopes.push(HashMap::new());
+        self.push_value_scope();
         self.mutables.push(HashSet::new());
         match alternative {
             ast::UnwrapAlternative::Block(stmts) => {
@@ -1567,7 +1580,7 @@ impl<'a> Checker<'a> {
 
         let mut coverage = Coverage::success_case(success_case);
         for arm in arms.iter() {
-            self.scopes.push(HashMap::new());
+            self.push_value_scope();
             self.mutables.push(HashSet::new());
             self.check_pattern(&arm.pattern, scrutinee_type);
             let arm_type = self.check_expr(&arm.body);
@@ -1637,10 +1650,11 @@ impl<'a> Checker<'a> {
         } else {
             value_type
         };
+        let class = self.classify_initializer(value, &final_type);
         if mutable {
-            self.declare_mutable_var(name, final_type);
+            self.declare_mutable_var_class(name, final_type, class);
         } else {
-            self.declare_var(name, final_type);
+            self.declare_var_class(name, final_type, class);
         }
         self.index_flow.remember_integer(name, value);
         // A declaration at module scope activates its seed for module-level
@@ -1710,7 +1724,7 @@ impl<'a> Checker<'a> {
         // is still Result<T, string>; JavaScript wraps it in a Promise.
         self.in_async_function = true;
         self.return_type = Some(expected_result);
-        self.scopes.push(HashMap::new());
+        self.push_value_scope();
         self.mutables.push(HashSet::new());
         for stmt in body {
             self.check_statement(stmt);
@@ -1798,7 +1812,7 @@ impl<'a> Checker<'a> {
         let (body_expected_ret, final_ret) =
             self.function_return_context(is_async, explicit_ret.clone(), _span);
 
-        self.scopes.push(HashMap::new());
+        self.push_value_scope();
         self.mutables.push(HashSet::new());
 
         // Make the function available to its own body for recursion. Use the
@@ -1832,7 +1846,7 @@ impl<'a> Checker<'a> {
                     );
                 }
             }
-            self.declare_var(p.name, t.clone());
+            self.declare_var_class(p.name, t.clone(), Self::param_capture_class(t));
         }
 
         let saved_in_function = self.in_function;
@@ -2033,7 +2047,7 @@ impl<'a> Checker<'a> {
         let (body_expected_ret, final_ret) =
             self.function_return_context(is_async, explicit_ret.clone(), _span);
 
-        self.scopes.push(HashMap::new());
+        self.push_value_scope();
         self.mutables.push(HashSet::new());
 
         // Bind the receiver name to the receiver type inside the method body.
@@ -2101,7 +2115,7 @@ impl<'a> Checker<'a> {
                     );
                 }
             }
-            self.declare_var(p.name, t.clone());
+            self.declare_var_class(p.name, t.clone(), Self::param_capture_class(t));
         }
 
         let saved_in_function = self.in_function;

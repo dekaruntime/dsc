@@ -58,9 +58,10 @@ fn that calls a hook-typed fn is hook-typed. Aliasing preserves the color;
 hook-typed values are not assignable to plain `fn(...)` parameters.
 
 Checker coverage lives in `crates/deka_syntax/src/typeck/hooks_tests.rs`
-(transitive coloring, aliasing, HOF assignability, shadowing, straight-line,
-Setter dual call, Ref mutation, `useState(None)` requiring an explicit
-`Option` annotation). Emission coverage lives in `deka_emit`
+(transitive coloring, aliasing, HOF assignability, builtin shadowing, a
+local that reuses a custom-hook name, straight-line, Setter dual call, Ref
+mutation, `useState(None)` requiring an explicit `Option` annotation).
+Emission coverage lives in `deka_emit`
 (`emit_usestate_is_byte_idiomatic`, `emit_usestate_alias_imports_resolved_reference`,
 `emit_counter_component_end_to_end`). Imports are keyed off resolved
 identifier references, not call-site text.

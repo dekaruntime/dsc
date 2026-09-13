@@ -41,6 +41,10 @@ pub(super) fn localize_export<'a>(
                 base: "Promise",
                 args,
             } => args.iter().any(has_exception),
+            Type::Generic {
+                base: "Hook",
+                args,
+            } => args.iter().any(has_exception),
             Type::Function { ret, .. } => has_exception(ret),
             _ => false,
         }

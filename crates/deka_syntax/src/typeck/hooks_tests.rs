@@ -151,6 +151,27 @@ fn cannot_shadow_compiler_known_hook() {
 }
 
 #[test]
+fn name_shadowing_local_is_not_a_hook_call() {
+    // A local binding that shares a custom-hook name is a plain value; a
+    // conditional call must not trip the straight-line rule. Name-table
+    // coloring false-positived this as a hook call.
+    assert_ok(
+        "fn useCounter() [number, Setter<number>] {\n\
+           return useState(0)\n\
+         }\n\
+         fn Counter() ReactNode {\n\
+           const [count, setCount] = useState(0)\n\
+           if (count > 0) {\n\
+             const useCounter = fn() number { return 1 }\n\
+             const n = useCounter()\n\
+             setCount(n)\n\
+           }\n\
+           return <p>{string(count)}</p>\n\
+         }",
+    );
+}
+
+#[test]
 fn use_prefix_without_hook_call_is_plain() {
     // Coloring is the type, not the name: a `use*` function that never
     // calls a hook-typed function is an ordinary function.

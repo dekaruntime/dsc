@@ -298,9 +298,13 @@ impl<'a> Checker<'a> {
                 };
                 let saved_flow = self.index_flow.clone();
                 self.assume_index_condition(condition);
-                let left = self.check_exception_use(then_branch, branch_use, expected.clone());
+                let left = self.with_hook_conditional(|this| {
+                    this.check_exception_use(then_branch, branch_use, expected.clone())
+                });
                 self.index_flow.restrict_to(&saved_flow);
-                let right = self.check_exception_use(else_branch, branch_use, expected);
+                let right = self.with_hook_conditional(|this| {
+                    this.check_exception_use(else_branch, branch_use, expected)
+                });
                 self.index_flow.restrict_to(&saved_flow);
                 return self.unify_ternary_arms(left, right, *span);
             }

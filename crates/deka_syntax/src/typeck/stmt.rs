@@ -208,6 +208,9 @@ impl<'a> Checker<'a> {
                 if *name == "Type" {
                     self.error_span(*span, BUILTIN_TYPE_DIAGNOSTIC);
                 }
+                if matches!(*name, "Setter" | "Ref") {
+                    self.error_span(*span, format!("`{name}` is a builtin type"));
+                }
                 if self.aliases.insert(name, value.clone()).is_some() {
                     self.error_span(*span, format!("duplicate type alias `{name}`"));
                 }
@@ -391,6 +394,8 @@ impl<'a> Checker<'a> {
                             | "ReactNode"
                             | "Promise"
                             | "Type"
+                            | "Setter"
+                            | "Ref"
                     )
                 {
                     self.error_span(
@@ -1205,17 +1210,21 @@ impl<'a> Checker<'a> {
                 self.assume_index_condition(condition);
                 self.scopes.push(HashMap::new());
                 self.mutables.push(HashSet::new());
-                for s in then_body.iter() {
-                    self.check_statement(s);
-                }
+                self.with_hook_conditional(|this| {
+                    for s in then_body.iter() {
+                        this.check_statement(s);
+                    }
+                });
                 self.pop_value_scope();
                 self.mutables.pop();
                 self.scopes.push(HashMap::new());
                 self.mutables.push(HashSet::new());
                 self.index_flow.restrict_to(&saved_flow);
-                for s in else_body.iter() {
-                    self.check_statement(s);
-                }
+                self.with_hook_conditional(|this| {
+                    for s in else_body.iter() {
+                        this.check_statement(s);
+                    }
+                });
                 self.pop_value_scope();
                 self.mutables.pop();
                 self.index_flow.restrict_to(&saved_flow);
@@ -1599,6 +1608,11 @@ impl<'a> Checker<'a> {
         } else {
             self.declare_var(name, final_type);
         }
+        if matches!(value, ast::Expr::Function { .. }) {
+            self.remember_hook_binding(name);
+        } else {
+            self.last_fn_expr_is_hook = false;
+        }
         self.index_flow.remember_integer(name, value);
         // A declaration at module scope activates its seed for module-level
         // lookups; nested declarations never touch module pending state.
@@ -1788,6 +1802,7 @@ impl<'a> Checker<'a> {
         let saved_return_type = self.return_type.clone();
         let saved_catches = std::mem::take(&mut self.exception_catches);
         let is_interactive_component = self.interactive_components.contains(name);
+        let hook_frame = self.push_hook_frame(Some(name), Self::is_component_return(&explicit_ret));
         self.in_function = true;
         self.in_async_function = is_async;
         self.return_type = body_expected_ret.clone();
@@ -1802,6 +1817,7 @@ impl<'a> Checker<'a> {
         if is_interactive_component {
             self.interactive_component_depth -= 1;
         }
+        self.pop_hook_frame(hook_frame, false);
 
         // A function that declares a value-producing return type must actually
         // return on every path. Without this, `fn f() string { }` typechecks
@@ -2045,6 +2061,7 @@ impl<'a> Checker<'a> {
         let saved_in_async = self.in_async_function;
         let saved_return_type = self.return_type.clone();
         let saved_catches = std::mem::take(&mut self.exception_catches);
+        let hook_frame = self.push_hook_frame(Some(name), Self::is_component_return(&explicit_ret));
         self.in_function = true;
         self.in_async_function = is_async;
         self.return_type = body_expected_ret.clone();
@@ -2053,6 +2070,7 @@ impl<'a> Checker<'a> {
             self.check_statement(stmt);
         }
 
+        self.pop_hook_frame(hook_frame, false);
         self.in_function = saved_in_function;
         self.in_async_function = saved_in_async;
         self.return_type = saved_return_type;
@@ -2113,6 +2131,7 @@ impl<'a> Checker<'a> {
         } else {
             self.return_type = Some(value_type);
         }
+        self.hook_seen_return = true;
     }
 }
 

@@ -22,6 +22,9 @@ mod ast_type;
 mod descriptor;
 mod exceptions;
 mod expr;
+mod hooks;
+#[cfg(test)]
+mod hooks_tests;
 mod indexing;
 mod stmt;
 #[cfg(test)]
@@ -1263,6 +1266,7 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
                 | "JsError" | "SyntaxError" | "TypeError" | "RangeError" | "Error" | "Type" => {
                     Type::Named { name }
                 }
+                "Setter" | "Ref" => Type::Named { name },
                 _ => {
                     if structs.contains_key(name) {
                         Type::Struct { name }
@@ -1298,6 +1302,13 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
                         elem: Box::new(ast_type_to_export_type(
                             &args[0], structs, enums, aliases, newtypes, seen,
                         )),
+                    }
+                } else if (*base == "Setter" || *base == "Ref") && args.len() == 1 {
+                    Type::Generic {
+                        base,
+                        args: vec![ast_type_to_export_type(
+                            &args[0], structs, enums, aliases, newtypes, seen,
+                        )],
                     }
                 } else if (*base == "Result" || *base == "Exception" || *base == "Promise")
                     && args.len() <= 2
@@ -1890,6 +1901,13 @@ struct Checker<'a> {
     return_type: Option<Type<'a>>,
     /// How many nested loops currently enclose the checked statement?
     loop_depth: usize,
+    /// Named functions whose immediate body calls `useState`/`useRef` (rfd#64).
+    hook_functions: HashSet<&'a str>,
+    hook_fn_name: Option<&'a str>,
+    hook_is_component: bool,
+    hook_seen_return: bool,
+    hook_conditional_depth: usize,
+    last_fn_expr_is_hook: bool,
     /// When true, diagnostics are suppressed. Used during the pre-check
     /// inference pass that resolves forward-referenced function return types.
     infer_only: bool,
@@ -1898,6 +1916,7 @@ struct Checker<'a> {
 impl<'a> Checker<'a> {
     fn new(program: &'a ast::Program<'a>, imports: &HashMap<&str, &ModuleExports<'a>>) -> Self {
         let interactive_components = collect_interactive_components(program, imports);
+        let hook_functions = hooks::collect_hook_functions(program);
         let mut this = Self {
             program,
             errors: Vec::new(),
@@ -1951,6 +1970,12 @@ impl<'a> Checker<'a> {
             exception_catches: Vec::new(),
             return_type: None,
             loop_depth: 0,
+            hook_functions,
+            hook_fn_name: None,
+            hook_is_component: false,
+            hook_seen_return: false,
+            hook_conditional_depth: 0,
+            last_fn_expr_is_hook: false,
             infer_only: false,
         };
         this.seed_imports(imports);
@@ -1964,6 +1989,36 @@ impl<'a> Checker<'a> {
         // global, language and stdlib stay imports. It is declared here so
         // the native and browser (wasm) compilers agree on it (deka#481).
         self.globals.insert("deka", Type::Infer);
+        // Compiler-known React hooks (rfd#64 amendment 3). Calls are special-
+        // cased; these bindings exist so a value reference typechecks.
+        let t = Type::Param { name: "T" };
+        self.globals.insert(
+            "useState",
+            Type::Function {
+                params: vec![t.clone()],
+                ret: Box::new(Type::Tuple {
+                    elements: vec![
+                        t.clone(),
+                        Type::Generic {
+                            base: "Setter",
+                            args: vec![t.clone()],
+                        },
+                    ],
+                }),
+                optional: 0,
+            },
+        );
+        self.globals.insert(
+            "useRef",
+            Type::Function {
+                params: vec![t.clone()],
+                ret: Box::new(Type::Generic {
+                    base: "Ref",
+                    args: vec![t],
+                }),
+                optional: 0,
+            },
+        );
     }
 
     fn seed_imports(&mut self, imports: &HashMap<&str, &ModuleExports<'a>>) {
@@ -2144,6 +2199,7 @@ impl<'a> Checker<'a> {
     // ------------------------------------------------------------------
 
     fn declare_var(&mut self, name: &'a str, ty: Type<'a>) {
+        self.reject_hook_shadow(name, ast::Span::dummy());
         self.index_flow.shadow(name);
         if self.program.statements.iter().any(|stmt| matches!(stmt, ast::Stmt::Summon { functions, .. } if functions.iter().any(|f| f.name == name))) {
             self.error_span(ast::Span::dummy(), format!("cannot shadow summoned binding `{name}`"));
@@ -2152,6 +2208,7 @@ impl<'a> Checker<'a> {
     }
 
     fn declare_mutable_var(&mut self, name: &'a str, ty: Type<'a>) {
+        self.reject_hook_shadow(name, ast::Span::dummy());
         self.index_flow.shadow(name);
         if self.program.statements.iter().any(|stmt| matches!(stmt, ast::Stmt::Summon { functions, .. } if functions.iter().any(|f| f.name == name))) {
             self.error_span(ast::Span::dummy(), format!("cannot shadow summoned binding `{name}`"));

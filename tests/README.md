@@ -50,6 +50,20 @@ Remaining work: statement lifting for bodyless matches nested within other
 expression operands, such as `Ok(match ...)`. These currently produce an
 explicit emission error instead of returning from an artificial IIFE.
 
+## Hooks v1 (rfd#64 amendment 3, lane A)
+
+`useState` / `useRef` are compiler-known. Checker coverage lives in
+`crates/deka_syntax/src/typeck/hooks_tests.rs` (coloring, straight-line,
+Setter dual call, Ref mutation). Emission coverage lives in `deka_emit`
+(`emit_usestate_is_byte_idiomatic`, `emit_counter_component_end_to_end`).
+`useEffect`, context, and memoization are absent — they belong to later lanes.
+
+The React value-import specifier is derived from `jsxRuntime` by dropping a
+final `jsx-runtime` / `jsx-dev-runtime` segment (`@js/react/jsx-runtime` →
+`@js/react`). That is the #189 family; amendment 2 resolves the same
+specifier as a runtime builtin, so emission does not change when React
+graduates.
+
 ## Ternary conformance (rfd#65, part 1)
 
 `tests/fixtures/ternary/` contains five new Hats-format fixtures, following

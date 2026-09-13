@@ -1708,7 +1708,12 @@ impl<'a> Checker<'a> {
         } else {
             value_type
         };
-        let class = self.classify_initializer(value, &final_type);
+        let mut class = self.classify_initializer(value, &final_type);
+        if !mutable && self.try_auto_memo(value) {
+            // A memoized const is a hook result, so later captures treat it
+            // as reactive — the same classification as other hook results.
+            class = super::hooks::CaptureClass::Reactive;
+        }
         if mutable {
             self.declare_mutable_var_class(name, final_type, class);
         } else {

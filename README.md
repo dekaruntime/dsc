@@ -87,6 +87,16 @@ capture is a compile error. Emission is the call as written plus
 (`@js/react/jsx-runtime` → `@js/react`), keyed off resolved references so
 aliases still import.
 
+The compiler auto-memoizes the provable subset: a straight-line component
+(or already-hook) `const` whose initializer is a pure expression over
+classified captures emits `useMemo` with an inferred deps array; an inline
+function used as a const initializer or JSX prop emits `useCallback` the
+same way. Purity is a proof, not a heuristic — summon, `unsafe`, mutation,
+hook/setter calls, `Ref.current` reads, and unknown calls are not wrapped.
+`useMemo` / `useCallback` are not DS source; writing them is a diagnostic.
+Memo results are reactive captures for `useEffect`. The wrappers are
+ordinary React calls at stable positions, so hook order does not change.
+
 `data-deka-id` is injected on host JSX elements only when the compile graph
 hydrates islands: any `client:*` directive, or interactive-component analysis
 firing, anywhere in the graph. Plain components emit props byte-identical to

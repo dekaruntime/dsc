@@ -32,6 +32,7 @@ mod tuples_tests;
 mod types;
 
 pub use descriptor::{DescriptorField, DescriptorTree, JsonCall, JsonOperation, StaticTypeCall};
+pub use hooks::{MemoKind, MemoSite};
 pub use types::{
     ArrayAccess, NewtypeSide, NumberMath, OperatorRewrite, Type, UnionMemberTest, UnwrapKind,
 };
@@ -155,6 +156,9 @@ pub struct TypeckResult<'a> {
     /// Inferred `useEffect` dependency arrays, keyed by the call expression.
     /// Names are in source order of first capture. An empty vec is `[]`.
     pub effect_deps: HashMap<*const ast::Expr<'a>, Vec<&'a str>>,
+    /// Auto-memoization sites (rfd#64 lane D), keyed by the source expression
+    /// emission wraps in `useMemo` / `useCallback`.
+    pub memo_sites: HashMap<*const ast::Expr<'a>, MemoSite<'a>>,
 }
 
 /// Compiler-owned information for one `build { ... }` initializer.
@@ -807,6 +811,7 @@ pub fn check_program_with_imports<'a>(
         dev_blocks: checker.dev_blocks,
         hook_builtin_refs: checker.hook_builtin_refs,
         effect_deps: checker.effect_deps,
+        memo_sites: checker.memo_sites,
     }
 }
 
@@ -1929,6 +1934,8 @@ struct Checker<'a> {
     capture_scopes: Vec<HashMap<&'a str, hooks::CaptureClass>>,
     /// Inferred `useEffect` dependency arrays, keyed by the call expression.
     effect_deps: HashMap<*const ast::Expr<'a>, Vec<&'a str>>,
+    /// Auto-inserted `useMemo` / `useCallback` sites, keyed by expression.
+    memo_sites: HashMap<*const ast::Expr<'a>, hooks::MemoSite<'a>>,
     /// When true, diagnostics are suppressed. Used during the pre-check
     /// inference pass that resolves forward-referenced function return types.
     infer_only: bool,
@@ -1976,6 +1983,7 @@ impl<'a> Checker<'a> {
             mutables: vec![HashSet::new()],
             capture_scopes: vec![HashMap::new()],
             effect_deps: HashMap::new(),
+            memo_sites: HashMap::new(),
             pending_module_bindings: HashSet::new(),
             type_scopes: Vec::new(),
             param_bounds: Vec::new(),
@@ -2194,6 +2202,7 @@ impl<'a> Checker<'a> {
         self.operator_rewrites.clear();
         self.hook_builtin_refs.clear();
         self.effect_deps.clear();
+        self.memo_sites.clear();
     }
 
     // ------------------------------------------------------------------

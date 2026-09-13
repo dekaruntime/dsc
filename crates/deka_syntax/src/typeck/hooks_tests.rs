@@ -387,12 +387,83 @@ fn useeffect_needs_inline_function() {
 
 #[test]
 fn useeffect_unclassified_capture() {
+    // A `let` is mutable and therefore not auto-memoized, so it stays
+    // CaptureClass::Other — the checker still refuses to guess.
     assert_teaches(
+        "fn Counter() ReactNode {\n\
+           const [count, setCount] = useState(0)\n\
+           let scratch = 0\n\
+           scratch = count\n\
+           useEffect(fn() Option<fn() void> {\n\
+             const _n = scratch\n\
+             return None\n\
+           })\n\
+           return <p>{string(count)}</p>\n\
+         }",
+        "will not guess",
+    );
+}
+
+#[test]
+fn automemo_derived_const_is_a_reactive_capture() {
+    // Lane D: `doubled` is a pure expression over a tracked input, so it is
+    // wrapped in useMemo and classified as a hook result. Capturing it from
+    // useEffect is therefore legal — the same path as other hook results.
+    assert_ok(
         "fn Counter() ReactNode {\n\
            const [count, setCount] = useState(0)\n\
            const doubled = count * 2\n\
            useEffect(fn() Option<fn() void> {\n\
              const _n = doubled\n\
+             return None\n\
+           })\n\
+           return <p>{string(count)}</p>\n\
+         }",
+    );
+}
+
+#[test]
+fn cannot_write_usememo() {
+    assert_teaches(
+        "fn Counter() ReactNode {\n\
+           const n = useMemo(fn() number { return 1 })\n\
+           return <p>{string(n)}</p>\n\
+         }",
+        "inserted by the compiler",
+    );
+}
+
+#[test]
+fn cannot_write_usecallback() {
+    assert_teaches(
+        "fn Counter() ReactNode {\n\
+           const f = useCallback\n\
+           return <p />\n\
+         }",
+        "inserted by the compiler",
+    );
+}
+
+#[test]
+fn cannot_shadow_usememo() {
+    assert_teaches(
+        "fn Counter() ReactNode {\n\
+           const useMemo = 1\n\
+           return <p />\n\
+         }",
+        "cannot shadow compiler-known hook `useMemo`",
+    );
+}
+
+#[test]
+fn automemo_impure_const_is_not_a_reactive_capture() {
+    // Purity gate: unsafe is not memoized, so the binding stays unclassified.
+    assert_teaches(
+        "fn Counter() ReactNode {\n\
+           const [count, setCount] = useState(0)\n\
+           const t = unsafe<number> { 1 }\n\
+           useEffect(fn() Option<fn() void> {\n\
+             const _n = t\n\
              return None\n\
            })\n\
            return <p>{string(count)}</p>\n\

@@ -79,7 +79,13 @@ use; setters and refs are omitted; no reactive captures emit `[]`; a capture
 the checker cannot classify is a diagnostic at the capture. Explicit
 dependency arrays are rejected.
 
-Context and memoization are absent — they belong to later lanes.
+Context is absent — it belongs to lane C.
+
+Auto-memoization (lane D) wraps the provable subset: pure expressions over
+tracked inputs (`useMemo`) and JSX/const callbacks (`useCallback`), reusing
+lane B's capture classification. Emission tests cover memoized and skipped
+cases, the purity gate, and order-stability. Writing `useMemo`/`useCallback`
+in DS is a diagnostic.
 
 The React value-import specifier is derived from `jsxRuntime` by dropping a
 final `jsx-runtime` / `jsx-dev-runtime` segment (`@js/react/jsx-runtime` →

@@ -41,6 +41,45 @@ pub(super) fn is_hook_builtin(name: &str) -> bool {
     hook_builtin_name(name).is_some()
 }
 
+/// Names the compiler owns, including auto-inserted memo hooks that never
+/// exist in DS source (rfd#64 lane D). Shadowing any of them would collide
+/// with the emitted `import { useMemo, useCallback } from "@js/react"`.
+pub(super) fn reserved_hook_name(name: &str) -> Option<&'static str> {
+    match name {
+        "useMemo" => Some("useMemo"),
+        "useCallback" => Some("useCallback"),
+        other => hook_builtin_name(other),
+    }
+}
+
+pub(super) fn written_memo_diagnostic(name: &str) -> Option<&'static str> {
+    match name {
+        "useMemo" => Some(WRITTEN_MEMO),
+        "useCallback" => Some(WRITTEN_CALLBACK),
+        _ => None,
+    }
+}
+
+/// Compiler-inserted memoization (rfd#64 lane D). Keyed by the source
+/// expression that emission wraps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MemoKind {
+    UseMemo,
+    UseCallback,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MemoSite<'a> {
+    pub kind: MemoKind,
+    pub deps: Vec<&'a str>,
+}
+
+pub(super) const WRITTEN_MEMO: &str =
+    "`useMemo` is inserted by the compiler from a pure expression over tracked inputs — do not write it";
+
+pub(super) const WRITTEN_CALLBACK: &str =
+    "`useCallback` is inserted by the compiler for callbacks over tracked inputs — do not write it";
+
 /// How a component-scope binding participates in `useEffect` dependency
 /// inference. Stable identities are omitted; everything else that is not a
 /// known reactive binding is a diagnostic, not a guess.
@@ -437,8 +476,183 @@ impl<'a> Checker<'a> {
     }
 
     pub(super) fn reject_hook_shadow(&mut self, name: &str, span: ast::Span) {
-        if is_hook_builtin(name) {
+        if reserved_hook_name(name).is_some() {
             self.error_span(span, format!("cannot shadow compiler-known hook `{name}`"));
+        }
+    }
+
+    /// Straight-line position where inserting a hook does not change call order.
+    fn memo_position_ok(&self) -> bool {
+        self.in_function
+            && (self.hook_is_component || self.hook_body_called)
+            && self.hook_conditional_depth == 0
+            && self.loop_depth == 0
+            && !self.hook_seen_return
+    }
+
+    /// Wrap a component-body const initializer if it is a pure expression
+    /// over classified captures, or a function (useCallback).
+    pub(super) fn try_auto_memo(&mut self, expr: &ast::Expr<'a>) -> bool {
+        if !self.memo_position_ok() {
+            return false;
+        }
+        let key = expr as *const ast::Expr<'a>;
+        if self.memo_sites.contains_key(&key) {
+            return false;
+        }
+        let kind = match peel(expr) {
+            ast::Expr::Function { is_async: true, .. } => return false,
+            ast::Expr::Function { .. } => MemoKind::UseCallback,
+            _ => MemoKind::UseMemo,
+        };
+        if kind == MemoKind::UseMemo {
+            if is_trivial_memo_expr(expr) || self.is_hook_call_expr(expr) {
+                return false;
+            }
+            if !self.expr_is_memo_pure(expr) {
+                return false;
+            }
+        }
+        let frees = collect_expr_frees(expr);
+        let Some(deps) = self.infer_classified_deps(&frees) else {
+            return false;
+        };
+        let builtin = match kind {
+            MemoKind::UseMemo => "useMemo",
+            MemoKind::UseCallback => "useCallback",
+        };
+        self.note_hook_builtin_ref(builtin);
+        self.note_hook_call(builtin, expr.span(), true);
+        self.memo_sites.insert(key, MemoSite { kind, deps });
+        true
+    }
+
+    /// JSX attribute values wrap only inline function expressions.
+    pub(super) fn consider_jsx_callback(&mut self, expr: &ast::Expr<'a>) {
+        if matches!(peel(expr), ast::Expr::Function { .. }) {
+            self.try_auto_memo(expr);
+        }
+    }
+
+    /// Same capture classification as `useEffect` deps: unclassified means
+    /// "do not guess", so auto-memo skips rather than diagnosing.
+    fn infer_classified_deps(&self, frees: &[(&'a str, ast::Span)]) -> Option<Vec<&'a str>> {
+        let mut deps = Vec::new();
+        for &(name, _) in frees {
+            match self.classify_capture(name) {
+                CaptureDecision::Skip => {}
+                CaptureDecision::Dep => {
+                    if !deps.contains(&name) {
+                        deps.push(name);
+                    }
+                }
+                CaptureDecision::Unclassified => return None,
+            }
+        }
+        Some(deps)
+    }
+
+    fn expr_is_memo_pure(&self, expr: &ast::Expr<'a>) -> bool {
+        let mut impure = false;
+        crate::visit::walk_expr(expr, &mut |node| {
+            if self.node_is_memo_impure(node) {
+                impure = true;
+            }
+        });
+        !impure
+    }
+
+    fn node_is_memo_impure(&self, expr: &ast::Expr<'a>) -> bool {
+        match expr {
+            ast::Expr::Unsafe { .. }
+            | ast::Expr::Await { .. }
+            | ast::Expr::Bridge { .. }
+            | ast::Expr::Build { .. }
+            | ast::Expr::Match { .. }
+            | ast::Expr::JsxElement { .. }
+            | ast::Expr::JsxFragment { .. }
+            | ast::Expr::Function { .. } => true,
+            ast::Expr::Binary { op, .. }
+                if matches!(
+                    *op,
+                    ast::BinOp::Assign
+                        | ast::BinOp::AddAssign
+                        | ast::BinOp::SubAssign
+                        | ast::BinOp::MulAssign
+                        | ast::BinOp::DivAssign
+                        | ast::BinOp::ModAssign
+                        | ast::BinOp::Pipe
+                ) =>
+            {
+                true
+            }
+            ast::Expr::Call { callee, .. } => {
+                self.is_hook_call_expr(expr)
+                    || self.callee_is_setter(callee)
+                    || self.callee_is_summon(callee)
+                    || self.call_is_mutating_method(callee)
+                    || !self.call_is_known_pure(expr)
+            }
+            ast::Expr::FieldAccess {
+                object,
+                field: "current",
+                ..
+            } => self.expr_is_ref(object),
+            _ => false,
+        }
+    }
+
+    fn call_is_known_pure(&self, expr: &ast::Expr<'a>) -> bool {
+        let key = expr as *const _;
+        self.unwrap_calls.contains_key(&key)
+            || self.number_math_calls.contains_key(&key)
+            || self.array_builtin_calls.get(&key) == Some(&super::types::ArrayAccess::Has)
+    }
+
+    fn callee_is_setter(&self, callee: &ast::Expr<'a>) -> bool {
+        match peel(callee) {
+            ast::Expr::Identifier { name, .. } => {
+                matches!(
+                    self.lookup_var(name),
+                    Some(Type::Generic { base: "Setter", .. })
+                )
+            }
+            _ => false,
+        }
+    }
+
+    fn callee_is_summon(&self, callee: &ast::Expr<'a>) -> bool {
+        match peel(callee) {
+            ast::Expr::Identifier { name, .. } => self.program.statements.iter().any(|stmt| {
+                matches!(
+                    stmt,
+                    ast::Stmt::Summon { functions, .. }
+                        if functions.iter().any(|f| f.name == *name)
+                )
+            }),
+            _ => false,
+        }
+    }
+
+    fn call_is_mutating_method(&self, callee: &ast::Expr<'a>) -> bool {
+        match peel(callee) {
+            ast::Expr::FieldAccess { field, .. } => matches!(
+                *field,
+                "push" | "pop" | "shift" | "unshift" | "splice" | "sort" | "reverse" | "fill"
+            ),
+            _ => false,
+        }
+    }
+
+    fn expr_is_ref(&self, expr: &ast::Expr<'a>) -> bool {
+        match peel(expr) {
+            ast::Expr::Identifier { name, .. } => {
+                matches!(
+                    self.lookup_var(name),
+                    Some(Type::Generic { base: "Ref", .. })
+                )
+            }
+            _ => false,
         }
     }
 
@@ -517,6 +731,29 @@ fn collect_free_idents<'a>(
     walker.frees
 }
 
+fn collect_expr_frees<'a>(expr: &ast::Expr<'a>) -> Vec<(&'a str, ast::Span)> {
+    let mut walker = CaptureWalker {
+        bound: vec![HashSet::new()],
+        seen: HashSet::new(),
+        frees: Vec::new(),
+    };
+    walker.expr(expr);
+    walker.frees
+}
+
+fn is_trivial_memo_expr(expr: &ast::Expr<'_>) -> bool {
+    matches!(
+        peel(expr),
+        ast::Expr::Identifier { .. }
+            | ast::Expr::Number { .. }
+            | ast::Expr::BigInt { .. }
+            | ast::Expr::String { .. }
+            | ast::Expr::Boolean { .. }
+            | ast::Expr::None { .. }
+            | ast::Expr::JsxText { .. }
+    )
+}
+
 struct CaptureWalker<'a> {
     bound: Vec<HashSet<&'a str>>,
     seen: HashSet<&'a str>,
@@ -549,13 +786,13 @@ impl<'a> CaptureWalker<'a> {
         self.frees.push((name, span));
     }
 
-    fn stmts(&mut self, stmts: &'a [ast::Stmt<'a>]) {
+    fn stmts(&mut self, stmts: &[ast::Stmt<'a>]) {
         for stmt in stmts {
             self.stmt(stmt);
         }
     }
 
-    fn stmt(&mut self, stmt: &'a ast::Stmt<'a>) {
+    fn stmt(&mut self, stmt: &ast::Stmt<'a>) {
         match stmt {
             ast::Stmt::Const { name, value, .. } | ast::Stmt::Let { name, value, .. } => {
                 self.expr(value);
@@ -737,7 +974,7 @@ impl<'a> CaptureWalker<'a> {
         }
     }
 
-    fn expr(&mut self, expr: &'a ast::Expr<'a>) {
+    fn expr(&mut self, expr: &ast::Expr<'a>) {
         match expr {
             ast::Expr::Identifier { name, span } => self.ident(name, *span),
             ast::Expr::Binary { left, right, .. } => {
@@ -842,7 +1079,7 @@ impl<'a> CaptureWalker<'a> {
         }
     }
 
-    fn match_arm(&mut self, arm: &'a ast::MatchArm<'a>) {
+    fn match_arm(&mut self, arm: &ast::MatchArm<'a>) {
         self.push();
         self.pattern(&arm.pattern);
         if let Some(guard) = &arm.guard {
@@ -852,7 +1089,7 @@ impl<'a> CaptureWalker<'a> {
         self.pop();
     }
 
-    fn pattern(&mut self, pattern: &'a ast::Pattern<'a>) {
+    fn pattern(&mut self, pattern: &ast::Pattern<'a>) {
         match pattern {
             ast::Pattern::Wildcard { .. } | ast::Pattern::Literal { .. } => {}
             ast::Pattern::Identifier { name, .. } => self.bind(name),

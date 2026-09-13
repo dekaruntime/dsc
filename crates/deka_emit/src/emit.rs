@@ -500,6 +500,7 @@ pub fn emit_js_with_options<'a>(
         union_type_patterns,
         &HashMap::new(),
         &HashMap::new(),
+        &HashMap::new(),
         build_closure_names,
         file_path,
         None,
@@ -550,6 +551,7 @@ pub fn emit_js_module_with_options<'a>(
         deka_syntax::typeck::UnionMemberTest<'a>,
     >,
     effect_deps: &HashMap<*const Expr<'a>, Vec<&'a str>>,
+    memo_sites: &HashMap<*const Expr<'a>, deka_syntax::typeck::MemoSite<'a>>,
     build_blocks: &HashMap<*const Expr<'a>, deka_syntax::typeck::DevBlock<'a>>,
     // Factories this module's compiler-private `__deka_factories` closure
     // must capture for consumer build hydration (dsc#52). Empty disables the
@@ -588,6 +590,7 @@ pub fn emit_js_module_with_options<'a>(
     emitter.enum_case_patterns = enum_case_patterns.clone();
     emitter.union_type_patterns = union_type_patterns.clone();
     emitter.effect_deps = effect_deps.clone();
+    emitter.memo_sites = memo_sites.clone();
     emitter.build_blocks = build_blocks.clone();
     for block in build_blocks.values() {
         build_factory_names(&block.descriptor, &mut emitter.build_factory_names);
@@ -642,6 +645,7 @@ pub fn emit_dev_entry<'a>(
     emitter.enum_case_patterns = typeck.enum_case_patterns.clone();
     emitter.union_type_patterns = typeck.union_type_patterns.clone();
     emitter.effect_deps = typeck.effect_deps.clone();
+    emitter.memo_sites = typeck.memo_sites.clone();
     emitter.emit_dev_entry(slot, body)
 }
 
@@ -1413,6 +1417,8 @@ struct Emitter<'a> {
     detached: bool,
     /// Inferred `useEffect` dependency arrays, keyed by the call expression.
     effect_deps: HashMap<*const Expr<'a>, Vec<&'a str>>,
+    /// Auto-memoization sites, keyed by the source expression to wrap.
+    memo_sites: HashMap<*const Expr<'a>, deka_syntax::typeck::MemoSite<'a>>,
     /// Inject `data-deka-id` on host JSX elements. Set when the compile graph
     /// hydrates islands (`client:*` or interactive-component analysis).
     inject_deka_id: bool,
@@ -1476,6 +1482,7 @@ impl<'a> Emitter<'a> {
             detached: false,
             inject_deka_id: false,
             effect_deps: HashMap::new(),
+            memo_sites: HashMap::new(),
             demand: crate::prelude::PreludeDemand::default(),
         };
         emitter.prepass();
@@ -2579,6 +2586,8 @@ impl<'a> Emitter<'a> {
         let mut saw_state = false;
         let mut saw_ref = false;
         let mut saw_effect = false;
+        let mut saw_memo = false;
+        let mut saw_callback = false;
         for stmt in self.program.statements.iter() {
             if !self.should_emit_stmt(stmt) {
                 continue;
@@ -2596,6 +2605,12 @@ impl<'a> Emitter<'a> {
                 }
             });
         }
+        for site in self.memo_sites.values() {
+            match site.kind {
+                deka_syntax::typeck::MemoKind::UseMemo => saw_memo = true,
+                deka_syntax::typeck::MemoKind::UseCallback => saw_callback = true,
+            }
+        }
         let mut names = Vec::new();
         if saw_state {
             names.push("useState");
@@ -2606,16 +2621,47 @@ impl<'a> Emitter<'a> {
         if saw_effect {
             names.push("useEffect");
         }
+        if saw_memo {
+            names.push("useMemo");
+        }
+        if saw_callback {
+            names.push("useCallback");
+        }
         names
     }
 
-    fn emit_effect_deps(&mut self, call: *const Expr<'a>, need_comma: bool) {
-        let Some(deps) = self.effect_deps.get(&call) else {
-            return;
-        };
-        if need_comma {
-            self.out.push_str(", ");
-        }
+    fn emit_auto_memo(
+        &mut self,
+        expr: &Expr<'a>,
+        site: deka_syntax::typeck::MemoSite<'a>,
+    ) -> Result<(), String> {
+        // Drop the site so the recursive emit of the same expression does not
+        // wrap itself. Restore it afterwards so a second walk still sees it.
+        self.memo_sites.remove(&(expr as *const _));
+        let result = (|| {
+            match site.kind {
+                deka_syntax::typeck::MemoKind::UseMemo => {
+                    self.out.push_str("useMemo(function() { return ");
+                    self.emit_expr(expr)?;
+                    self.out.push_str("; }, ");
+                    self.emit_dep_array(&site.deps);
+                    self.out.push(')');
+                }
+                deka_syntax::typeck::MemoKind::UseCallback => {
+                    self.out.push_str("useCallback(");
+                    self.emit_expr(expr)?;
+                    self.out.push_str(", ");
+                    self.emit_dep_array(&site.deps);
+                    self.out.push(')');
+                }
+            }
+            Ok(())
+        })();
+        self.memo_sites.insert(expr as *const _, site);
+        result
+    }
+
+    fn emit_dep_array(&mut self, deps: &[&str]) {
         self.out.push('[');
         for (i, dep) in deps.iter().enumerate() {
             if i > 0 {
@@ -2624,6 +2670,16 @@ impl<'a> Emitter<'a> {
             self.out.push_str(dep);
         }
         self.out.push(']');
+    }
+
+    fn emit_effect_deps(&mut self, call: *const Expr<'a>, need_comma: bool) {
+        let Some(deps) = self.effect_deps.get(&call).cloned() else {
+            return;
+        };
+        if need_comma {
+            self.out.push_str(", ");
+        }
+        self.emit_dep_array(&deps);
     }
 
     fn configure_jsx_names(&mut self, source: &str) {
@@ -3689,6 +3745,9 @@ impl<'a> Emitter<'a> {
         if let Some(value) = self.lifted_values.get(&(expr as *const _)) {
             self.out.push_str(value);
             return Ok(());
+        }
+        if let Some(site) = self.memo_sites.get(&(expr as *const _)).cloned() {
+            return self.emit_auto_memo(expr, site);
         }
         use deka_syntax::typeck::ExceptionEmit;
         match self.exception_forms.get(&(expr as *const _)).copied() {
@@ -5032,6 +5091,7 @@ impl<'a> Emitter<'a> {
                     jsx_helpers: self.jsx_helpers.clone(),
                     dev: self.dev,
                     effect_deps: HashMap::new(),
+                    memo_sites: HashMap::new(),
                     detached: false,
                     inject_deka_id: false,
                     demand: crate::prelude::PreludeDemand::default(),

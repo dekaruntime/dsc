@@ -513,24 +513,30 @@ impl<'a> Checker<'a> {
                 Type::Named { name: "boolean" }
             }
             ast::Expr::None { .. } => Type::None,
-            ast::Expr::Identifier { name, span } => match self.lookup_var(name) {
-                Some(ty) => {
-                    if let Some(builtin) = super::hooks::hook_builtin_name(name) {
-                        self.note_hook_builtin_ref(builtin);
-                    }
-                    ty
-                }
-                None => {
-                    let message = if *name == "Math" {
-                        "`Math` is not available in DekaScript; import { PI } from \"math\" instead for PI, or use number methods such as `x.sqrt()`"
-                            .to_string()
-                    } else {
-                        format!("unknown identifier `{name}`")
-                    };
+            ast::Expr::Identifier { name, span } => {
+                if let Some(message) = super::hooks::written_memo_diagnostic(name) {
                     self.error_span(*span, message);
-                    Type::Error
+                    return Type::Error;
                 }
-            },
+                match self.lookup_var(name) {
+                    Some(ty) => {
+                        if let Some(builtin) = super::hooks::hook_builtin_name(name) {
+                            self.note_hook_builtin_ref(builtin);
+                        }
+                        ty
+                    }
+                    None => {
+                        let message = if *name == "Math" {
+                            "`Math` is not available in DekaScript; import { PI } from \"math\" instead for PI, or use number methods such as `x.sqrt()`"
+                                .to_string()
+                        } else {
+                            format!("unknown identifier `{name}`")
+                        };
+                        self.error_span(*span, message);
+                        Type::Error
+                    }
+                }
+            }
             ast::Expr::Binary {
                 op,
                 left,
@@ -1687,6 +1693,12 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn check_jsx_attr_value(&mut self, value: &ast::Expr<'a>) -> Type<'a> {
+        let ty = self.check_expr(value);
+        self.consider_jsx_callback(value);
+        ty
+    }
+
     /// Check a JSX element's attributes against its component's props interface.
     ///
     /// deka#443: attributes were never checked at all. A missing required prop,
@@ -1723,7 +1735,7 @@ impl<'a> Checker<'a> {
             // attribute expressions themselves.
             for attr in element.attributes.iter() {
                 if let Some(value) = &attr.value {
-                    self.check_expr(value);
+                    self.check_jsx_attr_value(value);
                 }
             }
             return;
@@ -1734,7 +1746,7 @@ impl<'a> Checker<'a> {
         for attr in element.attributes.iter() {
             if attr.name == "key" || attr.name == "client" || attr.name.starts_with("client:") {
                 if let Some(value) = &attr.value {
-                    self.check_expr(value);
+                    self.check_jsx_attr_value(value);
                 }
                 continue;
             }
@@ -1742,7 +1754,7 @@ impl<'a> Checker<'a> {
 
             let Some((_, field_ty, _)) = fields.iter().find(|(name, _, _)| *name == attr.name) else {
                 if let Some(value) = &attr.value {
-                    self.check_expr(value);
+                    self.check_jsx_attr_value(value);
                 }
                 self.error_span(
                     attr.span,
@@ -1767,7 +1779,7 @@ impl<'a> Checker<'a> {
                 continue;
             };
 
-            let actual = self.check_expr(value);
+            let actual = self.check_jsx_attr_value(value);
             if !self.is_assignable(&expected, &actual)
                 && !matches!(actual, Type::Infer | Type::Error)
                 && !matches!(expected, Type::Infer | Type::Error)
@@ -4559,6 +4571,19 @@ impl<'a> Checker<'a> {
             return Type::Named { name: "boolean" };
         }
 
+        if let ast::Expr::Identifier {
+            name,
+            span: name_span,
+        } = callee
+        {
+            if let Some(message) = super::hooks::written_memo_diagnostic(name) {
+                self.error_span(*name_span, message);
+                for arg in args {
+                    self.check_expr(arg);
+                }
+                return Type::Error;
+            }
+        }
         if let ast::Expr::Identifier { name: "useState", .. } = callee {
             return self.check_use_state(type_args, args, span);
         }

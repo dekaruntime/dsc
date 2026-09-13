@@ -13,7 +13,11 @@ use super::{kind_is_name_capable, util::token_name, Parser};
 
 impl<'a> Parser<'a> {
     /// Entry point called from the expression parser when it sees `<`.
-    pub(super) fn parse_jsx(&mut self, start: crate::ast::Pos, start_byte: usize) -> Option<Expr<'a>> {
+    pub(super) fn parse_jsx(
+        &mut self,
+        start: crate::ast::Pos,
+        start_byte: usize,
+    ) -> Option<Expr<'a>> {
         // Current token must be `<`.
         if !self.at(TokenKind::Lt) {
             return None;
@@ -42,13 +46,7 @@ impl<'a> Parser<'a> {
             });
         }
 
-        let tag = self.expect_identifier()?;
-
-        // RFD 8: JSX member expressions (`<My.Component />`) are disallowed.
-        if self.at(TokenKind::Dot) {
-            self.error("JSX member expressions are not allowed; use a single identifier for the tag (RFD 8)");
-            return None;
-        }
+        let tag = self.parse_jsx_tag()?;
 
         let attributes = self.parse_jsx_attributes()?;
 
@@ -83,10 +81,7 @@ impl<'a> Parser<'a> {
 
     fn parse_jsx_attributes(&mut self) -> Option<Vec<JsxAttribute<'a>>> {
         let mut attrs = Vec::new();
-        while !self.at(TokenKind::Gt)
-            && !self.at(TokenKind::Slash)
-            && !self.at(TokenKind::Eof)
-        {
+        while !self.at(TokenKind::Gt) && !self.at(TokenKind::Slash) && !self.at(TokenKind::Eof) {
             self.skip_newlines();
             // Spread attribute: `{...expr}`
             if self.at(TokenKind::LBrace) {
@@ -177,10 +172,7 @@ impl<'a> Parser<'a> {
             self.advance();
             Some(name)
         } else {
-            self.error(format!(
-                "expected identifier, found `{}`",
-                token_name(kind)
-            ));
+            self.error(format!("expected identifier, found `{}`", token_name(kind)));
             None
         }
     }
@@ -231,10 +223,28 @@ impl<'a> Parser<'a> {
         Some(Some(expr))
     }
 
+    /// JSX tags are a single identifier, plus the one RFD 8 exception
+    /// `<Ctx.Provider>` that context (rfd#64 lane C) requires.
+    fn parse_jsx_tag(&mut self) -> Option<&'a str> {
+        let base = self.expect_identifier()?;
+        if !self.at(TokenKind::Dot) {
+            return Some(base);
+        }
+        self.advance();
+        let member = self.expect_identifier()?;
+        if member != "Provider" {
+            self.error(
+                "JSX member expressions are not allowed; use a single identifier for the tag (RFD 8)",
+            );
+            return None;
+        }
+        Some(self.bump_str(&format!("{base}.Provider")))
+    }
+
     fn expect_jsx_closing_tag(&mut self, expected: &'a str) -> Option<()> {
         self.expect(TokenKind::Lt)?;
         self.expect(TokenKind::Slash)?;
-        let name = self.expect_identifier()?;
+        let name = self.parse_jsx_tag()?;
         if name != expected {
             self.error(format!(
                 "expected closing tag `</{}>` but found `</{}>`",

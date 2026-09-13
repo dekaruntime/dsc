@@ -13,7 +13,7 @@
 //! Straight-line: hook calls must be unconditional, un-looped, and before any
 //! early return in the immediate body.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::{types::Type, Checker};
 use crate::ast;
@@ -33,12 +33,28 @@ pub(super) fn hook_builtin_name(name: &str) -> Option<&'static str> {
         "useState" => Some("useState"),
         "useRef" => Some("useRef"),
         "useEffect" => Some("useEffect"),
+        "useContext" => Some("useContext"),
+        _ => None,
+    }
+}
+
+pub(super) fn react_import_name(name: &str) -> Option<&'static str> {
+    match name {
+        "useState" => Some("useState"),
+        "useRef" => Some("useRef"),
+        "useEffect" => Some("useEffect"),
+        "useContext" => Some("useContext"),
+        "createContext" => Some("createContext"),
         _ => None,
     }
 }
 
 pub(super) fn is_hook_builtin(name: &str) -> bool {
     hook_builtin_name(name).is_some()
+}
+
+pub(super) fn is_react_builtin(name: &str) -> bool {
+    react_import_name(name).is_some()
 }
 
 /// How a component-scope binding participates in `useEffect` dependency
@@ -53,8 +69,21 @@ pub(super) enum CaptureClass {
     /// The `useEffect` builtin (and aliases). Stable, and the call is the
     /// inference site.
     UseEffect,
+    /// The `createContext` builtin (and aliases). Not a hook.
+    CreateContext,
+    /// The `useContext` builtin (and aliases). The *call* is a hook; the
+    /// function value itself is a stable identity.
+    UseContext,
     /// Visible in the component, but neither reactive nor a stable identity.
     Other,
+}
+
+/// One `createContext` identity. Provider presence is about this object,
+/// not the `Context<T>` type — two `Context<string>` values are distinct.
+#[derive(Clone, Debug)]
+pub(super) struct ContextInfo<'a> {
+    pub name: &'a str,
+    pub has_default: bool,
 }
 
 pub(super) const UNCLASSIFIED_CAPTURE: &str =
@@ -65,6 +94,15 @@ pub(super) const EFFECT_INLINE: &str =
 
 pub(super) const EFFECT_ARITY: &str =
     "`useEffect` takes one effect; the compiler infers the dependency array from the effect's captures — do not write one";
+
+pub(super) const CONTEXT_MODULE: &str =
+    "`createContext` belongs at module scope so the context identity is stable across renders";
+
+pub(super) const CONTEXT_ARG: &str =
+    "`useContext` needs a context from `createContext`, passed by name, so the compiler can prove a Provider";
+
+pub(super) const CONTEXT_DEFAULT: &str =
+    "give this context a default (`createContext<T>(default)`) or wrap the render in `<Ctx.Provider>`";
 
 pub(super) struct HookFrame<'a> {
     pub name: Option<&'a str>,
@@ -126,7 +164,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(super) fn note_hook_call(&mut self, name: &str, span: ast::Span, builtin: bool) {
+    pub(super) fn note_hook_call(&mut self, name: &'a str, span: ast::Span, builtin: bool) {
         if self.hook_conditional_depth > 0 || self.loop_depth > 0 || self.hook_seen_return {
             self.error_span(span, STRAIGHT_LINE);
         }
@@ -144,6 +182,13 @@ impl<'a> Checker<'a> {
         // Any function that calls a hook-typed function becomes hook-typed.
         self.hook_body_called = true;
         self.paint_current_fn_hook();
+        if !builtin {
+            if let Some(caller) = self.hook_fn_name {
+                if name != "hook" {
+                    self.fn_hook_calls.entry(caller).or_default().insert(name);
+                }
+            }
+        }
     }
 
     pub(super) fn note_hook_callee(
@@ -241,6 +286,14 @@ impl<'a> Checker<'a> {
         name == "useEffect" || self.lookup_capture(name) == Some(CaptureClass::UseEffect)
     }
 
+    pub(super) fn is_use_context_binding(&self, name: &str) -> bool {
+        name == "useContext" || self.lookup_capture(name) == Some(CaptureClass::UseContext)
+    }
+
+    pub(super) fn is_create_context_binding(&self, name: &str) -> bool {
+        name == "createContext" || self.lookup_capture(name) == Some(CaptureClass::CreateContext)
+    }
+
     pub(super) fn param_capture_class(ty: &Type<'a>) -> CaptureClass {
         if is_stable_identity(ty) {
             CaptureClass::Stable
@@ -257,6 +310,12 @@ impl<'a> Checker<'a> {
         if self.is_use_effect_expr(value) {
             return CaptureClass::UseEffect;
         }
+        if self.is_create_context_expr(value) {
+            return CaptureClass::CreateContext;
+        }
+        if self.is_use_context_expr(value) {
+            return CaptureClass::UseContext;
+        }
         if is_stable_identity(ty) {
             return CaptureClass::Stable;
         }
@@ -272,6 +331,20 @@ impl<'a> Checker<'a> {
                 self.is_use_effect_expr(expr)
             }
             ast::Expr::Identifier { name, .. } => self.is_use_effect_binding(name),
+            _ => false,
+        }
+    }
+
+    fn is_create_context_expr(&self, expr: &ast::Expr<'a>) -> bool {
+        match peel(expr) {
+            ast::Expr::Identifier { name, .. } => self.is_create_context_binding(name),
+            _ => false,
+        }
+    }
+
+    fn is_use_context_expr(&self, expr: &ast::Expr<'a>) -> bool {
+        match peel(expr) {
+            ast::Expr::Identifier { name, .. } => self.is_use_context_binding(name),
             _ => false,
         }
     }
@@ -320,7 +393,13 @@ impl<'a> Checker<'a> {
             None => CaptureDecision::Skip,
             Some((0, _)) => CaptureDecision::Skip,
             Some((_, CaptureClass::Reactive)) => CaptureDecision::Dep,
-            Some((_, CaptureClass::Stable | CaptureClass::UseEffect)) => CaptureDecision::Skip,
+            Some((
+                _,
+                CaptureClass::Stable
+                | CaptureClass::UseEffect
+                | CaptureClass::CreateContext
+                | CaptureClass::UseContext,
+            )) => CaptureDecision::Skip,
             Some((_, CaptureClass::Other)) => CaptureDecision::Unclassified,
         }
     }
@@ -437,8 +516,13 @@ impl<'a> Checker<'a> {
     }
 
     pub(super) fn reject_hook_shadow(&mut self, name: &str, span: ast::Span) {
-        if is_hook_builtin(name) {
-            self.error_span(span, format!("cannot shadow compiler-known hook `{name}`"));
+        if is_react_builtin(name) {
+            let kind = if name == "createContext" {
+                "compiler-known React builtin"
+            } else {
+                "compiler-known hook"
+            };
+            self.error_span(span, format!("cannot shadow {kind} `{name}`"));
         }
     }
 
@@ -446,6 +530,25 @@ impl<'a> Checker<'a> {
         Type::Function {
             params: vec![Self::effect_fn_type()],
             ret: Box::new(Type::Named { name: "void" }),
+            optional: 0,
+        }
+        .as_hook()
+    }
+
+    pub(super) fn builtin_create_context_type() -> Type<'a> {
+        let t = Type::Param { name: "T" };
+        Type::Function {
+            params: vec![t.clone()],
+            ret: Box::new(Type::context(t, true)),
+            optional: 1,
+        }
+    }
+
+    pub(super) fn builtin_use_context_type() -> Type<'a> {
+        let t = Type::Param { name: "T" };
+        Type::Function {
+            params: vec![Type::context(t.clone(), true)],
+            ret: Box::new(t),
             optional: 0,
         }
         .as_hook()
@@ -479,6 +582,1037 @@ impl<'a> Checker<'a> {
         };
         inner.as_hook()
     }
+
+    pub(super) fn check_create_context(
+        &mut self,
+        expr: &ast::Expr<'a>,
+        type_args: &'a [ast::Type<'a>],
+        args: &'a [ast::Expr<'a>],
+        span: ast::Span,
+    ) -> Type<'a> {
+        self.note_hook_builtin_ref("createContext");
+        if self.in_function {
+            self.error_span(span, CONTEXT_MODULE);
+        }
+        if type_args.len() > 1 {
+            self.error_span(span, "`createContext` takes at most one type argument");
+        }
+        if args.len() > 1 {
+            self.error_span(
+                span,
+                "`createContext` takes a default value, or none if a Provider must wrap every use",
+            );
+            for extra in args.iter().skip(1) {
+                self.check_expr(extra);
+            }
+        }
+        let has_default = !args.is_empty();
+        let arg_type = if let Some(arg) = args.first() {
+            self.check_expr(arg)
+        } else {
+            Type::Var
+        };
+        let t = if let Some(ty) = type_args.first() {
+            let expected = self.resolve_ast_type(ty);
+            if has_default && !self.is_assignable(&expected, &arg_type) {
+                self.error_at_expr(
+                    &args[0],
+                    super::with_union_narrowing_hint(
+                        format!("expected type `{expected}`, found type `{arg_type}`"),
+                        &expected,
+                        &arg_type,
+                    ),
+                );
+            }
+            expected
+        } else if has_default {
+            arg_type
+        } else {
+            self.error_span(
+                span,
+                "`createContext` without a default needs a type argument, e.g. `createContext<Locale>()`",
+            );
+            Type::Error
+        };
+        if has_default {
+            self.reject_none_hook_init(type_args, &t, span);
+        }
+        let ty = Type::context(t, has_default);
+        self.intern_create_context(expr, has_default);
+        ty
+    }
+
+    pub(super) fn check_use_context(
+        &mut self,
+        type_args: &'a [ast::Type<'a>],
+        args: &'a [ast::Expr<'a>],
+        span: ast::Span,
+    ) -> Type<'a> {
+        self.note_hook_builtin_ref("useContext");
+        self.note_hook_call("useContext", span, true);
+        if !type_args.is_empty() {
+            self.error_span(span, "`useContext` does not take type arguments");
+        }
+        if args.len() != 1 {
+            self.error_span(span, "`useContext` takes one context from `createContext`");
+            for extra in args.iter() {
+                self.check_expr(extra);
+            }
+            return Type::Error;
+        }
+        let arg_type = self.check_expr(&args[0]);
+        let Some(value) = arg_type.context_value_type().cloned() else {
+            if !arg_type.is_error() {
+                self.error_at_expr(
+                    &args[0],
+                    format!("expected a `Context<T>`, found type `{arg_type}`"),
+                );
+            }
+            return Type::Error;
+        };
+        match self.context_id_of_expr(&args[0]) {
+            Some(id) => self.record_context_use(id, span),
+            None if arg_type.context_has_default() => {}
+            None => {
+                self.error_at_expr(&args[0], CONTEXT_ARG);
+            }
+        }
+        value
+    }
+
+    pub(super) fn intern_imported_context(&mut self, name: &'a str, ty: &Type<'a>) {
+        let Some(_) = ty.context_value_type() else {
+            return;
+        };
+        let id = self.next_context_id;
+        self.next_context_id += 1;
+        self.contexts.insert(
+            id,
+            ContextInfo {
+                name,
+                has_default: ty.context_has_default(),
+            },
+        );
+        if let Some(scope) = self.context_scopes.last_mut() {
+            scope.insert(name, id);
+        }
+    }
+
+    pub(super) fn bind_context_from_value(&mut self, name: &'a str, value: &ast::Expr<'a>) {
+        if let Some(id) = self.context_id_of_expr(value) {
+            if let Some(scope) = self.context_scopes.last_mut() {
+                scope.insert(name, id);
+            }
+            if let Some(info) = self.contexts.get_mut(&id) {
+                if info.name == "context" {
+                    info.name = name;
+                }
+            }
+        }
+    }
+
+    pub(super) fn seed_create_context_type(&mut self, value: &ast::Expr<'a>) -> Option<Type<'a>> {
+        let ast::Expr::Call {
+            callee,
+            type_args,
+            args,
+            span,
+            ..
+        } = peel(value)
+        else {
+            return None;
+        };
+        let ast::Expr::Identifier { name, .. } = peel(callee) else {
+            return None;
+        };
+        if !self.is_create_context_binding(name) {
+            return None;
+        }
+        Some(self.check_create_context(value, type_args, args, *span))
+    }
+
+    pub(super) fn note_provider_element(
+        &mut self,
+        element: &ast::JsxElement<'a>,
+        context_name: &'a str,
+    ) {
+        if let Some(id) = self.lookup_context(context_name) {
+            self.provider_elements.insert(element as *const _, id);
+        }
+    }
+
+    pub(super) fn lookup_context(&self, name: &str) -> Option<usize> {
+        for scope in self.context_scopes.iter().rev() {
+            if let Some(id) = scope.get(name) {
+                return Some(*id);
+            }
+        }
+        None
+    }
+
+    fn intern_create_context(&mut self, expr: &ast::Expr<'a>, has_default: bool) -> usize {
+        let key = peel(expr) as *const _;
+        if let Some(id) = self.context_by_expr.get(&key) {
+            return *id;
+        }
+        let id = self.next_context_id;
+        self.next_context_id += 1;
+        self.contexts.insert(
+            id,
+            ContextInfo {
+                name: "context",
+                has_default,
+            },
+        );
+        self.context_by_expr.insert(key, id);
+        id
+    }
+
+    fn context_id_of_expr(&self, expr: &ast::Expr<'a>) -> Option<usize> {
+        match peel(expr) {
+            ast::Expr::Identifier { name, .. } => self.lookup_context(name),
+            ast::Expr::Call { .. } => self.context_by_expr.get(&(peel(expr) as *const _)).copied(),
+            _ => None,
+        }
+    }
+
+    fn record_context_use(&mut self, id: usize, span: ast::Span) {
+        if let Some(name) = self.hook_fn_name {
+            self.fn_uses_context
+                .entry(name)
+                .or_default()
+                .push((id, span));
+        }
+        if let Some(body) = self.current_body {
+            self.body_uses_context
+                .entry(body as *const _)
+                .or_default()
+                .push((id, span));
+        }
+    }
+
+    pub(super) fn prove_provider_presence(&mut self) {
+        if self.infer_only {
+            return;
+        }
+        let consumes = self.saturated_context_consumes();
+        let bodies = named_function_bodies(self.program);
+        let exported = exported_names(self.program);
+        let children_slots = self.children_slot_providers(&bodies);
+        let mut reached: HashSet<&str> = HashSet::new();
+        let mut diagnosed: HashSet<(u32, usize)> = HashSet::new();
+        let empty = HashSet::new();
+
+        for stmt in self.program.statements {
+            match stmt {
+                ast::Stmt::Function { .. }
+                | ast::Stmt::ReceiverMethod { .. }
+                | ast::Stmt::Export {
+                    decl: ast::ExportDecl::Function { .. },
+                    ..
+                } => {}
+                _ => {
+                    self.walk_stmt_for_providers(
+                        stmt,
+                        &empty,
+                        &consumes,
+                        &bodies,
+                        &children_slots,
+                        &mut reached,
+                        &mut diagnosed,
+                        &mut HashSet::new(),
+                    );
+                }
+            }
+        }
+
+        // Walk every function body so intra-module wrappers are visible
+        // even without a module-level render root. Own-body consumption is
+        // only diagnosed for exports (library entries); JSX sites diagnose
+        // the callee against the providers in force at that site.
+        let names: Vec<&'a str> = bodies.keys().copied().collect();
+        for name in names {
+            let body = bodies.get(name).copied().unwrap_or(&[]);
+            self.enter_function_with_providers(
+                name,
+                body,
+                &empty,
+                None,
+                exported.contains(name),
+                &consumes,
+                &bodies,
+                &children_slots,
+                &mut reached,
+                &mut diagnosed,
+                &mut HashSet::new(),
+            );
+        }
+    }
+
+    fn saturated_context_consumes(&self) -> HashMap<&'a str, Vec<(usize, ast::Span)>> {
+        let mut consumes = self.fn_uses_context.clone();
+        for (name, body) in named_function_bodies(self.program) {
+            if let Some(uses) = self.body_uses_context.get(&(body as *const _)) {
+                consumes
+                    .entry(name)
+                    .or_default()
+                    .extend(uses.iter().copied());
+            }
+        }
+        let mut changed = true;
+        while changed {
+            changed = false;
+            let callers: Vec<_> = self.fn_hook_calls.keys().copied().collect();
+            for caller in callers {
+                let Some(callees) = self.fn_hook_calls.get(caller) else {
+                    continue;
+                };
+                let mut extra = Vec::new();
+                for callee in callees {
+                    if let Some(uses) = consumes.get(callee) {
+                        extra.extend(uses.iter().copied());
+                    }
+                }
+                if extra.is_empty() {
+                    continue;
+                }
+                let entry = consumes.entry(caller).or_default();
+                for item in extra {
+                    if !entry
+                        .iter()
+                        .any(|e| e.0 == item.0 && e.1.byte_start == item.1.byte_start)
+                    {
+                        entry.push(item);
+                        changed = true;
+                    }
+                }
+            }
+        }
+        consumes
+    }
+
+    fn children_slot_providers(
+        &self,
+        bodies: &HashMap<&'a str, &'a [ast::Stmt<'a>]>,
+    ) -> HashMap<&'a str, HashSet<usize>> {
+        let mut out = HashMap::new();
+        for (name, body) in bodies {
+            let params = function_param_names(self.program, name);
+            let mut found = Vec::new();
+            let mut provided = HashSet::new();
+            self.collect_children_slots(body, &params, &mut provided, &mut found);
+            if !found.is_empty() {
+                let mut inter = found[0].clone();
+                for set in found.iter().skip(1) {
+                    inter = inter.intersection(set).copied().collect();
+                }
+                out.insert(*name, inter);
+            }
+        }
+        out
+    }
+
+    fn collect_children_slots(
+        &self,
+        stmts: &'a [ast::Stmt<'a>],
+        params: &FunctionParams<'a>,
+        provided: &mut HashSet<usize>,
+        found: &mut Vec<HashSet<usize>>,
+    ) {
+        for stmt in stmts {
+            self.collect_children_slots_stmt(stmt, params, provided, found);
+        }
+    }
+
+    fn collect_children_slots_stmt(
+        &self,
+        stmt: &'a ast::Stmt<'a>,
+        params: &FunctionParams<'a>,
+        provided: &mut HashSet<usize>,
+        found: &mut Vec<HashSet<usize>>,
+    ) {
+        match stmt {
+            ast::Stmt::Const { value, .. }
+            | ast::Stmt::Let { value, .. }
+            | ast::Stmt::Expr { expr: value, .. }
+            | ast::Stmt::Return {
+                value: Some(value), ..
+            } => self.collect_children_slots_expr(value, params, provided, found),
+            ast::Stmt::If {
+                then_body,
+                else_body,
+                condition,
+                ..
+            } => {
+                self.collect_children_slots_expr(condition, params, provided, found);
+                self.collect_children_slots(then_body, params, provided, found);
+                self.collect_children_slots(else_body, params, provided, found);
+            }
+            ast::Stmt::Block { body, .. } => {
+                self.collect_children_slots(body, params, provided, found)
+            }
+            ast::Stmt::Function { body, .. } => {
+                self.collect_children_slots(body, params, provided, found)
+            }
+            ast::Stmt::Export {
+                decl: ast::ExportDecl::Const { value, .. },
+                ..
+            } => self.collect_children_slots_expr(value, params, provided, found),
+            _ => {}
+        }
+    }
+
+    fn collect_children_slots_expr(
+        &self,
+        expr: &'a ast::Expr<'a>,
+        params: &FunctionParams<'a>,
+        provided: &mut HashSet<usize>,
+        found: &mut Vec<HashSet<usize>>,
+    ) {
+        match expr {
+            ast::Expr::JsxElement { element, .. } => {
+                let extra = self.provider_elements.get(&(element as *const _)).copied();
+                if let Some(id) = extra {
+                    provided.insert(id);
+                }
+                if is_children_slot_expr(element.children, params) {
+                    found.push(provided.clone());
+                }
+                for child in element.children {
+                    self.collect_children_slots_expr(child, params, provided, found);
+                }
+                for attr in element.attributes {
+                    if let Some(value) = &attr.value {
+                        self.collect_children_slots_expr(value, params, provided, found);
+                    }
+                }
+                if let Some(id) = extra {
+                    provided.remove(&id);
+                }
+            }
+            ast::Expr::JsxFragment { children, .. } => {
+                for child in *children {
+                    self.collect_children_slots_expr(child, params, provided, found);
+                }
+            }
+            ast::Expr::Ternary {
+                condition,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.collect_children_slots_expr(condition, params, provided, found);
+                self.collect_children_slots_expr(then_branch, params, provided, found);
+                self.collect_children_slots_expr(else_branch, params, provided, found);
+            }
+            ast::Expr::Paren { expr, .. }
+            | ast::Expr::Safe { expr, .. }
+            | ast::Expr::Await { expr, .. } => {
+                self.collect_children_slots_expr(expr, params, provided, found)
+            }
+            ast::Expr::Function { body, .. } => {
+                self.collect_children_slots(body, params, provided, found)
+            }
+            ast::Expr::Call { args, callee, .. } => {
+                self.collect_children_slots_expr(callee, params, provided, found);
+                for arg in *args {
+                    self.collect_children_slots_expr(arg, params, provided, found);
+                }
+            }
+            ast::Expr::Array { elements, .. } => {
+                for el in *elements {
+                    self.collect_children_slots_expr(el, params, provided, found);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn walk_stmt_for_providers(
+        &mut self,
+        stmt: &ast::Stmt<'a>,
+        provided: &HashSet<usize>,
+        consumes: &HashMap<&'a str, Vec<(usize, ast::Span)>>,
+        bodies: &HashMap<&'a str, &'a [ast::Stmt<'a>]>,
+        children_slots: &HashMap<&'a str, HashSet<usize>>,
+        reached: &mut HashSet<&'a str>,
+        diagnosed: &mut HashSet<(u32, usize)>,
+        inlining: &mut HashSet<&'a str>,
+    ) {
+        match stmt {
+            ast::Stmt::Const { value, .. }
+            | ast::Stmt::Let { value, .. }
+            | ast::Stmt::Expr { expr: value, .. }
+            | ast::Stmt::Return {
+                value: Some(value), ..
+            } => self.walk_expr_for_providers(
+                value,
+                provided,
+                consumes,
+                bodies,
+                children_slots,
+                reached,
+                diagnosed,
+                inlining,
+            ),
+            ast::Stmt::If {
+                condition,
+                then_body,
+                else_body,
+                ..
+            } => {
+                self.walk_expr_for_providers(
+                    condition,
+                    provided,
+                    consumes,
+                    bodies,
+                    children_slots,
+                    reached,
+                    diagnosed,
+                    inlining,
+                );
+                for s in then_body.iter().chain(else_body.iter()) {
+                    self.walk_stmt_for_providers(
+                        s,
+                        provided,
+                        consumes,
+                        bodies,
+                        children_slots,
+                        reached,
+                        diagnosed,
+                        inlining,
+                    );
+                }
+            }
+            ast::Stmt::Block { body, .. } | ast::Stmt::Function { body, .. } => {
+                for s in *body {
+                    self.walk_stmt_for_providers(
+                        s,
+                        provided,
+                        consumes,
+                        bodies,
+                        children_slots,
+                        reached,
+                        diagnosed,
+                        inlining,
+                    );
+                }
+            }
+            ast::Stmt::Export {
+                decl: ast::ExportDecl::Const { value, .. },
+                ..
+            } => self.walk_expr_for_providers(
+                value,
+                provided,
+                consumes,
+                bodies,
+                children_slots,
+                reached,
+                diagnosed,
+                inlining,
+            ),
+            ast::Stmt::TupleBinding { value, .. } => self.walk_expr_for_providers(
+                value,
+                provided,
+                consumes,
+                bodies,
+                children_slots,
+                reached,
+                diagnosed,
+                inlining,
+            ),
+            _ => {}
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn walk_expr_for_providers(
+        &mut self,
+        expr: &ast::Expr<'a>,
+        provided: &HashSet<usize>,
+        consumes: &HashMap<&'a str, Vec<(usize, ast::Span)>>,
+        bodies: &HashMap<&'a str, &'a [ast::Stmt<'a>]>,
+        children_slots: &HashMap<&'a str, HashSet<usize>>,
+        reached: &mut HashSet<&'a str>,
+        diagnosed: &mut HashSet<(u32, usize)>,
+        inlining: &mut HashSet<&'a str>,
+    ) {
+        match expr {
+            ast::Expr::JsxElement { element, .. } => {
+                let mut child_provided = provided.clone();
+                if let Some(id) = self.provider_elements.get(&(element as *const _)) {
+                    child_provided.insert(*id);
+                } else if let Some(ctx) = element.context_provider() {
+                    if let Some(id) = self.lookup_context(ctx) {
+                        child_provided.insert(id);
+                    }
+                } else if element
+                    .tag
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_uppercase())
+                {
+                    self.enter_function_with_providers(
+                        element.tag,
+                        bodies.get(element.tag).copied().unwrap_or(&[]),
+                        provided,
+                        Some(element.span),
+                        true,
+                        consumes,
+                        bodies,
+                        children_slots,
+                        reached,
+                        diagnosed,
+                        inlining,
+                    );
+                    if let Some(extra) = children_slots.get(element.tag) {
+                        child_provided.extend(extra.iter().copied());
+                    }
+                }
+                for attr in element.attributes {
+                    if let Some(value) = &attr.value {
+                        self.walk_expr_for_providers(
+                            value,
+                            provided,
+                            consumes,
+                            bodies,
+                            children_slots,
+                            reached,
+                            diagnosed,
+                            inlining,
+                        );
+                    }
+                }
+                for child in element.children {
+                    self.walk_expr_for_providers(
+                        child,
+                        &child_provided,
+                        consumes,
+                        bodies,
+                        children_slots,
+                        reached,
+                        diagnosed,
+                        inlining,
+                    );
+                }
+            }
+            ast::Expr::JsxFragment { children, .. } => {
+                for child in *children {
+                    self.walk_expr_for_providers(
+                        child,
+                        provided,
+                        consumes,
+                        bodies,
+                        children_slots,
+                        reached,
+                        diagnosed,
+                        inlining,
+                    );
+                }
+            }
+            ast::Expr::Ternary {
+                condition,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.walk_expr_for_providers(
+                    condition,
+                    provided,
+                    consumes,
+                    bodies,
+                    children_slots,
+                    reached,
+                    diagnosed,
+                    inlining,
+                );
+                self.walk_expr_for_providers(
+                    then_branch,
+                    provided,
+                    consumes,
+                    bodies,
+                    children_slots,
+                    reached,
+                    diagnosed,
+                    inlining,
+                );
+                self.walk_expr_for_providers(
+                    else_branch,
+                    provided,
+                    consumes,
+                    bodies,
+                    children_slots,
+                    reached,
+                    diagnosed,
+                    inlining,
+                );
+            }
+            ast::Expr::Paren { expr, .. }
+            | ast::Expr::Safe { expr, .. }
+            | ast::Expr::Await { expr, .. }
+            | ast::Expr::Spread { expr, .. }
+            | ast::Expr::FieldAccess { object: expr, .. } => self.walk_expr_for_providers(
+                expr,
+                provided,
+                consumes,
+                bodies,
+                children_slots,
+                reached,
+                diagnosed,
+                inlining,
+            ),
+            ast::Expr::Call { callee, args, .. } => {
+                self.walk_expr_for_providers(
+                    callee,
+                    provided,
+                    consumes,
+                    bodies,
+                    children_slots,
+                    reached,
+                    diagnosed,
+                    inlining,
+                );
+                for arg in *args {
+                    self.walk_expr_for_providers(
+                        arg,
+                        provided,
+                        consumes,
+                        bodies,
+                        children_slots,
+                        reached,
+                        diagnosed,
+                        inlining,
+                    );
+                }
+            }
+            ast::Expr::Array { elements, .. } => {
+                for el in *elements {
+                    self.walk_expr_for_providers(
+                        el,
+                        provided,
+                        consumes,
+                        bodies,
+                        children_slots,
+                        reached,
+                        diagnosed,
+                        inlining,
+                    );
+                }
+            }
+            ast::Expr::Function { body, .. } => {
+                for stmt in *body {
+                    self.walk_stmt_for_providers(
+                        stmt,
+                        provided,
+                        consumes,
+                        bodies,
+                        children_slots,
+                        reached,
+                        diagnosed,
+                        inlining,
+                    );
+                }
+            }
+            ast::Expr::Binary { left, right, .. } => {
+                self.walk_expr_for_providers(
+                    left,
+                    provided,
+                    consumes,
+                    bodies,
+                    children_slots,
+                    reached,
+                    diagnosed,
+                    inlining,
+                );
+                self.walk_expr_for_providers(
+                    right,
+                    provided,
+                    consumes,
+                    bodies,
+                    children_slots,
+                    reached,
+                    diagnosed,
+                    inlining,
+                );
+            }
+            ast::Expr::Unary { operand, .. } => self.walk_expr_for_providers(
+                operand,
+                provided,
+                consumes,
+                bodies,
+                children_slots,
+                reached,
+                diagnosed,
+                inlining,
+            ),
+            ast::Expr::IndexAccess { object, index, .. } => {
+                self.walk_expr_for_providers(
+                    object,
+                    provided,
+                    consumes,
+                    bodies,
+                    children_slots,
+                    reached,
+                    diagnosed,
+                    inlining,
+                );
+                self.walk_expr_for_providers(
+                    index,
+                    provided,
+                    consumes,
+                    bodies,
+                    children_slots,
+                    reached,
+                    diagnosed,
+                    inlining,
+                );
+            }
+            ast::Expr::Object { fields, .. } => {
+                for field in *fields {
+                    self.walk_expr_for_providers(
+                        &field.value,
+                        provided,
+                        consumes,
+                        bodies,
+                        children_slots,
+                        reached,
+                        diagnosed,
+                        inlining,
+                    );
+                }
+            }
+            ast::Expr::StructLiteral { fields, .. } => {
+                for field in *fields {
+                    self.walk_expr_for_providers(
+                        &field.value,
+                        provided,
+                        consumes,
+                        bodies,
+                        children_slots,
+                        reached,
+                        diagnosed,
+                        inlining,
+                    );
+                }
+            }
+            ast::Expr::Match {
+                scrutinee, arms, ..
+            } => {
+                self.walk_expr_for_providers(
+                    scrutinee,
+                    provided,
+                    consumes,
+                    bodies,
+                    children_slots,
+                    reached,
+                    diagnosed,
+                    inlining,
+                );
+                for arm in *arms {
+                    self.walk_expr_for_providers(
+                        &arm.body,
+                        provided,
+                        consumes,
+                        bodies,
+                        children_slots,
+                        reached,
+                        diagnosed,
+                        inlining,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn enter_function_with_providers(
+        &mut self,
+        name: &'a str,
+        body: &'a [ast::Stmt<'a>],
+        provided: &HashSet<usize>,
+        site: Option<ast::Span>,
+        check_self: bool,
+        consumes: &HashMap<&'a str, Vec<(usize, ast::Span)>>,
+        bodies: &HashMap<&'a str, &'a [ast::Stmt<'a>]>,
+        children_slots: &HashMap<&'a str, HashSet<usize>>,
+        reached: &mut HashSet<&'a str>,
+        diagnosed: &mut HashSet<(u32, usize)>,
+        inlining: &mut HashSet<&'a str>,
+    ) {
+        reached.insert(name);
+        if check_self {
+            if let Some(uses) = consumes.get(name) {
+                for (id, use_span) in uses {
+                    let info = self.contexts.get(id);
+                    if info.is_some_and(|c| c.has_default) || provided.contains(id) {
+                        continue;
+                    }
+                    let span = site.unwrap_or(*use_span);
+                    self.diagnose_missing_provider(name, *id, span, diagnosed);
+                }
+            }
+        }
+        if !inlining.insert(name) {
+            return;
+        }
+        for stmt in body {
+            self.walk_stmt_for_providers(
+                stmt,
+                provided,
+                consumes,
+                bodies,
+                children_slots,
+                reached,
+                diagnosed,
+                inlining,
+            );
+        }
+        inlining.remove(name);
+    }
+
+    fn diagnose_missing_provider(
+        &mut self,
+        consumer: &'a str,
+        id: usize,
+        span: ast::Span,
+        diagnosed: &mut HashSet<(u32, usize)>,
+    ) {
+        let Some(info) = self.contexts.get(&id).cloned() else {
+            return;
+        };
+        if info.has_default {
+            return;
+        }
+        if !diagnosed.insert((span.byte_start as u32, id)) {
+            return;
+        }
+        self.error_span(
+            span,
+            format!(
+                "`{consumer}` reads `{name}` but this render is not wrapped in `<{name}.Provider>`; {CONTEXT_DEFAULT}",
+                name = info.name
+            ),
+        );
+    }
+}
+
+struct FunctionParams<'a> {
+    first: Option<&'a str>,
+    children: bool,
+}
+
+fn function_param_names<'a>(program: &'a ast::Program<'a>, name: &str) -> FunctionParams<'a> {
+    for stmt in program.statements {
+        let params = match stmt {
+            ast::Stmt::Function {
+                name: fn_name,
+                params,
+                ..
+            }
+            | ast::Stmt::Export {
+                decl:
+                    ast::ExportDecl::Function {
+                        name: fn_name,
+                        params,
+                        ..
+                    },
+                ..
+            } if *fn_name == name => *params,
+            _ => continue,
+        };
+        let first = params.first().map(|p| p.name);
+        let children = first == Some("children");
+        return FunctionParams { first, children };
+    }
+    FunctionParams {
+        first: None,
+        children: false,
+    }
+}
+
+fn is_children_slot_expr(children: &[ast::Expr<'_>], params: &FunctionParams<'_>) -> bool {
+    children.iter().any(|child| match peel(child) {
+        ast::Expr::Identifier { name, .. } => params.children && *name == "children",
+        ast::Expr::FieldAccess {
+            object,
+            field: "children",
+            ..
+        } => match peel(object) {
+            ast::Expr::Identifier { name, .. } => params.first == Some(*name),
+            _ => false,
+        },
+        _ => false,
+    })
+}
+
+fn named_function_bodies<'a>(
+    program: &'a ast::Program<'a>,
+) -> HashMap<&'a str, &'a [ast::Stmt<'a>]> {
+    let mut bodies = HashMap::new();
+    for stmt in program.statements {
+        match stmt {
+            ast::Stmt::Function { name, body, .. }
+            | ast::Stmt::Export {
+                decl: ast::ExportDecl::Function { name, body, .. },
+                ..
+            } => {
+                bodies.insert(*name, *body);
+            }
+            ast::Stmt::Const {
+                name,
+                value: ast::Expr::Function { body, .. },
+                ..
+            }
+            | ast::Stmt::Let {
+                name,
+                value: ast::Expr::Function { body, .. },
+                ..
+            }
+            | ast::Stmt::Export {
+                decl:
+                    ast::ExportDecl::Const {
+                        name,
+                        value: ast::Expr::Function { body, .. },
+                        ..
+                    },
+                ..
+            } => {
+                bodies.insert(*name, *body);
+            }
+            _ => {}
+        }
+    }
+    bodies
+}
+
+fn exported_names<'a>(program: &'a ast::Program<'a>) -> HashSet<&'a str> {
+    let mut names = HashSet::new();
+    for stmt in program.statements {
+        match stmt {
+            ast::Stmt::Export {
+                decl: ast::ExportDecl::Function { name, .. },
+                ..
+            }
+            | ast::Stmt::Export {
+                decl: ast::ExportDecl::Const { name, .. },
+                ..
+            } => {
+                names.insert(*name);
+            }
+            ast::Stmt::Export {
+                decl: ast::ExportDecl::NamedGroup { names: group, .. },
+                ..
+            } => {
+                for n in *group {
+                    names.insert(n.name);
+                }
+            }
+            _ => {}
+        }
+    }
+    names
 }
 
 fn is_stable_identity(ty: &Type<'_>) -> bool {

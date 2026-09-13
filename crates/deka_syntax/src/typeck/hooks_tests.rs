@@ -452,3 +452,220 @@ fn useeffect_cleanup_some_and_none() {
          }",
     );
 }
+
+#[test]
+fn createcontext_usecontext_with_default_ok() {
+    assert_ok(
+        "const LocaleContext = createContext<string>(\"en\")\n\
+         fn Page() ReactNode {\n\
+           const locale = useContext(LocaleContext)\n\
+           return <p>{locale}</p>\n\
+         }",
+    );
+}
+
+#[test]
+fn usecontext_colors_enclosing_fn() {
+    assert_ok(
+        "const LocaleContext = createContext<string>(\"en\")\n\
+         fn useLocale() string {\n\
+           return useContext(LocaleContext)\n\
+         }\n\
+         fn Page() ReactNode {\n\
+           const locale = useLocale()\n\
+           return <p>{locale}</p>\n\
+         }",
+    );
+    assert_teaches(
+        "const LocaleContext = createContext<string>(\"en\")\n\
+         fn useLocale() string { return useContext(LocaleContext) }\n\
+         useLocale()",
+        "from a plain function",
+    );
+}
+
+#[test]
+fn usecontext_straight_line() {
+    assert_teaches(
+        "const LocaleContext = createContext<string>(\"en\")\n\
+         fn Page() ReactNode {\n\
+           if (true) { const locale = useContext(LocaleContext) }\n\
+           return <p />\n\
+         }",
+        "hooks run in a fixed order every render; move the condition inside the hook",
+    );
+}
+
+#[test]
+fn cannot_shadow_usecontext_or_createcontext() {
+    assert_teaches(
+        "fn Page() ReactNode {\n\
+           const useContext = fn() { }\n\
+           return <p />\n\
+         }",
+        "cannot shadow compiler-known hook `useContext`",
+    );
+    assert_teaches(
+        "const createContext = fn() { }",
+        "cannot shadow compiler-known React builtin `createContext`",
+    );
+}
+
+#[test]
+fn createcontext_inside_function_rejected() {
+    assert_teaches(
+        "fn Page() ReactNode {\n\
+           const C = createContext<string>(\"en\")\n\
+           return <p />\n\
+         }",
+        "belongs at module scope",
+    );
+}
+
+#[test]
+fn default_context_is_always_legal_without_provider() {
+    assert_ok(
+        "const LocaleContext = createContext<string>(\"en\")\n\
+         fn Page() ReactNode {\n\
+           const locale = useContext(LocaleContext)\n\
+           return <p>{locale}</p>\n\
+         }\n\
+         const root = <Page />",
+    );
+}
+
+#[test]
+fn no_default_without_provider_is_a_diagnostic() {
+    assert_teaches(
+        "const ShopContext = createContext<string>()\n\
+         fn Page() ReactNode {\n\
+           const shop = useContext(ShopContext)\n\
+           return <p>{shop}</p>\n\
+         }\n\
+         const root = <Page />",
+        "not wrapped in `<ShopContext.Provider>`",
+    );
+}
+
+#[test]
+fn no_default_with_provider_ok() {
+    assert_ok(
+        "const ShopContext = createContext<string>()\n\
+         fn Page() ReactNode {\n\
+           const shop = useContext(ShopContext)\n\
+           return <p>{shop}</p>\n\
+         }\n\
+         fn App() ReactNode {\n\
+           return <ShopContext.Provider value={\"tana\"}><Page /></ShopContext.Provider>\n\
+         }",
+    );
+}
+
+#[test]
+fn no_default_provider_does_not_cover_sibling() {
+    assert_teaches(
+        "const ShopContext = createContext<string>()\n\
+         fn Page() ReactNode {\n\
+           const shop = useContext(ShopContext)\n\
+           return <p>{shop}</p>\n\
+         }\n\
+         fn App() ReactNode {\n\
+           return <>\n\
+             <ShopContext.Provider value={\"tana\"}><p /></ShopContext.Provider>\n\
+             <Page />\n\
+           </>\n\
+         }",
+        "not wrapped in `<ShopContext.Provider>`",
+    );
+}
+
+#[test]
+fn no_default_exported_consumer_is_unproven() {
+    assert_teaches(
+        "const ShopContext = createContext<string>()\n\
+         export fn Page() ReactNode {\n\
+           const shop = useContext(ShopContext)\n\
+           return <p>{shop}</p>\n\
+         }\n\
+         fn App() ReactNode {\n\
+           return <ShopContext.Provider value={\"tana\"}><Page /></ShopContext.Provider>\n\
+         }",
+        "not wrapped in `<ShopContext.Provider>`",
+    );
+}
+
+#[test]
+fn usecontext_value_is_reactive_for_useeffect() {
+    assert_ok(
+        "const LocaleContext = createContext<string>(\"en\")\n\
+         fn Page() ReactNode {\n\
+           const locale = useContext(LocaleContext)\n\
+           useEffect(fn() Option<fn() void> {\n\
+             const _s = locale\n\
+             return None\n\
+           })\n\
+           return <p>{locale}</p>\n\
+         }",
+    );
+}
+
+#[test]
+fn provider_value_type_is_checked() {
+    assert_teaches(
+        "const LocaleContext = createContext<string>(\"en\")\n\
+         fn App() ReactNode {\n\
+           return <LocaleContext.Provider value={1}><p /></LocaleContext.Provider>\n\
+         }",
+        "prop `value` expects type `string`",
+    );
+}
+
+#[test]
+fn createcontext_without_default_needs_type_argument() {
+    assert_teaches("const C = createContext()", "needs a type argument");
+}
+
+#[test]
+fn no_default_ternary_unprovided_branch() {
+    assert_teaches(
+        "const ShopContext = createContext<string>()\n\
+         fn Page() ReactNode {\n\
+           const shop = useContext(ShopContext)\n\
+           return <p>{shop}</p>\n\
+         }\n\
+         fn App() ReactNode {\n\
+           return true ? <ShopContext.Provider value={\"tana\"}><Page /></ShopContext.Provider> : <Page />\n\
+         }",
+        "not wrapped in `<ShopContext.Provider>`",
+    );
+}
+
+#[test]
+fn no_default_children_slot_under_provider() {
+    assert_ok(
+        "interface ShellProps { children: ReactNode }\n\
+         const ShopContext = createContext<string>()\n\
+         fn Page() ReactNode {\n\
+           const shop = useContext(ShopContext)\n\
+           return <p>{shop}</p>\n\
+         }\n\
+         fn Shell(props: ShellProps) ReactNode {\n\
+           return <ShopContext.Provider value={\"tana\"}>{props.children}</ShopContext.Provider>\n\
+         }\n\
+         fn App() ReactNode {\n\
+           return <Shell><Page /></Shell>\n\
+         }",
+    );
+}
+
+#[test]
+fn alias_usecontext_is_still_a_hook() {
+    assert_ok(
+        "const LocaleContext = createContext<string>(\"en\")\n\
+         fn Page() ReactNode {\n\
+           const f = useContext\n\
+           const locale = f(LocaleContext)\n\
+           return <p>{locale}</p>\n\
+         }",
+    );
+}

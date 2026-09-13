@@ -4,8 +4,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast;
 
-use super::Checker;
 use super::types::Type;
+use super::Checker;
 
 fn is_panic_callee(callee: &ast::Expr<'_>) -> bool {
     match callee {
@@ -452,7 +452,7 @@ impl<'a> Checker<'a> {
         callee: &ast::Expr<'a>,
         args: &[ast::Expr<'a>],
     ) -> Option<Type<'a>> {
-        use crate::deka_catalog::{ReturnShape, ValType, find_method};
+        use crate::deka_catalog::{find_method, ReturnShape, ValType};
         let ast::Expr::FieldAccess {
             object,
             field: method,
@@ -515,7 +515,7 @@ impl<'a> Checker<'a> {
             ast::Expr::None { .. } => Type::None,
             ast::Expr::Identifier { name, span } => match self.lookup_var(name) {
                 Some(ty) => {
-                    if let Some(builtin) = super::hooks::hook_builtin_name(name) {
+                    if let Some(builtin) = super::hooks::react_import_name(name) {
                         self.note_hook_builtin_ref(builtin);
                     }
                     ty
@@ -705,7 +705,10 @@ impl<'a> Checker<'a> {
                     _ => false,
                 };
                 if bounded_array
-                    && matches!(index_type, Type::Named { name: "number" } | Type::Var | Type::Infer)
+                    && matches!(
+                        index_type,
+                        Type::Named { name: "number" } | Type::Var | Type::Infer
+                    )
                 {
                     self.require_index_proof(object, index, *span);
                 }
@@ -806,7 +809,28 @@ impl<'a> Checker<'a> {
             ast::Expr::JsxElement { element, span } => {
                 // Uppercase JSX tags are component references and must be in
                 // scope; lowercase tags are plain HTML element names.
-                if let Some(first) = element.tag.chars().next() {
+                // `<LocaleContext.Provider>` refers to the context binding.
+                if let Some(ctx) = element.context_provider() {
+                    match self.lookup_var(ctx) {
+                        Some(ty) if ty.is_context() => {
+                            self.note_provider_element(element, ctx);
+                        }
+                        Some(ty) => {
+                            self.error_span(
+                                *span,
+                                format!(
+                                    "`{ctx}` is `{ty}`, not a context; `<{ctx}.Provider>` requires a `createContext` result"
+                                ),
+                            );
+                        }
+                        None => {
+                            self.error_span(
+                                *span,
+                                format!("`{ctx}` is used here but is not initialized until later"),
+                            );
+                        }
+                    }
+                } else if let Some(first) = element.tag.chars().next() {
                     if first.is_uppercase() && self.lookup_var(element.tag).is_none() {
                         self.error_span(
                             *span,
@@ -824,7 +848,9 @@ impl<'a> Checker<'a> {
                 if self.interactive_component_depth == 0
                     && self.jsx_island_depth == 0
                     && !has_client_directive
-                    && self.interactive_components.contains(element.tag)
+                    && self
+                        .interactive_components
+                        .contains(element.referenced_name())
                 {
                     // JSX tags begin immediately after `<`, so derive a span
                     // for the identifier rather than underlining the whole
@@ -1035,11 +1061,13 @@ impl<'a> Checker<'a> {
         self.in_function = true;
         self.in_async_function = is_async;
         self.return_type = body_expected_ret.clone();
+        let saved_body = self.current_body.replace(body);
 
         for stmt in body {
             self.check_statement(stmt);
         }
 
+        self.current_body = saved_body;
         let body_called_hook = self.pop_hook_frame(hook_frame);
         self.in_async_function = saved_in_async;
 
@@ -1458,6 +1486,26 @@ impl<'a> Checker<'a> {
                 );
                 Type::Error
             }
+            Type::Generic {
+                base: "Context" | "OpenContext",
+                args,
+            } if args.len() == 1 && field == "Provider" => Type::Function {
+                params: vec![Type::Object {
+                    fields: vec![("value", args[0].clone()), ("children", Type::react_node())],
+                }],
+                ret: Box::new(Type::react_node()),
+                optional: 1,
+            },
+            Type::Generic {
+                base: "Context" | "OpenContext",
+                ..
+            } => {
+                self.error_span(
+                    span,
+                    format!("Context has no field `{field}`; use `.Provider` in JSX"),
+                );
+                Type::Error
+            }
             Type::Object { fields } => {
                 if let Some((_, ty)) = fields.iter().find(|(name, _)| *name == field) {
                     ty.clone()
@@ -1618,10 +1666,13 @@ impl<'a> Checker<'a> {
             Type::Generic { base: "Result", .. } => "Result",
             _ => {
                 if !self.is_assignable(&Type::react_node(), ty) {
-                    self.error_span(span, format!("JSX children are ReactNode values; `{ty}` is not renderable"));
+                    self.error_span(
+                        span,
+                        format!("JSX children are ReactNode values; `{ty}` is not renderable"),
+                    );
                 }
                 return;
-            },
+            }
         };
         self.error_span(
             span,
@@ -1634,7 +1685,10 @@ impl<'a> Checker<'a> {
 
     /// Resolve props in the declaring namespace, including private interfaces
     /// carried by an imported component's signature (dsc#184).
-    fn jsx_props_fields(&mut self, tag: &'a str) -> Option<(&'a str, Vec<(&'a str, Type<'a>, bool)>)> {
+    fn jsx_props_fields(
+        &mut self,
+        tag: &'a str,
+    ) -> Option<(&'a str, Vec<(&'a str, Type<'a>, bool)>)> {
         if !tag.chars().next().is_some_and(|c| c.is_uppercase()) {
             return None;
         }
@@ -1656,7 +1710,9 @@ impl<'a> Checker<'a> {
                         let cached = self
                             .interface_members
                             .get(identity)
-                            .and_then(|definition| definition.members.iter().find(|(n, _)| n == field))
+                            .and_then(|definition| {
+                                definition.members.iter().find(|(n, _)| n == field)
+                            })
                             .map(|(_, ty)| ty.clone());
                         let expected = match cached {
                             Some(Type::Option { inner }) if *optional => *inner,
@@ -1687,6 +1743,82 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn check_jsx_provider_attributes(
+        &mut self,
+        element: &ast::JsxElement<'a>,
+        ctx: &'a str,
+        span: ast::Span,
+        child_types: &[Type<'a>],
+    ) {
+        let value_ty = self
+            .lookup_var(ctx)
+            .as_ref()
+            .and_then(Type::context_value_type)
+            .cloned();
+        let mut saw_value = false;
+        for attr in element.attributes.iter() {
+            if attr.name == "key" || attr.name == "client" || attr.name.starts_with("client:") {
+                if let Some(value) = &attr.value {
+                    self.check_expr(value);
+                }
+                continue;
+            }
+            if attr.name == "children" {
+                if let Some(value) = &attr.value {
+                    let actual = self.check_expr(value);
+                    self.reject_unrendered_option(&actual, value.span());
+                }
+                continue;
+            }
+            if attr.name != "value" {
+                if let Some(value) = &attr.value {
+                    self.check_expr(value);
+                }
+                self.error_span(
+                    attr.span,
+                    format!(
+                        "`{ctx}.Provider` accepts `value` and `children`, not `{}`",
+                        attr.name
+                    ),
+                );
+                continue;
+            }
+            saw_value = true;
+            let Some(value) = &attr.value else {
+                self.error_span(
+                    attr.span,
+                    format!("prop `value` on `{ctx}.Provider` cannot be a bare attribute"),
+                );
+                continue;
+            };
+            let actual = self.check_expr(value);
+            if let Some(expected) = &value_ty {
+                if !self.is_assignable(expected, &actual)
+                    && !matches!(actual, Type::Infer | Type::Error)
+                    && !matches!(expected, Type::Infer | Type::Error)
+                {
+                    self.error_span(
+                        attr.span,
+                        super::with_union_narrowing_hint(
+                            format!(
+                                "prop `value` expects type `{expected}`, found type `{actual}`"
+                            ),
+                            expected,
+                            &actual,
+                        ),
+                    );
+                }
+            }
+        }
+        if !saw_value {
+            self.error_span(
+                span,
+                format!("missing required prop `value` on `{ctx}.Provider`"),
+            );
+        }
+        let _ = child_types;
+    }
+
     /// Check a JSX element's attributes against its component's props interface.
     ///
     /// deka#443: attributes were never checked at all. A missing required prop,
@@ -1703,13 +1835,17 @@ impl<'a> Checker<'a> {
         span: ast::Span,
         child_types: &[Type<'a>],
     ) {
+        if let Some(ctx) = element.context_provider() {
+            self.check_jsx_provider_attributes(element, ctx, span, child_types);
+            return;
+        }
         if element.tag.chars().next().is_some_and(|c| c.is_uppercase()) {
             let valid = match self.lookup_var(element.tag).map(|t| t.function_contract()) {
                 Some(Type::Function { params, ret, .. }) => {
                     params.len() <= 1
-                        && params
-                            .first()
-                            .is_none_or(|p| matches!(p, Type::Interface { .. } | Type::Struct { .. }))
+                        && params.first().is_none_or(|p| {
+                            matches!(p, Type::Interface { .. } | Type::Struct { .. })
+                        })
                         && self.is_assignable(&Type::react_node(), &ret)
                 }
                 _ => false,
@@ -1740,7 +1876,8 @@ impl<'a> Checker<'a> {
             }
             supplied.push(attr.name);
 
-            let Some((_, field_ty, _)) = fields.iter().find(|(name, _, _)| *name == attr.name) else {
+            let Some((_, field_ty, _)) = fields.iter().find(|(name, _, _)| *name == attr.name)
+            else {
                 if let Some(value) = &attr.value {
                     self.check_expr(value);
                 }
@@ -2430,7 +2567,9 @@ impl<'a> Checker<'a> {
 
     pub(super) fn check_pattern(&mut self, pattern: &ast::Pattern<'a>, scrutinee_type: &Type<'a>) {
         if matches!(scrutinee_type, Type::Option { .. } | Type::None) {
-            self.exception_forms.option_patterns.insert(pattern as *const _);
+            self.exception_forms
+                .option_patterns
+                .insert(pattern as *const _);
         }
         if matches!(scrutinee_type, Type::Generic { base: "Result", .. }) {
             self.exception_forms
@@ -2635,7 +2774,9 @@ impl<'a> Checker<'a> {
             _ => {
                 self.error_span(
                     span,
-                    format!("struct pattern `{name}` does not match scrutinee type `{scrutinee_type}`"),
+                    format!(
+                        "struct pattern `{name}` does not match scrutinee type `{scrutinee_type}`"
+                    ),
                 );
                 return;
             }
@@ -2651,7 +2792,10 @@ impl<'a> Checker<'a> {
             if !seen.insert(field.name) {
                 self.error_span(
                     field.span,
-                    format!("duplicate field `{}` in struct pattern `{name}`", field.name),
+                    format!(
+                        "duplicate field `{}` in struct pattern `{name}`",
+                        field.name
+                    ),
                 );
                 continue;
             }
@@ -3941,9 +4085,7 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|p| substitute_type(p, &subst))
                     .collect();
-                info.resolved_return = info
-                    .resolved_return
-                    .map(|r| substitute_type(&r, &subst));
+                info.resolved_return = info.resolved_return.map(|r| substitute_type(&r, &subst));
             }
             // rfd#56 phase 2: a bound is a contract at the call site. A bound
             // may be declared only on the receiver (`fn (x Holder<T: Named>)`
@@ -4547,19 +4689,29 @@ impl<'a> Checker<'a> {
 
         if let ast::Expr::Identifier { name: "isset", .. } = callee {
             if args.len() != 1 || !type_args.is_empty() {
-                self.error_span(span, "`isset` expects one Option<T> argument and no type arguments");
+                self.error_span(
+                    span,
+                    "`isset` expects one Option<T> argument and no type arguments",
+                );
             }
             for arg in args {
                 let ty = self.check_expr(arg);
                 if !matches!(ty, Type::Option { .. } | Type::None | Type::Error) {
-                    self.error_span(span, "`isset` expects Option<T>; use a boolean directly or match the value");
+                    self.error_span(
+                        span,
+                        "`isset` expects Option<T>; use a boolean directly or match the value",
+                    );
                 }
             }
-            self.unwrap_calls.insert(expr as *const _, super::types::UnwrapKind::Isset);
+            self.unwrap_calls
+                .insert(expr as *const _, super::types::UnwrapKind::Isset);
             return Type::Named { name: "boolean" };
         }
 
-        if let ast::Expr::Identifier { name: "useState", .. } = callee {
+        if let ast::Expr::Identifier {
+            name: "useState", ..
+        } = callee
+        {
             return self.check_use_state(type_args, args, span);
         }
         if let ast::Expr::Identifier { name: "useRef", .. } = callee {
@@ -4568,6 +4720,12 @@ impl<'a> Checker<'a> {
         if let ast::Expr::Identifier { name, .. } = callee {
             if self.is_use_effect_binding(name) {
                 return self.check_use_effect(expr, type_args, args, span);
+            }
+            if self.is_use_context_binding(name) {
+                return self.check_use_context(type_args, args, span);
+            }
+            if self.is_create_context_binding(name) {
+                return self.check_create_context(expr, type_args, args, span);
             }
         }
 

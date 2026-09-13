@@ -76,6 +76,13 @@ impl<'a> Checker<'a> {
                     self.error_span(*span, "Ref requires a type argument, e.g. Ref<number>");
                     Type::Error
                 }
+                "Context" => {
+                    self.error_span(
+                        *span,
+                        "Context requires a type argument, e.g. Context<string>",
+                    );
+                    Type::Error
+                }
                 "Hook" => {
                     self.error_span(
                         *span,
@@ -150,7 +157,7 @@ impl<'a> Checker<'a> {
                         self.error_span(*span, "Promise requires exactly one type argument");
                         Type::Error
                     }
-                } else if base == &"Setter" || base == &"Ref" {
+                } else if base == &"Setter" || base == &"Ref" || base == &"Context" {
                     if args.len() == 1 {
                         Type::Generic {
                             base,

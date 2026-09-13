@@ -50,23 +50,28 @@ Remaining work: statement lifting for bodyless matches nested within other
 expression operands, such as `Ok(match ...)`. These currently produce an
 explicit emission error instead of returning from an artificial IIFE.
 
-## Hooks v1 (rfd#64 amendment 3, lanes A and B)
+## Hooks v1 (rfd#64 amendment 3, lanes A, B, and C)
 
-`useState` / `useRef` / `useEffect` are compiler-known. Hook color lives on
-the function type as `Hook<fn(...) T>` (Exception-shaped), inferred as a
-fixed-point: any fn that calls a hook-typed fn is hook-typed. Aliasing
-preserves the color; hook-typed values are not assignable to plain `fn(...)`
-parameters.
+`useState` / `useRef` / `useEffect` / `createContext` / `useContext` are
+compiler-known. Hook color lives on the function type as `Hook<fn(...) T>`
+(Exception-shaped), inferred as a fixed-point: any fn that calls a
+hook-typed fn is hook-typed. Aliasing preserves the color; hook-typed values
+are not assignable to plain `fn(...)` parameters.
 
 Checker coverage lives in `crates/deka_syntax/src/typeck/hooks_tests.rs`
 (transitive coloring, aliasing, HOF assignability, builtin shadowing, a
 local that reuses a custom-hook name, straight-line, Setter dual call, Ref
 mutation, `useState(None)` requiring an explicit `Option` annotation,
-`useEffect` coloring and straight-line, unclassifiable-capture diagnostic).
-Emission coverage lives in `deka_emit`
+`useEffect` coloring and straight-line, unclassifiable-capture diagnostic,
+`createContext`/`useContext` coloring and straight-line, default-context
+always-legal, no-default-without-provider, Provider-wrapped no-default,
+exported no-default consumer). Emission coverage lives in `deka_emit`
 (`emit_usestate_is_byte_idiomatic`, `emit_usestate_alias_imports_resolved_reference`,
 `emit_counter_component_end_to_end`, `emit_useeffect_infers_deps_and_erases_cleanup`,
-`emit_useeffect_alias_imports_resolved_reference`). Imports are keyed off
+`emit_useeffect_alias_imports_resolved_reference`,
+`emit_createcontext_usecontext_provider_is_byte_idiomatic`,
+`emit_usecontext_alias_imports_resolved_reference`,
+`emit_useeffect_infers_context_value_dep`). Imports are keyed off
 resolved identifier references, not call-site text.
 
 `useState(None)` without a type argument is a compile error naming Option
@@ -79,7 +84,8 @@ use; setters and refs are omitted; no reactive captures emit `[]`; a capture
 the checker cannot classify is a diagnostic at the capture. Explicit
 dependency arrays are rejected.
 
-Context and memoization are absent — they belong to later lanes.
+Memoization is absent — it belongs to lane D. Provider-presence proof is
+same-module static JSX trees (see the lane C PR).
 
 The React value-import specifier is derived from `jsxRuntime` by dropping a
 final `jsx-runtime` / `jsx-dev-runtime` segment (`@js/react/jsx-runtime` →

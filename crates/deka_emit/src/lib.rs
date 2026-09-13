@@ -2383,6 +2383,82 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
     }
 
     #[test]
+    fn emit_createcontext_usecontext_provider_is_byte_idiomatic() {
+        let out = parse_check_and_emit(
+            "const LocaleContext = createContext<string>(\"en\");\n\
+             fn Page() ReactNode {\n\
+               const locale = useContext(LocaleContext);\n\
+               return <p>{locale}</p>;\n\
+             }\n\
+             fn App() ReactNode {\n\
+               return <LocaleContext.Provider value={\"fr\"}><Page /></LocaleContext.Provider>;\n\
+             }",
+        );
+        assert!(
+            out.contains("import { createContext, useContext } from \"@js/react\";"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("const LocaleContext = createContext(\"en\");"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("const locale = useContext(LocaleContext);"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("LocaleContext.Provider") && out.contains("\"value\": \"fr\""),
+            "Provider must pass through JSX emission, got: {out}"
+        );
+        assert!(
+            !out.contains("function createContext")
+                && !out.contains("__deka_createContext")
+                && !out.contains("function useContext")
+                && !out.contains("__deka_useContext"),
+            "hooks must not be wrapped: {out}"
+        );
+    }
+
+    #[test]
+    fn emit_usecontext_alias_imports_resolved_reference() {
+        let out = parse_check_and_emit(
+            "const LocaleContext = createContext<string>(\"en\");\n\
+             fn Page() ReactNode {\n\
+               const f = useContext;\n\
+               const locale = f(LocaleContext);\n\
+               return <p>{locale}</p>;\n\
+             }",
+        );
+        assert!(
+            out.contains("import { createContext, useContext } from \"@js/react\";"),
+            "alias must still emit the resolved builtin import, got: {out}"
+        );
+        assert!(
+            out.contains("const f = useContext;") && out.contains("f(LocaleContext)"),
+            "got: {out}"
+        );
+    }
+
+    #[test]
+    fn emit_useeffect_infers_context_value_dep() {
+        let out = parse_check_and_emit(
+            "const LocaleContext = createContext<string>(\"en\");\n\
+             fn Page() ReactNode {\n\
+               const locale = useContext(LocaleContext);\n\
+               useEffect(fn() Option<fn() void> {\n\
+                 const _s = locale;\n\
+                 return None;\n\
+               });\n\
+               return <p>{locale}</p>;\n\
+             }",
+        );
+        assert!(
+            out.contains("useEffect(function() {") && out.contains("}, [locale]);"),
+            "useContext result is a reactive capture, got: {out}"
+        );
+    }
+
+    #[test]
     fn emit_useref_is_byte_idiomatic() {
         let out = parse_check_and_emit(
             "fn Counter() ReactNode {\n\

@@ -5,8 +5,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast;
 
-use super::Checker;
 use super::types::Type;
+use super::Checker;
 
 /// Receiver type parameters — `(name, declared bound)` — with the struct's
 /// declared bounds inherited at positions the receiver leaves unbounded:
@@ -32,10 +32,7 @@ impl<'a> Checker<'a> {
     /// Push a type-parameter scope from `(name, bound)` pairs — the shape
     /// produced by [`effective_receiver_params`], where the bound may be
     /// inherited from the struct declaration rather than a `TypeParam` node.
-    pub(super) fn push_receiver_params(
-        &mut self,
-        params: &[(&'a str, Option<&'a ast::Type<'a>>)],
-    ) {
+    pub(super) fn push_receiver_params(&mut self, params: &[(&'a str, Option<&'a ast::Type<'a>>)]) {
         let mut scope = HashMap::new();
         let mut bounds = HashMap::new();
         for &(name, bound) in params {
@@ -175,6 +172,7 @@ impl<'a> Checker<'a> {
                 _ => self.check_statement(stmt),
             }
         }
+        self.prove_provider_presence();
     }
 
     fn collect_declarations(&mut self) {
@@ -208,7 +206,7 @@ impl<'a> Checker<'a> {
                 if *name == "Type" {
                     self.error_span(*span, BUILTIN_TYPE_DIAGNOSTIC);
                 }
-                if matches!(*name, "Setter" | "Ref") {
+                if matches!(*name, "Setter" | "Ref" | "Context" | "Hook") {
                     self.error_span(*span, format!("`{name}` is a builtin type"));
                 }
                 if self.aliases.insert(name, value.clone()).is_some() {
@@ -949,14 +947,24 @@ impl<'a> Checker<'a> {
                 continue;
             }
             let (name, ty, value, mutable) = match stmt {
-                ast::Stmt::Const { name, ty, value, .. } => (*name, ty.as_ref(), Some(value), false),
-                ast::Stmt::Let { name, ty, value, .. } => (*name, ty.as_ref(), Some(value), true),
+                ast::Stmt::Const {
+                    name, ty, value, ..
+                } => (*name, ty.as_ref(), Some(value), false),
+                ast::Stmt::Let {
+                    name, ty, value, ..
+                } => (*name, ty.as_ref(), Some(value), true),
                 ast::Stmt::Export {
-                    decl: ast::ExportDecl::Const { name, ty, value, .. },
+                    decl:
+                        ast::ExportDecl::Const {
+                            name, ty, value, ..
+                        },
                     ..
                 } => (*name, ty.as_ref(), Some(value), false),
                 _ => continue,
             };
+            if let Some(value) = value {
+                let _ = self.seed_create_context_type(value);
+            }
             let seed = if let Some(annot) = ty {
                 self.resolve_ast_type(annot)
             } else if let Some(ast::Expr::Identifier { name: init, .. }) = value {
@@ -965,6 +973,8 @@ impl<'a> Checker<'a> {
                     .cloned()
                     .or_else(|| self.scopes[0].get(init).cloned())
                     .unwrap_or(Type::Infer)
+            } else if let Some(value) = value {
+                self.seed_create_context_type(value).unwrap_or(Type::Infer)
             } else {
                 Type::Infer
             };
@@ -976,10 +986,27 @@ impl<'a> Checker<'a> {
                 {
                     super::hooks::CaptureClass::UseEffect
                 }
+                Some(ast::Expr::Identifier { name: init, .. })
+                    if *init == "useContext"
+                        || self.capture_scopes[0].get(init)
+                            == Some(&super::hooks::CaptureClass::UseContext) =>
+                {
+                    super::hooks::CaptureClass::UseContext
+                }
+                Some(ast::Expr::Identifier { name: init, .. })
+                    if *init == "createContext"
+                        || self.capture_scopes[0].get(init)
+                            == Some(&super::hooks::CaptureClass::CreateContext) =>
+                {
+                    super::hooks::CaptureClass::CreateContext
+                }
                 _ => super::hooks::CaptureClass::Other,
             };
             self.scopes[0].insert(name, seed);
             self.capture_scopes[0].insert(name, class);
+            if let Some(value) = value {
+                self.bind_context_from_value(name, value);
+            }
             if mutable {
                 self.mutables[0].insert(name);
             }
@@ -1615,7 +1642,8 @@ impl<'a> Checker<'a> {
             return self.check_dev_binding(name, ty, body, mutable, value, span);
         }
         let expected = ty.map(|t| self.resolve_ast_type(t));
-        let value_type = self.check_exception_use(value, super::exceptions::Use::Value, expected.clone());
+        let value_type =
+            self.check_exception_use(value, super::exceptions::Use::Value, expected.clone());
         let final_type = if let Some(expected) = expected {
             if let Type::Option { inner } = &expected {
                 // Explicit `Option<T>` bindings must be initialized with
@@ -1645,8 +1673,17 @@ impl<'a> Checker<'a> {
             if let (Type::Named { name: "Component" }, Type::Function { params, .. }) =
                 (&expected, &value_type.unhook())
             {
-                if params.len() == 1 { Type::Generic { base: "Component", args: params.clone() } } else { expected }
-            } else { expected }
+                if params.len() == 1 {
+                    Type::Generic {
+                        base: "Component",
+                        args: params.clone(),
+                    }
+                } else {
+                    expected
+                }
+            } else {
+                expected
+            }
         } else {
             value_type
         };
@@ -1656,6 +1693,7 @@ impl<'a> Checker<'a> {
         } else {
             self.declare_var_class(name, final_type, class);
         }
+        self.bind_context_from_value(name, value);
         self.index_flow.remember_integer(name, value);
         // A declaration at module scope activates its seed for module-level
         // lookups; nested declarations never touch module pending state.
@@ -1861,6 +1899,7 @@ impl<'a> Checker<'a> {
         self.in_function = true;
         self.in_async_function = is_async;
         self.return_type = body_expected_ret.clone();
+        let saved_body = self.current_body.replace(body);
         if is_interactive_component {
             self.interactive_component_depth += 1;
         }
@@ -1872,6 +1911,7 @@ impl<'a> Checker<'a> {
         if is_interactive_component {
             self.interactive_component_depth -= 1;
         }
+        self.current_body = saved_body;
         let body_called_hook = self.pop_hook_frame(hook_frame);
 
         // A function that declares a value-producing return type must actually
@@ -2084,10 +2124,7 @@ impl<'a> Checker<'a> {
                 };
                 Type::Generic {
                     base: receiver_type,
-                    args: names
-                        .into_iter()
-                        .map(|name| Type::Param { name })
-                        .collect(),
+                    args: names.into_iter().map(|name| Type::Param { name }).collect(),
                 }
             }
         } else {

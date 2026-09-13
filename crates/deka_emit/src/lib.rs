@@ -122,7 +122,7 @@ const nested: Request = { options: {} };
 
     #[test]
     fn indexing_hats_fixtures() {
-        run_hats_fixtures("indexing", 6);
+        run_hats_fixtures("indexing", 7);
     }
 
     #[test]
@@ -1164,11 +1164,11 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
     #[test]
     fn emit_jsx_automatic_runtime_exact_output() {
         for (source, expression) in [
-            ("const el = <p>hi</p>;", r#"jsx("p", {"data-deka-id": "module:_/i0", "children": "hi"})"#),
-            ("const el = <p>hello {name}</p>;", r#"jsxs("p", {"data-deka-id": "module:_/i0", "children": ["hello ", name]})"#),
-            ("const el = <p>{items}</p>;", r#"jsx("p", {"data-deka-id": "module:_/i0", "children": items})"#),
-            ("const el = <><Card title=\"ok\" /><p>x</p></>;", r#"jsxs(Fragment, {"children": [jsx(Card, {"title": "ok"}), jsx("p", {"data-deka-id": "module:_/i0/i1", "children": "x"})]})"#),
-            ("const el = <p key={id} ref={ref} onClick={click} data-deka-id=\"forwarded\">x</p>;", r#"jsx("p", {"data-deka-id": "module:_/i0", "ref": ref, "onClick": click, "data-deka-id": "forwarded", "children": "x"}, id)"#),
+            ("const el = <p>hi</p>;", r#"jsx("p", {"children": "hi"})"#),
+            ("const el = <p>hello {name}</p>;", r#"jsxs("p", {"children": ["hello ", name]})"#),
+            ("const el = <p>{items}</p>;", r#"jsx("p", {"children": items})"#),
+            ("const el = <><Card title=\"ok\" /><p>x</p></>;", r#"jsxs(Fragment, {"children": [jsx(Card, {"title": "ok"}), jsx("p", {"children": "x"})]})"#),
+            ("const el = <p key={id} ref={ref} onClick={click} data-deka-id=\"forwarded\">x</p>;", r#"jsx("p", {"ref": ref, "onClick": click, "data-deka-id": "forwarded", "children": "x"}, id)"#),
             ("const el = <>x</>;", r#"jsx(Fragment, {"children": "x"})"#),
         ] {
             let out = parse_and_emit(source);
@@ -1177,10 +1177,44 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
     }
 
     #[test]
+    fn emit_jsx_plain_component_props_are_only_user_props() {
+        let out = parse_and_emit(
+            "interface Props { title: string } fn Card(props: Props) ReactNode { return <p>{props.title}</p>; }",
+        );
+        assert!(
+            !out.contains("data-deka-id"),
+            "plain components must not inject hydration markers: {out}"
+        );
+        assert!(
+            out.contains("return jsx(\"p\", {\"children\": props.title});"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn emit_jsx_islands_inject_data_deka_id_on_host_elements() {
+        let out = parse_and_emit(
+            "fn Counter() ReactNode { return <button onClick={click}>x</button>; }\nfn click() {}\nconst page = <Counter client:load />;",
+        );
+        assert!(
+            out.contains("\"client:load\": true"),
+            "island directive must emit: {out}"
+        );
+        assert!(
+            out.contains("jsx(\"button\", {\"data-deka-id\": \"module:Counter/i0\", \"onClick\": click, \"children\": \"x\"})"),
+            "hydration walk matches host elements by data-deka-id: {out}"
+        );
+        assert!(
+            out.contains("jsx(Counter, {\"client:load\": true})"),
+            "component tags are not host elements: {out}"
+        );
+    }
+
+    #[test]
     fn emit_jsx_element_without_children() {
         let out = parse_and_emit("const el = <div class=\"box\" />;");
         assert!(
-            out.contains("jsx(\"div\", {\"data-deka-id\": \"module:_/i0\", \"class\": \"box\"})"),
+            out.contains("jsx(\"div\", {\"class\": \"box\"})"),
             "childless elements must emit a two-argument call: {out}"
         );
     }
@@ -1279,7 +1313,7 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
     fn emit_jsx_css_import_does_not_inject_retired_scope_prop() {
         let out = parse_and_emit("import \"./card.css\"; const el = <div />;");
         assert!(!out.contains("data-deka-cid"), "{out}");
-        assert!(out.contains("\"data-deka-id\": \"module:_/i0\""), "{out}");
+        assert!(!out.contains("data-deka-id"), "{out}");
     }
 
     #[test]
@@ -1340,11 +1374,10 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
         assert!(!out.contains("__deka_ui"), "got: {}", out);
         assert!(!out.contains("`<${tag}"), "got: {}", out);
         assert!(
-            out.contains("\"data-deka-id\""),
-            "expected tagged id, got: {}",
+            !out.contains("\"data-deka-id\""),
+            "plain host elements must not inject a hydration marker: {}",
             out
         );
-        assert!(out.contains("i0"), "expected i0 path segment, got: {}", out);
     }
 
     #[test]

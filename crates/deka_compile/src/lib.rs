@@ -13,7 +13,7 @@ use deka_emit::{dev_slot_id, dev_slot_source_path, emit_dev_entry, emit_js_modul
 use deka_syntax::typeck::Type;
 use deka_syntax::{
     Diagnostic, Expr, ModuleExports, Program, Span, Stmt, check_program_with_imports, parse,
-    resolve_imported_enum_constructors,
+    program_needs_hydration_ids, resolve_imported_enum_constructors,
 };
 use serde::Serialize;
 
@@ -438,6 +438,12 @@ pub struct CompileOptions {
     /// Set by module-graph compilation when a live consumer build reaches
     /// these factories.
     pub build_closure_names: HashSet<String>,
+    /// Inject `data-deka-id` on host JSX elements. `None` auto-detects from
+    /// this module (`client:*` or interactive-component analysis). The module
+    /// graph sets `Some` from the union across every emitted module, because
+    /// an island's render tree may live in a different file from the
+    /// `client:*` usage site.
+    pub inject_deka_id: Option<bool>,
 }
 
 fn dev_binding<'a>(stmt: &'a Stmt<'a>) -> Option<(&'a str, &'a Expr<'a>)> {
@@ -717,6 +723,9 @@ pub fn compile_to_js_with_imports_and_options<'a>(
         options.detached_prelude,
         jsx_runtime,
         options.dev,
+        options
+            .inject_deka_id
+            .unwrap_or_else(|| program_needs_hydration_ids(&program, imports)),
     )
     .map_err(|message| vec![Diagnostic::error(0, 0, message)])?;
 
@@ -781,7 +790,7 @@ mod tests {
             js,
             concat!(
                 "\"use strict\";\nimport { jsx, jsxs, Fragment } from \"@js/custom/runtime\";\n\n\n",
-                "export function Card(props) {\nreturn jsx(\"p\", {\"data-deka-id\": \"card:Card/i0\", \"children\": props.title});\n}"
+                "export function Card(props) {\nreturn jsx(\"p\", {\"children\": props.title});\n}"
             )
         );
         let errors = compile_to_js_with_options(
@@ -1787,9 +1796,8 @@ const arrow = unsafe { () => User { name: "Bob" } }
     #[test]
     fn compile_jsx_hyphenated_attributes() {
         // dsc#69: hyphenated HTML attribute names must survive into the
-        // emitted props object — the emitter already emits `data-deka-id`,
-        // so the name string flows through untouched once the parser
-        // accepts it.
+        // emitted props object — user-authored `data-*` names flow through
+        // untouched once the parser accepts them.
         let result = compile_to_js(
             "const n = 1; const el = <p data-x=\"1\" aria-label=\"y\" data-count={n - 1}>z</p>;",
             "test.dsx",

@@ -19,21 +19,21 @@ const HEADER: &str =
 #[test]
 fn known_ds_source_position_and_single_child() {
     assert_eq!(dev(include_str!("fixtures/jsx_dev/known.dsx"), "fixtures/known.dsx"), format!(
-        "{HEADER}export function Card() {{\nreturn jsxDEV(\"p\", {{\"data-deka-id\": \"known:Card/i0\", \"children\": \"hello\"}}, undefined, false, {{fileName: \"fixtures/known.dsx\", lineNumber: 3, columnNumber: 10}}, this);\n}}"
+        "{HEADER}export function Card() {{\nreturn jsxDEV(\"p\", {{\"children\": \"hello\"}}, undefined, false, {{fileName: \"fixtures/known.dsx\", lineNumber: 3, columnNumber: 10}}, this);\n}}"
     ));
 }
 
 #[test]
 fn key_is_third_argument_and_multiple_children_are_static() {
     assert_eq!(dev("const view = <p key={7}>{1}{2}</p>;", "multi.dsx"), format!(
-        "{HEADER}const view = jsxDEV(\"p\", {{\"data-deka-id\": \"multi:_/i0\", \"children\": [1, 2]}}, 7, true, {{fileName: \"multi.dsx\", lineNumber: 1, columnNumber: 14}}, this);"
+        "{HEADER}const view = jsxDEV(\"p\", {{\"children\": [1, 2]}}, 7, true, {{fileName: \"multi.dsx\", lineNumber: 1, columnNumber: 14}}, this);"
     ));
 }
 
 #[test]
 fn nested_fragment_and_empty_element_have_individual_spans() {
     assert_eq!(dev("const view = <><p />{2}</>;", "nested.dsx"), format!(
-        "{HEADER}const view = jsxDEV(Fragment, {{\"children\": [jsxDEV(\"p\", {{\"data-deka-id\": \"nested:_/i0/i0\"}}, undefined, false, {{fileName: \"nested.dsx\", lineNumber: 1, columnNumber: 16}}, this), 2]}}, undefined, true, {{fileName: \"nested.dsx\", lineNumber: 1, columnNumber: 14}}, this);"
+        "{HEADER}const view = jsxDEV(Fragment, {{\"children\": [jsxDEV(\"p\", {{}}, undefined, false, {{fileName: \"nested.dsx\", lineNumber: 1, columnNumber: 16}}, this), 2]}}, undefined, true, {{fileName: \"nested.dsx\", lineNumber: 1, columnNumber: 14}}, this);"
     ));
 }
 

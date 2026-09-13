@@ -68,9 +68,12 @@ A bare `Component` annotation on a binding infers its props from the checked
 function. Components evaluate dynamic expressions during render. State and
 hooks require a future amendment.
 
-The only injected prop is `data-deka-id`. `ref` and event handlers pass through
-as ordinary props; omitted optional props stay omitted. JSX spread attributes
-remain unsupported. Event-handler hydration diagnostics still apply.
+`data-deka-id` is injected on host JSX elements only when the compile graph
+hydrates islands: any `client:*` directive, or interactive-component analysis
+firing, anywhere in the graph. Plain components emit props byte-identical to
+hand-written React. `ref` and event handlers pass through as ordinary props;
+omitted optional props stay omitted. JSX spread attributes remain unsupported.
+Event-handler hydration diagnostics still apply.
 
 ## WASM
 

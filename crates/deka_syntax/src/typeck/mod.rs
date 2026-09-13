@@ -658,6 +658,41 @@ fn is_event_handler(attribute: &ast::JsxAttribute<'_>) -> bool {
             .is_some_and(|suffix| suffix.chars().next().is_some_and(char::is_alphabetic))
 }
 
+/// True when any JSX element in this program carries a `client:*` island
+/// directive. `ui/client` walk-and-attach hydrate is the only consumer of
+/// the `data-deka-id` host-element marker, and it only runs for islands.
+pub fn program_has_client_directive(program: &Program<'_>) -> bool {
+    let mut found = false;
+    for stmt in program.statements.iter() {
+        crate::visit::walk_stmt(stmt, &mut |expr| {
+            if let ast::Expr::JsxElement { element, .. } = expr {
+                if element
+                    .attributes
+                    .iter()
+                    .any(|attribute| attribute.name.starts_with("client:"))
+                {
+                    found = true;
+                }
+            }
+        });
+        if found {
+            break;
+        }
+    }
+    found
+}
+
+/// True when this module needs hydration markers on host JSX: a `client:*`
+/// directive is present, or interactive-component analysis identified a
+/// component that requires a hydrated island (including through imports).
+pub fn program_needs_hydration_ids<'a>(
+    program: &'a Program<'a>,
+    imports: &HashMap<&str, &ModuleExports<'a>>,
+) -> bool {
+    program_has_client_directive(program)
+        || !collect_interactive_components(program, imports).is_empty()
+}
+
 /// The kind of a named factory an importer can reach only through a
 /// descriptor fragment (dsc#52). Lets the consumer's checker resolve field
 /// and receiver types that are private to the declaring module.
@@ -5470,6 +5505,30 @@ mod tests {
              const page = <Counter client:load />\n",
         );
         assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn hydration_ids_follow_client_directives_and_interactive_analysis() {
+        let arena = bumpalo::Bump::new();
+        let empty = std::collections::HashMap::new();
+        let plain = parse("fn Card() ReactNode { return <p>hi</p>; }", &arena)
+            .program
+            .unwrap();
+        assert!(!program_has_client_directive(&plain));
+        assert!(!program_needs_hydration_ids(&plain, &empty));
+        let island = parse("const page = <Card client:load />;", &arena)
+            .program
+            .unwrap();
+        assert!(program_has_client_directive(&island));
+        assert!(program_needs_hydration_ids(&island, &empty));
+        let interactive = parse(
+            "fn Counter() ReactNode { return <button onClick={clicked}>0</button>; } fn clicked() {}",
+            &arena,
+        )
+        .program
+        .unwrap();
+        assert!(!program_has_client_directive(&interactive));
+        assert!(program_needs_hydration_ids(&interactive, &empty));
     }
 
     #[test]

@@ -19,7 +19,8 @@ pub use parse::{parse, ParseResult};
 pub use typeck::{
     build_module_build_fragments, check_program, check_program_with_imports,
     collect_exported_interactive_components, collect_interactive_components, collect_module_exports,
-    refresh_module_export_values, EnumInfo, MethodInfo, ModuleExports, StructInfo, TypeError,
+    program_has_client_directive, program_needs_hydration_ids, refresh_module_export_values,
+    EnumInfo, MethodInfo, ModuleExports, StructInfo, TypeError,
 };
 
 pub mod deka_catalog;

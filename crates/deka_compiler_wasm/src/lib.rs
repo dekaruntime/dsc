@@ -263,6 +263,10 @@ pub(crate) struct Diagnostic {
 struct CompileRequestOptions {
     #[serde(rename = "jsxRuntime")]
     jsx_runtime: Option<String>,
+    #[serde(rename = "jsxDevRuntime")]
+    jsx_dev_runtime: Option<String>,
+    #[serde(default)]
+    dev: bool,
     mode: String,
     #[serde(rename = "moduleBase")]
     module_base: Option<String>,
@@ -276,6 +280,8 @@ fn compile_request(source: &str, filename: &str, options_json: &str) -> String {
 
     let compile_options = deka_compile::CompileOptions {
         jsx_runtime: options.jsx_runtime,
+        jsx_dev_runtime: options.jsx_dev_runtime,
+        dev: options.dev,
         foreign_modules: std::collections::HashMap::new(),
         package_name: None,
         module_base: options.module_base,
@@ -565,6 +571,27 @@ mod tests {
                 (lesson, source)
             })
             .collect()
+    }
+
+    #[test]
+    fn wasm_request_dev_options_reach_emission() {
+        for (options, runtime) in [
+            (r#"{"mode":"deka","dev":true}"#, "@js/react/jsx-dev-runtime"),
+            (r#"{"mode":"deka","dev":true,"jsxRuntime":"react/jsx-runtime"}"#, "react/jsx-dev-runtime"),
+            (r#"{"mode":"deka","dev":true,"jsxDevRuntime":"custom/dev"}"#, "custom/dev"),
+        ] {
+            let response: Value = serde_json::from_str(&compile_request(
+                "\nconst view = <p />;", "browser.dsx", options,
+            )).unwrap();
+            assert_eq!(response["ok"], true, "{response}");
+            let js = response["output"]["code"].as_str().unwrap();
+            assert!(js.contains(&format!("from \"{runtime}\";")), "{js}");
+            assert!(js.contains("lineNumber: 2, columnNumber: 14"), "{js}");
+        }
+        let response: Value = serde_json::from_str(&compile_request(
+            "const view = <p />;", "browser.dsx", r#"{"mode":"deka","dev":false}"#,
+        )).unwrap();
+        assert!(!response["output"]["code"].as_str().unwrap().contains("jsxDEV"));
     }
 
     #[test]

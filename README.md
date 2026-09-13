@@ -36,6 +36,25 @@ acquisition is being integrated. Preserved emission and `dsc bundle` use the
 same lowering; the compiler does not embed a React vendor path or provide
 `ui/jsx` / automatic `ui/reactive.live` adapters.
 
+Hosts opt into development emission with `CompileOptions.dev = true` or
+`GraphCompileOptions.dev = true`; WASM compile requests accept `"dev": true`.
+The default remains production. Dev mode imports `jsxDEV` and emits
+`jsxDEV(type, props, key, isStaticChildren, source, this)`, using `undefined`
+when there is no key. `isStaticChildren` is true exactly where production uses
+`jsxs`. The source object contains `fileName` (the supplied DS module path),
+`lineNumber`, and `columnNumber` (one-based positions of the opening `<` in
+`.dsx`, including Fragments).
+
+`jsxDevRuntime` is an independent `deka.json` key, also available as
+`jsx_dev_runtime` in Rust options and `jsxDevRuntime` in WASM requests. An
+explicit option overrides the nearest manifest. If omitted, the dev specifier
+uses the effective `jsxRuntime` base: replace its final slash-delimited segment
+with `jsx-dev-runtime`. Thus `react/jsx-runtime` becomes
+`react/jsx-dev-runtime`, `./runtime.mjs` becomes `./jsx-dev-runtime`, and a
+specifier without a slash becomes `jsx-dev-runtime`. With no overrides the
+default is `@js/react/jsx-dev-runtime`. Set `jsxDevRuntime` explicitly when a
+custom host uses another naming convention. Production ignores this key.
+
 ```deka
 interface Props { title: string }
 fn Card(props: Props) ReactNode { return <p>{props.title}</p>; }

@@ -256,6 +256,10 @@ impl ModuleLoader for FsModuleLoader {
 pub struct GraphCompileOptions {
     /// React automatic runtime override for virtual hosts. Disk projects use deka.json.
     pub jsx_runtime: Option<String>,
+    /// Independent React development runtime override.
+    pub jsx_dev_runtime: Option<String>,
+    /// Emit jsxDEV with each module's DS source locations.
+    pub dev: bool,
     /// When true, any import-graph path to `ui/server` is a compile error.
     pub client: bool,
     /// Base URL for bare stdlib module specifiers. When set, known stdlib
@@ -976,6 +980,8 @@ pub fn compile_module_graph_with_options(
         let compile_options = CompileOptions {
             foreign_modules,
             jsx_runtime: options.jsx_runtime.clone(),
+            jsx_dev_runtime: options.jsx_dev_runtime.clone(),
+            dev: options.dev,
             package_name: loader.package_name(&path),
             used_exports: plan.live.get(&path).cloned().flatten(),
             client: options.client,
@@ -1343,6 +1349,29 @@ mod tests {
     }
 
     #[test]
+    fn graph_dev_mode_preserves_each_modules_source_location() {
+        let entry = PathBuf::from("/project/page.dsx");
+        let component = PathBuf::from("/project/card.dsx");
+        let loader = InMemoryLoader {
+            files: HashMap::from([
+                (component.clone(), "export fn Card() ReactNode { return <p />; }".into()),
+                (entry.clone(), "import { Card } from \"./card.dsx\";\nexport const page = <Card />;".into()),
+            ]),
+            aliases: HashMap::from([((entry.clone(), "./card.dsx".into()), component.clone())]),
+        };
+        let graph = compile_module_graph_with_options(&entry, &loader, GraphCompileOptions {
+            dev: true,
+            jsx_dev_runtime: Some("custom/dev".into()),
+            ..Default::default()
+        }).unwrap();
+        for (path, line, column) in [(&entry, 2, 21), (&component, 1, 37)] {
+            let js = &graph.modules[path];
+            assert!(js.contains("from \"custom/dev\";"), "{js}");
+            assert!(js.contains(&format!("fileName: \"{}\", lineNumber: {line}, columnNumber: {column}", path.display())), "{js}");
+        }
+    }
+
+    #[test]
     fn graph_compiles_relative_imports() {
         let root = PathBuf::from("/project");
         let math = root.join("math.ds");
@@ -1670,6 +1699,7 @@ mod tests {
                 module_base: Some("https://hats.dump.invalid/modules".to_string()),
                 module_root: None,
                 jsx_runtime: None,
+                ..Default::default()
             },
         )
         .expect("virtual stdlib imports remain available pending dsc#129");

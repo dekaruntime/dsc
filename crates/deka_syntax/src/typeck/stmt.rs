@@ -5,8 +5,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast;
 
-use super::Checker;
 use super::types::Type;
+use super::Checker;
 
 /// Receiver type parameters — `(name, declared bound)` — with the struct's
 /// declared bounds inherited at positions the receiver leaves unbounded:
@@ -32,10 +32,7 @@ impl<'a> Checker<'a> {
     /// Push a type-parameter scope from `(name, bound)` pairs — the shape
     /// produced by [`effective_receiver_params`], where the bound may be
     /// inherited from the struct declaration rather than a `TypeParam` node.
-    pub(super) fn push_receiver_params(
-        &mut self,
-        params: &[(&'a str, Option<&'a ast::Type<'a>>)],
-    ) {
+    pub(super) fn push_receiver_params(&mut self, params: &[(&'a str, Option<&'a ast::Type<'a>>)]) {
         let mut scope = HashMap::new();
         let mut bounds = HashMap::new();
         for &(name, bound) in params {
@@ -410,6 +407,12 @@ impl<'a> Checker<'a> {
 
     /// Eagerly resolve interface member types so that unknown types and other
     /// annotation errors are reported even when the interface is not used.
+    ///
+    /// Local declarations are interned under their member-slice identity so
+    /// later assignability can compare them with imported payloads of the
+    /// same origin-resolved shape (dsc#206). Imported interfaces already in
+    /// `interface_members` stay origin-resolved — never re-checked against
+    /// this module's aliases (dsc#186).
     fn validate_interface_declarations(&mut self) {
         let interfaces: Vec<_> = self
             .interfaces
@@ -417,6 +420,10 @@ impl<'a> Checker<'a> {
             .map(|(n, i)| (*n, i.clone()))
             .collect();
         for (name, info) in interfaces {
+            let identity = info.members.as_ptr() as usize;
+            if self.interface_members.contains_key(&identity) {
+                continue;
+            }
             if info.members.is_empty() {
                 self.error_span(
                     info.span,
@@ -429,9 +436,16 @@ impl<'a> Checker<'a> {
             // resolves `value` to `T` here. Use-site instantiation of a
             // generic interface is not part of phase 1.
             self.push_type_params(info.type_params);
+            let mut fields = Vec::new();
             for member in info.members.iter() {
                 match member {
-                    ast::InterfaceMember::Field { ty, span, .. } => {
+                    ast::InterfaceMember::Field {
+                        name: field,
+                        ty,
+                        optional,
+                        span,
+                        ..
+                    } => {
                         let resolved = self.resolve_ast_type(ty);
                         if resolved.is_error() {
                             // Error already reported by resolve_ast_type.
@@ -443,25 +457,52 @@ impl<'a> Checker<'a> {
                                 "interface fields may not have function types; use a method instead",
                             );
                         }
+                        let field_ty = if *optional {
+                            Type::Option {
+                                inner: Box::new(resolved),
+                            }
+                        } else {
+                            resolved
+                        };
+                        fields.push((*field, field_ty));
                     }
                     ast::InterfaceMember::Method {
+                        name: method,
                         params,
                         return_type,
-                        span,
                         ..
                     } => {
-                        for param in params.iter() {
-                            if let Some(ty) = param.ty.as_ref() {
-                                self.resolve_ast_type(ty);
-                            }
-                        }
-                        if let Some(ty) = return_type.as_ref() {
-                            self.resolve_ast_type(ty);
-                        }
+                        let param_types: Vec<Type<'a>> = params
+                            .iter()
+                            .map(|p| {
+                                p.ty.as_ref()
+                                    .map(|t| self.resolve_ast_type(t))
+                                    .unwrap_or(Type::Infer)
+                            })
+                            .collect();
+                        let ret = return_type
+                            .as_ref()
+                            .map(|t| self.resolve_ast_type(t))
+                            .unwrap_or(Type::Named { name: "void" });
+                        fields.push((
+                            *method,
+                            Type::Function {
+                                params: param_types,
+                                ret: Box::new(ret),
+                                optional: 0,
+                            },
+                        ));
                     }
                 }
             }
             self.pop_type_params();
+            self.interface_members.insert(
+                identity,
+                super::ExportedInterface {
+                    info,
+                    members: fields,
+                },
+            );
         }
     }
 
@@ -948,10 +989,17 @@ impl<'a> Checker<'a> {
                 continue;
             }
             let (name, ty, value, mutable) = match stmt {
-                ast::Stmt::Const { name, ty, value, .. } => (*name, ty.as_ref(), Some(value), false),
-                ast::Stmt::Let { name, ty, value, .. } => (*name, ty.as_ref(), Some(value), true),
+                ast::Stmt::Const {
+                    name, ty, value, ..
+                } => (*name, ty.as_ref(), Some(value), false),
+                ast::Stmt::Let {
+                    name, ty, value, ..
+                } => (*name, ty.as_ref(), Some(value), true),
                 ast::Stmt::Export {
-                    decl: ast::ExportDecl::Const { name, ty, value, .. },
+                    decl:
+                        ast::ExportDecl::Const {
+                            name, ty, value, ..
+                        },
                     ..
                 } => (*name, ty.as_ref(), Some(value), false),
                 _ => continue,
@@ -1602,7 +1650,8 @@ impl<'a> Checker<'a> {
             return self.check_dev_binding(name, ty, body, mutable, value, span);
         }
         let expected = ty.map(|t| self.resolve_ast_type(t));
-        let value_type = self.check_exception_use(value, super::exceptions::Use::Value, expected.clone());
+        let value_type =
+            self.check_exception_use(value, super::exceptions::Use::Value, expected.clone());
         let final_type = if let Some(expected) = expected {
             if let Type::Option { inner } = &expected {
                 // Explicit `Option<T>` bindings must be initialized with
@@ -1632,8 +1681,17 @@ impl<'a> Checker<'a> {
             if let (Type::Named { name: "Component" }, Type::Function { params, .. }) =
                 (&expected, &value_type.unhook())
             {
-                if params.len() == 1 { Type::Generic { base: "Component", args: params.clone() } } else { expected }
-            } else { expected }
+                if params.len() == 1 {
+                    Type::Generic {
+                        base: "Component",
+                        args: params.clone(),
+                    }
+                } else {
+                    expected
+                }
+            } else {
+                expected
+            }
         } else {
             value_type
         };
@@ -2070,10 +2128,7 @@ impl<'a> Checker<'a> {
                 };
                 Type::Generic {
                     base: receiver_type,
-                    args: names
-                        .into_iter()
-                        .map(|name| Type::Param { name })
-                        .collect(),
+                    args: names.into_iter().map(|name| Type::Param { name }).collect(),
                 }
             }
         } else {

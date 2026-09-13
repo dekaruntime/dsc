@@ -146,6 +146,14 @@ import the type merely to inspect a returned value. Direct `export interface`
 syntax is a separate gap (dsc#185). No corpus/tour pairing patch is required:
 the unchanged corpus-v0.51.1 and pinned 90-lesson tour pass.
 
+Summon fn types that mention a local interface intern that declaration's
+identity before bodies are checked (dsc#206). Local interfaces therefore
+compare with imported payloads through origin-resolved members rather than
+falling off the interface-to-interface path. Same-shape satisfaction stays
+structural; identity stays the declaring member slice, so two incompatible
+`Url` declarations in different modules still fail even though both print as
+`Url`.
+
 ## Native tuples (rfd#66)
 
 `cargo test --locked -p deka_syntax -p deka_emit -p deka_compile -p deka-fmt tuples_`

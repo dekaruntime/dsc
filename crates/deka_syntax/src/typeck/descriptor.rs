@@ -291,7 +291,7 @@ impl<'a> Checker<'a> {
                  `unsafe` or otherwise unknown to the compiler"
                     .to_string(),
             ),
-            Type::Interface { name } => Ok(DescriptorTree::Interface { name }),
+            Type::Interface { name, .. } => Ok(DescriptorTree::Interface { name }),
             Type::Object { .. } => Err(format!(
                 "cannot describe type `{ty}` at this `super` call site"
             )),

@@ -1,0 +1,5 @@
+interface Claims { sub?: string }
+summon { parse(json: string): Exception<Claims, JsError> } from "./parse.mjs"
+export fn claims() {
+  return match (parse("{\"sub\":\"alice\"}")) { Ok(c) => Ok(c), Throw(e) => Err("bad JSON") }
+}

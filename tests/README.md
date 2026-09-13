@@ -99,3 +99,19 @@ JSON still encodes None in its tagged Option envelope.
 The pinned corpus has one intentional old rejection to migrate. Its prepared
 owner patch and landing dependency are in
 [migrations/option-struct-defaults/README.md](migrations/option-struct-defaults/README.md).
+
+## Imported interface payloads (dsc#184)
+
+`crates/deka_compile/tests/fixtures/claims_cross_module/` preserves the
+multi-module deka#913 JWT blocker and its single-module control.
+`cargo test --locked -p deka_compile --test cross_module_interfaces` checks the
+filesystem graphs and runs emitted ES modules with Node.js, including explicit
+Result and inferred summoned Exception payloads. See the fixture README for
+additional positive and negative coverage.
+
+Interface member types travel with signatures as private metadata resolved in
+the declaring module. `export { Claims }` additionally makes the erased type
+binding importable, including through aliases and barrels; callers need not
+import the type merely to inspect a returned value. Direct `export interface`
+syntax is a separate gap (dsc#185). No corpus/tour pairing patch is required:
+the unchanged corpus-v0.51.1 and pinned 90-lesson tour pass.

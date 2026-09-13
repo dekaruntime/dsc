@@ -208,6 +208,11 @@ fn export_type_ast_refs<'a>(
 /// typechecker of its importers.
 #[derive(Clone, Debug)]
 pub struct ModuleExports<'a> {
+    /// Explicitly exported, erased interface type bindings.
+    pub interfaces: HashMap<&'a str, InterfaceInfo<'a>>,
+    /// Members resolved in the declaring module, keyed by declaration identity.
+    /// Private signature payloads are reachable here but are not importable.
+    pub interface_members: HashMap<usize, ExportedInterface<'a>>,
     pub structs: HashMap<&'a str, StructInfo<'a>>,
     /// Compiler-private transitive struct metadata. The outer key is an
     /// exported struct name or a private struct named by an exported value;
@@ -248,6 +253,8 @@ pub struct ModuleExports<'a> {
 impl<'a> Default for ModuleExports<'a> {
     fn default() -> Self {
         Self {
+            interfaces: HashMap::new(),
+            interface_members: HashMap::new(),
             structs: HashMap::new(),
             promotion_structs: HashMap::new(),
             enums: HashMap::new(),
@@ -871,7 +878,74 @@ pub fn refresh_module_export_values<'a>(
     imports: &HashMap<&str, &ModuleExports<'a>>,
     exports: &mut ModuleExports<'a>,
 ) {
-    let inferred_values = infer_module_value_types(program, imports);
+    let mut checker = Checker::new(program, imports);
+    checker.infer_only = true;
+    checker.check_program();
+    let mut inferred_values = checker.globals.clone();
+    inferred_values.extend(checker.scopes.first().cloned().unwrap_or_default());
+    // Resolve members before leaving the defining namespace. This preserves
+    // aliases, nested/recursive interfaces, and same-spelled foreign types.
+    let declarations: Vec<_> = checker
+        .interfaces
+        .iter()
+        .map(|(name, info)| (*name, info.clone()))
+        .collect();
+    for (name, info) in declarations {
+        let identity = info.members.as_ptr() as usize;
+        if checker.interface_members.contains_key(&identity) {
+            continue;
+        }
+        let fields = info
+            .members
+            .iter()
+            .filter_map(|member| {
+                let field = match member {
+                    ast::InterfaceMember::Field { name, .. }
+                    | ast::InterfaceMember::Method { name, .. } => *name,
+                };
+                checker
+                    .resolve_interface_field(name, field)
+                    .map(|ty| (field, ty))
+            })
+            .collect();
+        checker.interface_members.insert(
+            identity,
+            ExportedInterface {
+                info,
+                members: fields,
+            },
+        );
+    }
+    exports
+        .interface_members
+        .extend(checker.interface_members.clone());
+    // Refresh functions too: their inferred returns may depend on imports.
+    for stmt in program.statements.iter() {
+        let names: Vec<_> = match stmt {
+            ast::Stmt::Export {
+                decl: ast::ExportDecl::Function { name, .. },
+                ..
+            } => vec![(*name, *name)],
+            ast::Stmt::Export {
+                decl:
+                    ast::ExportDecl::NamedGroup {
+                        names,
+                        source: None,
+                    },
+                ..
+            } => names
+                .iter()
+                .map(|n| (n.name, n.alias.unwrap_or(n.name)))
+                .collect(),
+            _ => Vec::new(),
+        };
+        for (local, external) in names {
+            if let Some(inferred @ Type::Function { .. }) = inferred_values.get(local) {
+                exports.values.insert(external, inferred.clone());
+            }
+        }
+    }
+
     let declared_structs: HashMap<&str, StructInfo<'a>> = program
         .statements
         .iter()
@@ -1471,6 +1545,27 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
                     let local = export_name.name;
                     let external = export_name.alias.unwrap_or(local);
 
+                    if let Some((members, type_params, span)) =
+                        program.statements.iter().find_map(|stmt| match stmt {
+                            ast::Stmt::Interface {
+                                name,
+                                members,
+                                type_params,
+                                span,
+                                ..
+                            } if *name == local => Some((*members, *type_params, *span)),
+                            _ => None,
+                        })
+                    {
+                        exports.interfaces.insert(
+                            external,
+                            InterfaceInfo {
+                                members,
+                                type_params,
+                                span,
+                            },
+                        );
+                    }
                     if let Some(info) = declared_structs.get(local) {
                         exports.structs.insert(external, info.clone());
                         let mut closure = HashMap::new();
@@ -1525,7 +1620,8 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
                     // must be a re-export of an import (`export { value }`
                     // after `import { value } from "..."`). Record it so
                     // importers can resolve through the chain.
-                    if !declared_structs.contains_key(local)
+                    if !exports.interfaces.contains_key(external)
+                        && !declared_structs.contains_key(local)
                         && !declared_enums.contains_key(local)
                         && !declared_aliases.contains_key(local)
                         && !declared_newtypes.contains_key(local)
@@ -1613,6 +1709,13 @@ pub struct MethodInfo<'a> {
     pub resolved_return: Option<Type<'a>>,
 }
 
+/// Compiler-private interface definition with types resolved at its origin.
+#[derive(Clone, Debug)]
+pub struct ExportedInterface<'a> {
+    pub info: InterfaceInfo<'a>,
+    pub members: Vec<(&'a str, Type<'a>)>,
+}
+
 /// Information about an interface's declared members.
 #[derive(Clone, Debug)]
 pub struct InterfaceInfo<'a> {
@@ -1656,6 +1759,8 @@ struct Checker<'a> {
     promotion_structs: HashMap<&'a str, HashMap<&'a str, StructInfo<'a>>>,
     /// User-defined interfaces.
     interfaces: HashMap<&'a str, InterfaceInfo<'a>>,
+    interface_members: HashMap<usize, ExportedInterface<'a>>,
+    interface_comparisons: HashSet<(usize, usize)>,
     /// User-defined newtypes.
     opaques: HashMap<&'a str, Type<'a>>,
     newtypes: HashMap<&'a str, NewtypeInfo>,
@@ -1782,6 +1887,8 @@ impl<'a> Checker<'a> {
             structs: HashMap::new(),
             promotion_structs: HashMap::new(),
             interfaces: HashMap::new(),
+            interface_members: HashMap::new(),
+            interface_comparisons: HashSet::new(),
             opaques: HashMap::new(),
             newtypes: HashMap::new(),
             receiver_methods: HashMap::new(),
@@ -1858,6 +1965,8 @@ impl<'a> Checker<'a> {
                 }
                 continue;
             };
+            self.interface_members
+                .extend(exports.interface_members.clone());
             // Private factories named by the dependency's fragments are
             // type-visible here for build hydration purposes (dsc#52), and so
             // are the receiver methods declared on them.
@@ -1884,6 +1993,9 @@ impl<'a> Checker<'a> {
                 let imported = spec.imported;
                 let local = spec.local;
 
+                if let Some(info) = exports.interfaces.get(imported) {
+                    self.interfaces.insert(local, info.clone());
+                }
                 if let Some(info) = exports.structs.get(imported) {
                     self.structs.insert(local, info.clone());
                     if let Some(closure) = exports.promotion_structs.get(imported) {
@@ -1953,7 +2065,8 @@ impl<'a> Checker<'a> {
                     self.build_fragments.insert(local, tree);
                 }
 
-                let known = exports.values.contains_key(imported)
+                let known = exports.interfaces.contains_key(imported)
+                    || exports.values.contains_key(imported)
                     || exports.structs.contains_key(imported)
                     || exports.enums.contains_key(imported)
                     || exports.aliases.contains_key(imported)
@@ -2167,6 +2280,13 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        if let (Type::Interface { identity: a, .. }, Type::Interface { identity: b, .. }) =
+            (expected, actual)
+        {
+            if a == b {
+                return true;
+            }
+        }
         if expected == actual {
             return true;
         }
@@ -2302,9 +2422,73 @@ impl<'a> Checker<'a> {
                     && self.is_assignable(expected_ret, actual_ret);
             }
         }
+        // Imported members are already resolved in their defining namespace.
+        // Never re-resolve their AST against a consumer's aliases/interfaces.
+        if let Type::Interface { identity, .. } = expected {
+            if let Some(members) = self.interface_members.get(identity).cloned() {
+                // Recursive interfaces are compared coinductively. Keep this
+                // guard only for the active comparison, not as a result cache.
+                let pair = if let Type::Interface {
+                    identity: actual_id,
+                    ..
+                } = actual
+                {
+                    let pair = (*identity, *actual_id);
+                    if !self.interface_comparisons.insert(pair) {
+                        return true;
+                    }
+                    Some(pair)
+                } else {
+                    None
+                };
+                let compatible = members.members.iter().all(|(field, expected_ty)| {
+                    let actual_ty = match actual {
+                        Type::Object { fields } => fields
+                            .iter()
+                            .find(|(n, _)| n == field)
+                            .map(|(_, ty)| ty.clone()),
+                        Type::Interface { name, identity } => {
+                            if let Some(fields) = self.interface_members.get(identity) {
+                                fields
+                                    .members
+                                    .iter()
+                                    .find(|(n, _)| n == field)
+                                    .map(|(_, ty)| ty.clone())
+                            } else {
+                                self.resolve_interface_field(name, field)
+                            }
+                        }
+                        Type::Struct { name } => {
+                            self.resolve_field_type(name, field).or_else(|| {
+                                self.collect_struct_methods(name)
+                                    .into_iter()
+                                    .find(|(method, _)| method == field)
+                                    .map(|(_, info)| Type::Function {
+                                        params: info.param_types,
+                                        ret: Box::new(
+                                            info.resolved_return
+                                                .unwrap_or(Type::Named { name: "void" }),
+                                        ),
+                                        optional: 0,
+                                    })
+                            })
+                        }
+                        _ => return false,
+                    };
+                    match actual_ty {
+                        Some(actual_ty) => self.is_assignable(expected_ty, &actual_ty),
+                        None => matches!(expected_ty, Type::Option { .. }),
+                    }
+                });
+                if let Some(pair) = pair {
+                    self.interface_comparisons.remove(&pair);
+                }
+                return compatible;
+            }
+        }
         // Interface satisfaction: structs and objects must supply every
         // required field and method with a compatible type.
-        if let Type::Interface { name } = expected {
+        if let Type::Interface { name, .. } = expected {
             let members: Vec<ast::InterfaceMember<'a>> = self
                 .interfaces
                 .get(name)

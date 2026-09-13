@@ -1,0 +1,6 @@
+interface Claims {
+  sub?: string
+}
+export fn claims() Result<Claims, string> {
+  return Ok({ sub: Some("alice") })
+}

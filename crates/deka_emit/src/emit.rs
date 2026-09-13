@@ -1283,7 +1283,8 @@ struct Emitter<'a> {
     promotion_structs: HashMap<String, HashMap<String, StructMeta>>,
     enums: HashMap<String, EnumMeta>,
     opaques: HashSet<String>,
-    opaque_exports: HashMap<String, HashSet<String>>,
+    interfaces: HashSet<String>,
+    erased_type_exports: HashMap<String, HashSet<String>>,
     newtypes: HashMap<String, NewtypeRepr>,
     receiver_methods: HashMap<String, Vec<ReceiverMethod<'a>>>,
     /// Base URL for rewriting bare import specifiers.
@@ -1390,7 +1391,8 @@ impl<'a> Emitter<'a> {
             promotion_structs: HashMap::new(),
             enums: HashMap::new(),
             opaques: HashSet::new(),
-            opaque_exports: HashMap::new(),
+            interfaces: HashSet::new(),
+            erased_type_exports: HashMap::new(),
             newtypes: HashMap::new(),
             receiver_methods: HashMap::new(),
             module_base: None,
@@ -1766,10 +1768,17 @@ impl<'a> Emitter<'a> {
         live
     }
 
-    fn is_opaque_export(&self, name: &str, source: Option<&str>) -> bool {
+    fn is_erased_binding(&self, name: &str) -> bool {
+        self.opaques.contains(name) || self.interfaces.contains(name)
+    }
+
+    fn is_erased_export(&self, name: &str, source: Option<&str>) -> bool {
         match source {
-            Some(source) => self.opaque_exports.get(source).is_some_and(|names| names.contains(name)),
-            None => self.opaques.contains(name),
+            Some(source) => self
+                .erased_type_exports
+                .get(source)
+                .is_some_and(|names| names.contains(name)),
+            None => self.is_erased_binding(name),
         }
     }
 
@@ -1823,7 +1832,7 @@ impl<'a> Emitter<'a> {
             Stmt::Import { specifiers, .. } => {
                 specifiers.is_empty()
                     || specifiers.iter().any(|spec| {
-                        !self.opaques.contains(spec.local)
+                        !self.is_erased_binding(spec.local)
                             && (self.is_live(spec.local) || self.is_build_factory_import(spec))
                     })
             }
@@ -1832,7 +1841,7 @@ impl<'a> Emitter<'a> {
                     self.is_live(name)
                 }
                 ExportDecl::NamedGroup { names, .. } => names.iter().any(|n| {
-                    !self.opaques.contains(n.name)
+                    !self.is_erased_binding(n.name)
                         && (self.is_live(n.alias.unwrap_or(n.name)) || self.is_live(n.name))
                 }),
             },
@@ -2064,6 +2073,9 @@ impl<'a> Emitter<'a> {
                 Stmt::Opaque { name, .. } => {
                     self.opaques.insert(name.to_string());
                 }
+                Stmt::Interface { name, .. } => {
+                    self.interfaces.insert(name.to_string());
+                }
                 Stmt::Newtype { name, repr, .. } => {
                     self.newtypes.insert(name.to_string(), *repr);
                     self.uses_newtype = true;
@@ -2106,7 +2118,15 @@ impl<'a> Emitter<'a> {
 
     fn seed_imports(&mut self, imports: &HashMap<&str, &deka_syntax::ModuleExports<'a>>) {
         for (source, exports) in imports.iter() {
-            self.opaque_exports.insert((*source).to_string(), exports.opaques.keys().map(|name| name.to_string()).collect());
+            self.erased_type_exports.insert(
+                (*source).to_string(),
+                exports
+                    .opaques
+                    .keys()
+                    .chain(exports.interfaces.keys())
+                    .map(|name| name.to_string())
+                    .collect(),
+            );
             // A dependency's descriptor fragments name factories in the
             // dependency's own namespace; their union is the closure its
             // compiler-private `__deka_factories` export provides (dsc#52).
@@ -2172,6 +2192,9 @@ impl<'a> Emitter<'a> {
             }
             if exports.opaques.contains_key(imported) {
                 self.opaques.insert(local.to_string());
+            }
+            if exports.interfaces.contains_key(imported) {
+                self.interfaces.insert(local.to_string());
             }
             if let Some(info) = exports.newtypes.get(imported) {
                 if !self.newtypes.contains_key(local) {
@@ -2528,7 +2551,7 @@ impl<'a> Emitter<'a> {
                 continue;
             }
             for spec in specifiers.iter() {
-                if !self.opaques.contains(spec.local)
+                if !self.is_erased_binding(spec.local)
                     && (self.is_live(spec.local) || self.is_build_factory_import(spec))
                 {
                     names.insert(spec.local);
@@ -2896,7 +2919,7 @@ impl<'a> Emitter<'a> {
             }
             Stmt::Export { decl, .. } => {
                 if let ExportDecl::NamedGroup { names, source } = decl {
-                    if names.iter().all(|n| self.is_opaque_export(n.name, *source)) {
+                    if names.iter().all(|n| self.is_erased_export(n.name, *source)) {
                         return Ok(());
                     }
                 }
@@ -2948,7 +2971,7 @@ impl<'a> Emitter<'a> {
                         let kept: Vec<_> = names
                             .iter()
                             .filter(|n| {
-                                !self.is_opaque_export(n.name, *source)
+                                !self.is_erased_export(n.name, *source)
                                     && (self.is_live(n.alias.unwrap_or(n.name))
                                         || self.is_live(n.name))
                             })
@@ -2993,7 +3016,7 @@ impl<'a> Emitter<'a> {
                     let kept: Vec<_> = specifiers
                         .iter()
                         .filter(|spec| {
-                            !self.opaques.contains(spec.local)
+                            !self.is_erased_binding(spec.local)
                                 && (self.is_live(spec.local) || self.is_build_factory_import(spec))
                         })
                         .collect();
@@ -3018,7 +3041,7 @@ impl<'a> Emitter<'a> {
                     let kept: Vec<_> = specifiers
                         .iter()
                         .filter(|spec| {
-                            !self.opaques.contains(spec.local)
+                            !self.is_erased_binding(spec.local)
                                 && (self.is_live(spec.local) || self.is_build_factory_import(spec))
                         })
                         .collect();
@@ -4896,7 +4919,8 @@ impl<'a> Emitter<'a> {
                     promotion_structs: HashMap::new(),
                     enums: HashMap::new(),
                     opaques: HashSet::new(),
-            opaque_exports: HashMap::new(),
+                    interfaces: HashSet::new(),
+                    erased_type_exports: HashMap::new(),
                     newtypes: HashMap::new(),
                     receiver_methods: HashMap::new(),
                     module_base: self.module_base.clone(),

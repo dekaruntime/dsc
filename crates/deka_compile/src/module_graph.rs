@@ -535,6 +535,9 @@ pub fn compile_module_graph_with_options(
             continue;
         };
         let module = modules.get(path).expect("module in graph");
+        // A forwarding function can call through a barrel. Resolve that
+        // barrel's public types/values before inferring its importers.
+        resolve_module_re_exports(module, program, &mut exports);
         let inferred = crate::infer_stdlib_imports_for_source(&module.source, &arena);
         // Keep independent snapshots while updating this module's export map.
         let dependency_exports: Vec<(&str, deka_syntax::ModuleExports)> = module
@@ -625,54 +628,7 @@ pub fn compile_module_graph_with_options(
             let Some(program) = programs.get(&module.path) else {
                 continue;
             };
-            let mut imports_by_local: HashMap<&str, (&str, &PathBuf)> = HashMap::new();
-            for stmt in program.statements.iter() {
-                if let deka_syntax::Stmt::Import {
-                    specifiers, source, ..
-                } = stmt
-                {
-                    if let Some(dep) = module.dependencies.get(*source) {
-                        for spec in specifiers.iter() {
-                            imports_by_local.insert(spec.local, (spec.imported, dep));
-                        }
-                    }
-                }
-            }
-            let export_specs: Vec<(&str, &str, Option<&str>)> = program
-                .statements
-                .iter()
-                .filter_map(|stmt| match stmt {
-                    deka_syntax::Stmt::Export {
-                        decl: deka_syntax::ExportDecl::NamedGroup { names, source },
-                        ..
-                    } => Some(
-                        names
-                            .iter()
-                            .map(move |n| (n.name, n.alias.unwrap_or(n.name), *source))
-                            .collect::<Vec<_>>(),
-                    ),
-                    _ => None,
-                })
-                .flatten()
-                .collect();
-            for (local, external, explicit_source) in export_specs {
-                let (imported, dep) = if let Some(source) = explicit_source {
-                    let Some(dep) = module.dependencies.get(source) else {
-                        continue;
-                    };
-                    (local, dep)
-                } else {
-                    let Some((imported, dep)) = imports_by_local.get(local).copied() else {
-                        continue;
-                    };
-                    (imported, dep)
-                };
-                let Some(dep_exports) = exports.get(dep).cloned() else {
-                    continue;
-                };
-                changed |=
-                    copy_export(&mut exports, &module.path, &dep_exports, imported, external);
-            }
+            changed |= resolve_module_re_exports(module, program, &mut exports);
         }
         if !changed {
             break;
@@ -726,7 +682,8 @@ pub fn compile_module_graph_with_options(
                 continue;
             };
             for spec in specifiers.iter() {
-                let known = dep_exports.values.contains_key(spec.imported)
+                let known = dep_exports.interfaces.contains_key(spec.imported)
+                    || dep_exports.values.contains_key(spec.imported)
                     || dep_exports.structs.contains_key(spec.imported)
                     || dep_exports.enums.contains_key(spec.imported)
                     || dep_exports.aliases.contains_key(spec.imported)
@@ -1101,6 +1058,62 @@ pub fn compile_module_graph_with_options(
     })
 }
 
+fn resolve_module_re_exports<'a>(
+    module: &GraphModule,
+    program: &'a deka_syntax::Program<'a>,
+    exports: &mut HashMap<PathBuf, deka_syntax::ModuleExports<'a>>,
+) -> bool {
+    let mut changed = false;
+    let mut imports_by_local: HashMap<&str, (&str, &PathBuf)> = HashMap::new();
+    for stmt in program.statements.iter() {
+        if let deka_syntax::Stmt::Import {
+            specifiers, source, ..
+        } = stmt
+        {
+            if let Some(dep) = module.dependencies.get(*source) {
+                for spec in specifiers.iter() {
+                    imports_by_local.insert(spec.local, (spec.imported, dep));
+                }
+            }
+        }
+    }
+    let export_specs: Vec<(&str, &str, Option<&str>)> = program
+        .statements
+        .iter()
+        .filter_map(|stmt| match stmt {
+            deka_syntax::Stmt::Export {
+                decl: deka_syntax::ExportDecl::NamedGroup { names, source },
+                ..
+            } => Some(
+                names
+                    .iter()
+                    .map(move |n| (n.name, n.alias.unwrap_or(n.name), *source))
+                    .collect::<Vec<_>>(),
+            ),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    for (local, external, explicit_source) in export_specs {
+        let (imported, dep) = if let Some(source) = explicit_source {
+            let Some(dep) = module.dependencies.get(source) else {
+                continue;
+            };
+            (local, dep)
+        } else {
+            let Some((imported, dep)) = imports_by_local.get(local).copied() else {
+                continue;
+            };
+            (imported, dep)
+        };
+        let Some(dep_exports) = exports.get(dep).cloned() else {
+            continue;
+        };
+        changed |= copy_export(exports, &module.path, &dep_exports, imported, external);
+    }
+    changed
+}
+
 fn copy_export<'a>(
     exports: &mut HashMap<PathBuf, deka_syntax::ModuleExports<'a>>,
     target: &Path,
@@ -1112,6 +1125,15 @@ fn copy_export<'a>(
         return false;
     };
     let mut changed = false;
+    for (identity, members) in &source.interface_members {
+        changed |= dest
+            .interface_members
+            .insert(*identity, members.clone())
+            .is_none();
+    }
+    if let Some(info) = source.interfaces.get(imported) {
+        changed |= dest.interfaces.insert(external, info.clone()).is_none();
+    }
     if let Some(value) = source.values.get(imported) {
         changed |= dest.values.insert(external, value.clone()) != Some(value.clone());
         // dsc#119 values can name a private struct. These are the same

@@ -53,8 +53,10 @@ pub enum Type<'a> {
     Array { elem: Box<Type<'a>> },
     /// An object record type with known fields.
     Object { fields: Vec<(&'a str, Type<'a>)> },
-    /// A declared interface type.
-    Interface { name: &'a str },
+    /// A declared interface type. Identity is its member slice in the shared
+    /// AST arena; it selects origin-resolved metadata across module boundaries.
+    /// Satisfaction remains structural rather than nominal.
+    Interface { name: &'a str, identity: usize },
     /// A boxed newtype over a primitive representation.
     Newtype {
         name: &'a str,
@@ -290,7 +292,7 @@ impl fmt::Display for Type<'_> {
                 }
                 write!(f, "}}")
             }
-            Type::Interface { name } => write!(f, "{name}"),
+            Type::Interface { name, .. } => write!(f, "{name}"),
             Type::Newtype { name, .. } | Type::Opaque { name, .. } => write!(f, "{name}"),
             Type::Param { name } => write!(f, "{name}"),
             Type::Union { members } => {

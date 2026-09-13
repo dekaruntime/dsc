@@ -21,6 +21,10 @@ Commands (`check`, `transpile`, `fmt`, `lsp`, `summon`) are registered in `crate
 - `dsc check --as-package <dir>` typechecks a local package through a scratch consumer + `.deka/links.json`. Registry install stays on `deka`.
 - `dsc summon infer <module.mjs>` scaffolds a DRAFT summon block from a vendored module (`--out` writes a file). Review before committing; see [SUMMON.md](SUMMON.md).
 
+## WASM
+
+A deka subset of features, this dsc compiler, and the deka lsp are compiled to WASM and made available open source via [web-ide-kit](https://github.com/dekaruntime/web-ide-kit).
+
 ## Development
 
 Same as [`deka`](https://github.com/dekaruntime/deka): **PR → merge commit → tag**. Do not push to `main`. See [CONTRIBUTING.md](CONTRIBUTING.md).

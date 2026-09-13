@@ -2576,11 +2576,9 @@ impl<'a> Emitter<'a> {
                 continue;
             }
             deka_syntax::visit::walk_stmt(stmt, &mut |expr| {
-                if let Expr::Call {
-                    callee: Expr::Identifier { name, .. },
-                    ..
-                } = expr
-                {
+                // Resolved references, not call-site text: `const f = useState`
+                // must emit the import even when the call is `f(0)`.
+                if let Expr::Identifier { name, .. } = expr {
                     match *name {
                         "useState" if !self.user_imported("useState") => saw_state = true,
                         "useRef" if !self.user_imported("useRef") => saw_ref = true,

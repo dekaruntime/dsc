@@ -64,13 +64,119 @@ fn plain_function_calling_hook_rejected() {
 
 #[test]
 fn hook_fn_called_from_plain_fn_rejected() {
+    // Transitive coloring: `add` becomes hook-typed because it calls a hook
+    // function. The diagnostic fires at the plain (module-level) call site.
     assert_teaches(
         "fn useCounter() [number, Setter<number>] { return useState(0) }\n\
          fn add(a: number, b: number) number {\n\
            const [count, setCount] = useCounter()\n\
            return a + b\n\
-         }",
+         }\n\
+         add(1, 2)",
         "from a plain function",
+    );
+}
+
+#[test]
+fn multi_hop_custom_hook_ok() {
+    // Forward-ref: useOuter is declared before useInner. Color is a
+    // fixed-point on the function type, not a one-hop name table.
+    assert_ok(
+        "fn useOuter() [number, Setter<number>] {\n\
+           return useInner()\n\
+         }\n\
+         fn useInner() [number, Setter<number>] {\n\
+           return useState(0)\n\
+         }\n\
+         fn Counter() ReactNode {\n\
+           const [count, setCount] = useOuter()\n\
+           return <p>{string(count)}</p>\n\
+         }",
+    );
+}
+
+#[test]
+fn alias_call_in_plain_fn_rejected() {
+    // Rejected at check, so emission never runs (no missing-import crash).
+    assert_teaches(
+        "const f = useState\n\
+         f(0)",
+        "from a plain function",
+    );
+}
+
+#[test]
+fn alias_call_in_component_ok() {
+    assert_ok(
+        "fn Counter() ReactNode {\n\
+           const f = useState\n\
+           const [count, setCount] = f(0)\n\
+           return <p>{string(count)}</p>\n\
+         }",
+    );
+}
+
+#[test]
+fn closure_into_plain_hof_rejected() {
+    assert_teaches(
+        "fn apply(f: fn() number) number { return f() }\n\
+         fn Counter() ReactNode {\n\
+           const n = apply(fn() number { const [c, s] = useState(0); return c })\n\
+           return <p>{string(n)}</p>\n\
+         }",
+        "this closure calls a hook; hooks run only during render — accept a hook-typed parameter or lift the hook to the component",
+    );
+}
+
+#[test]
+fn colored_fn_by_value_into_hook_typed_param_ok() {
+    assert_ok(
+        "fn run(f: Hook<fn() number>) number { return f() }\n\
+         fn Counter() ReactNode {\n\
+           const n = run(fn() number { const [c, s] = useState(0); return c })\n\
+           return <p>{string(n)}</p>\n\
+         }",
+    );
+}
+
+#[test]
+fn cannot_shadow_compiler_known_hook() {
+    assert_teaches(
+        "fn Counter() ReactNode {\n\
+           const useState = fn(n: number) number { return n }\n\
+           return <p>{string(useState(0))}</p>\n\
+         }",
+        "cannot shadow compiler-known hook `useState`",
+    );
+}
+
+#[test]
+fn use_prefix_without_hook_call_is_plain() {
+    // Coloring is the type, not the name: a `use*` function that never
+    // calls a hook-typed function is an ordinary function.
+    assert_ok(
+        "fn useHelper(n: number) number { return n }\n\
+         fn main() number { return useHelper(1) }",
+    );
+}
+
+#[test]
+fn usestate_none_requires_option_annotation() {
+    // Pick: require an explicit Option annotation. `None` is the empty
+    // Option payload; inferring `T = none` would be a silent nonsense type.
+    assert_teaches(
+        "fn Counter() ReactNode {\n\
+           const [count, setCount] = useState(None)\n\
+           return <p />\n\
+         }",
+        "explicit Option",
+    );
+    assert_ok(
+        "alias NumOpt = Option<number>\n\
+         fn Counter() ReactNode {\n\
+           const [count, setCount] = useState<NumOpt>(None)\n\
+           return <p />\n\
+         }",
     );
 }
 

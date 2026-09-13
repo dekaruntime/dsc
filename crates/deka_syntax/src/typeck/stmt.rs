@@ -947,18 +947,26 @@ impl<'a> Checker<'a> {
                 }
                 continue;
             }
-            let (name, ty, mutable) = match stmt {
-                ast::Stmt::Const { name, ty, .. } => (*name, ty.as_ref(), false),
-                ast::Stmt::Let { name, ty, .. } => (*name, ty.as_ref(), true),
+            let (name, ty, value, mutable) = match stmt {
+                ast::Stmt::Const { name, ty, value, .. } => (*name, ty.as_ref(), Some(value), false),
+                ast::Stmt::Let { name, ty, value, .. } => (*name, ty.as_ref(), Some(value), true),
                 ast::Stmt::Export {
-                    decl: ast::ExportDecl::Const { name, ty, .. },
+                    decl: ast::ExportDecl::Const { name, ty, value, .. },
                     ..
-                } => (*name, ty.as_ref(), false),
+                } => (*name, ty.as_ref(), Some(value), false),
                 _ => continue,
             };
-            let seed = ty
-                .map(|annot| self.resolve_ast_type(annot))
-                .unwrap_or(Type::Infer);
+            let seed = if let Some(annot) = ty {
+                self.resolve_ast_type(annot)
+            } else if let Some(ast::Expr::Identifier { name: init, .. }) = value {
+                self.globals
+                    .get(init)
+                    .cloned()
+                    .or_else(|| self.scopes[0].get(init).cloned())
+                    .unwrap_or(Type::Infer)
+            } else {
+                Type::Infer
+            };
             self.scopes[0].insert(name, seed);
             if mutable {
                 self.mutables[0].insert(name);
@@ -1007,9 +1015,15 @@ impl<'a> Checker<'a> {
                         span,
                         is_async,
                         ..
-                    } if return_type.is_none() => {
-                        Some((*name, *type_params, *params, *body, *is_async, *span))
-                    }
+                    } => Some((
+                        *name,
+                        *type_params,
+                        *params,
+                        return_type.as_ref(),
+                        *body,
+                        *is_async,
+                        *span,
+                    )),
                     ast::Stmt::Export {
                         decl:
                             ast::ExportDecl::Function {
@@ -1023,15 +1037,31 @@ impl<'a> Checker<'a> {
                             },
                         span,
                         ..
-                    } if return_type.is_none() => {
-                        Some((*name, *type_params, *params, *body, *is_async, *span))
-                    }
+                    } => Some((
+                        *name,
+                        *type_params,
+                        *params,
+                        return_type.as_ref(),
+                        *body,
+                        *is_async,
+                        *span,
+                    )),
                     _ => None,
                 };
-                if let Some((name, type_params, params, body, is_async, span)) = info {
-                    pending.push((name, span));
+                if let Some((name, type_params, params, return_type, body, is_async, span)) = info {
+                    if return_type.is_none() {
+                        pending.push((name, span));
+                    }
                     let prev = self.globals.get(name).cloned();
-                    self.check_function(name, type_params, params, None, body, is_async, span);
+                    self.check_function(
+                        name,
+                        type_params,
+                        params,
+                        return_type,
+                        body,
+                        is_async,
+                        span,
+                    );
                     let new = self.globals.get(name).cloned();
                     if prev != new {
                         changed = true;
@@ -1046,14 +1076,16 @@ impl<'a> Checker<'a> {
         self.infer_only = false;
         if !converged {
             for (name, span) in pending {
-                if let Some(Type::Function { ret, .. }) = self.globals.get(name) {
-                    if matches!(**ret, Type::Infer) {
-                        self.error_span(
-                            span,
-                            format!(
-                                "could not infer a return type for `{name}`; add an explicit return type"
-                            ),
-                        );
+                if let Some(ty) = self.globals.get(name).cloned() {
+                    if let Type::Function { ret, .. } = ty.unhook() {
+                        if matches!(*ret, Type::Infer) {
+                            self.error_span(
+                                span,
+                                format!(
+                                    "could not infer a return type for `{name}`; add an explicit return type"
+                                ),
+                            );
+                        }
                     }
                 }
             }
@@ -1597,7 +1629,9 @@ impl<'a> Checker<'a> {
                     ),
                 );
             }
-            if let (Type::Named { name: "Component" }, Type::Function { params, .. }) = (&expected, &value_type) {
+            if let (Type::Named { name: "Component" }, Type::Function { params, .. }) =
+                (&expected, &value_type.unhook())
+            {
                 if params.len() == 1 { Type::Generic { base: "Component", args: params.clone() } } else { expected }
             } else { expected }
         } else {
@@ -1607,11 +1641,6 @@ impl<'a> Checker<'a> {
             self.declare_mutable_var(name, final_type);
         } else {
             self.declare_var(name, final_type);
-        }
-        if matches!(value, ast::Expr::Function { .. }) {
-            self.remember_hook_binding(name);
-        } else {
-            self.last_fn_expr_is_hook = false;
         }
         self.index_flow.remember_integer(name, value);
         // A declaration at module scope activates its seed for module-level
@@ -1723,7 +1752,9 @@ impl<'a> Checker<'a> {
         self.index_flow.kill();
         // Use the previously collected signature for parameter types so that
         // errors about missing annotations are reported exactly once.
-        let (param_types, collected_ret, optional) = match self.globals.get(name).cloned() {
+        let collected = self.globals.get(name).cloned();
+        let was_hook = collected.as_ref().is_some_and(Type::is_hook_fn);
+        let (param_types, collected_ret, optional) = match collected.map(|ty| ty.unhook()) {
             Some(Type::Function {
                 params,
                 ret,
@@ -1778,7 +1809,14 @@ impl<'a> Checker<'a> {
             ret: Box::new(final_ret.clone()),
             optional,
         };
-        self.declare_var(name, self_type);
+        self.declare_var(
+            name,
+            if was_hook {
+                self_type.as_hook()
+            } else {
+                self_type
+            },
+        );
 
         for (p, t) in params.iter().zip(param_types.iter()) {
             if let Some(default) = &p.default_value {
@@ -1803,6 +1841,9 @@ impl<'a> Checker<'a> {
         let saved_catches = std::mem::take(&mut self.exception_catches);
         let is_interactive_component = self.interactive_components.contains(name);
         let hook_frame = self.push_hook_frame(Some(name), Self::is_component_return(&explicit_ret));
+        if was_hook {
+            self.hook_body_called = true;
+        }
         self.in_function = true;
         self.in_async_function = is_async;
         self.return_type = body_expected_ret.clone();
@@ -1817,7 +1858,7 @@ impl<'a> Checker<'a> {
         if is_interactive_component {
             self.interactive_component_depth -= 1;
         }
-        self.pop_hook_frame(hook_frame, false);
+        let body_called_hook = self.pop_hook_frame(hook_frame);
 
         // A function that declares a value-producing return type must actually
         // return on every path. Without this, `fn f() string { }` typechecks
@@ -1873,13 +1914,19 @@ impl<'a> Checker<'a> {
         self.pop_type_params();
 
         // Update the global function type with the final (possibly inferred)
-        // return type.
+        // return type. A body that called a hook-typed function is itself
+        // hook-typed — the color is on the type, not a name table.
+        let fn_type = Type::Function {
+            params: param_types,
+            ret: Box::new(final_ret),
+            optional,
+        };
         self.globals.insert(
             name,
-            Type::Function {
-                params: param_types,
-                ret: Box::new(final_ret),
-                optional,
+            if body_called_hook || was_hook {
+                fn_type.as_hook()
+            } else {
+                fn_type
             },
         );
     }
@@ -2070,7 +2117,7 @@ impl<'a> Checker<'a> {
             self.check_statement(stmt);
         }
 
-        self.pop_hook_frame(hook_frame, false);
+        let _body_called_hook = self.pop_hook_frame(hook_frame);
         self.in_function = saved_in_function;
         self.in_async_function = saved_in_async;
         self.return_type = saved_return_type;

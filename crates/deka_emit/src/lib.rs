@@ -2278,6 +2278,25 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
     }
 
     #[test]
+    fn emit_usestate_alias_imports_resolved_reference() {
+        let out = parse_check_and_emit(
+            "fn Counter() ReactNode {\n\
+               const f = useState;\n\
+               const [count, setCount] = f(0);\n\
+               return <p>{string(count)}</p>;\n\
+             }",
+        );
+        assert!(
+            out.contains("import { useState } from \"@js/react\";"),
+            "alias must still emit the resolved builtin import, got: {out}"
+        );
+        assert!(
+            out.contains("const f = useState;") && out.contains("f(0)"),
+            "got: {out}"
+        );
+    }
+
+    #[test]
     fn emit_useref_is_byte_idiomatic() {
         let out = parse_check_and_emit(
             "fn Counter() ReactNode {\n\

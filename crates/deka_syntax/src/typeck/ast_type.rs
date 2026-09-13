@@ -76,6 +76,13 @@ impl<'a> Checker<'a> {
                     self.error_span(*span, "Ref requires a type argument, e.g. Ref<number>");
                     Type::Error
                 }
+                "Hook" => {
+                    self.error_span(
+                        *span,
+                        "Hook requires a function type argument, e.g. Hook<fn() number>",
+                    );
+                    Type::Error
+                }
                 _ => {
                     if let Some(param) = self.lookup_type_param(name) {
                         return param;
@@ -154,6 +161,27 @@ impl<'a> Checker<'a> {
                             *span,
                             format!("{base} requires exactly one type argument"),
                         );
+                        Type::Error
+                    }
+                } else if base == &"Hook" {
+                    if args.len() == 1 {
+                        let inner = self.resolve_ast_type_rec(&args[0], seen);
+                        match &inner {
+                            Type::Function { .. }
+                            | Type::Error
+                            | Type::Infer
+                            | Type::Generic { base: "Hook", .. }
+                            | Type::Generic { base: "Component", .. } => {}
+                            _ => {
+                                self.error_span(
+                                    *span,
+                                    "Hook takes a function type, e.g. Hook<fn() number>",
+                                );
+                            }
+                        }
+                        inner.as_hook()
+                    } else {
+                        self.error_span(*span, "Hook requires exactly one type argument");
                         Type::Error
                     }
                 } else if base == &"Array" {

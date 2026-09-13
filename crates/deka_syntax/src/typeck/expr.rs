@@ -514,7 +514,16 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::None { .. } => Type::None,
             ast::Expr::Identifier { name, span } => match self.lookup_var(name) {
-                Some(ty) => ty,
+                Some(ty) => {
+                    if super::hooks::is_hook_builtin(name) {
+                        self.note_hook_builtin_ref(if *name == "useState" {
+                            "useState"
+                        } else {
+                            "useRef"
+                        });
+                    }
+                    ty
+                }
                 None => {
                     let message = if *name == "Math" {
                         "`Math` is not available in DekaScript; import { PI } from \"math\" instead for PI, or use number methods such as `x.sqrt()`"
@@ -1035,8 +1044,7 @@ impl<'a> Checker<'a> {
             self.check_statement(stmt);
         }
 
-        let expr_was_hook = self.last_fn_expr_is_hook;
-        self.pop_hook_frame(hook_frame, expr_was_hook);
+        let body_called_hook = self.pop_hook_frame(hook_frame);
         self.in_async_function = saved_in_async;
 
         let final_ret = if is_async {
@@ -1070,10 +1078,15 @@ impl<'a> Checker<'a> {
             .take_while(|p| p.default_value.is_some())
             .count();
 
-        Type::Function {
+        let fn_type = Type::Function {
             params: param_types,
             ret: Box::new(final_ret),
             optional,
+        };
+        if body_called_hook {
+            fn_type.as_hook()
+        } else {
+            fn_type
         }
     }
 
@@ -3206,11 +3219,21 @@ impl<'a> Checker<'a> {
                                 Type::Error
                             }
                         };
+                        if callee_type.is_hook_fn() {
+                            if super::hooks::is_hook_builtin(name) {
+                                self.note_hook_builtin_ref(if *name == "useState" {
+                                    "useState"
+                                } else {
+                                    "useRef"
+                                });
+                            }
+                            self.note_hook_call(name, *span, super::hooks::is_hook_builtin(name));
+                        }
                         if let Type::Function {
                             params,
                             ret,
                             optional,
-                        } = callee_type
+                        } = callee_type.function_contract()
                         {
                             let required = params.len().saturating_sub(optional);
                             if params.len() < 1 || required > 1 {
@@ -3252,7 +3275,9 @@ impl<'a> Checker<'a> {
                         args,
                         span,
                     } => {
-                        let callee_type = self.check_expr(callee).function_contract();
+                        let callee_type = self.check_expr(callee);
+                        self.note_hook_callee(callee, &callee_type, *span);
+                        let callee_type = callee_type.function_contract();
                         if let Type::Function {
                             params,
                             ret,
@@ -4548,11 +4573,6 @@ impl<'a> Checker<'a> {
         if let ast::Expr::Identifier { name: "useRef", .. } = callee {
             return self.check_use_ref(type_args, args, span);
         }
-        if let ast::Expr::Identifier { name, .. } = callee {
-            if self.hook_functions.contains(name) {
-                self.note_hook_call(name, span, false);
-            }
-        }
 
         // `panic(msg)` / `deka.panic(msg)`: never-returning lang item (RFD 21).
         if is_panic_callee(callee) {
@@ -4689,7 +4709,10 @@ impl<'a> Checker<'a> {
             }
         }
 
-        let callee_type = self.check_expr(callee).function_contract();
+        let callee_type = self.check_expr(callee);
+        self.note_hook_callee(callee, &callee_type, span);
+        let was_hook = callee_type.is_hook_fn();
+        let callee_type = callee_type.function_contract();
 
         match callee_type {
             Type::Generic {
@@ -4711,6 +4734,11 @@ impl<'a> Checker<'a> {
                 } else {
                     HashMap::new()
                 };
+                if was_hook && type_args.is_empty() {
+                    if subst.values().any(|t| matches!(t, Type::None)) {
+                        self.error_span(span, super::hooks::NONE_INIT);
+                    }
+                }
 
                 // rfd#56 phase 2: a bound is a contract at the call site.
                 // After inference solves a type parameter, the solution is

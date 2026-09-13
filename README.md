@@ -67,13 +67,18 @@ a checked interface or struct; JSX results use the opaque `ReactNode` type.
 A bare `Component` annotation on a binding infers its props from the checked
 function. Components evaluate dynamic expressions during render.
 
-`useState` and `useRef` are compiler-known hooks (no import). A function that
-calls a hook is a hook function, callable only from a Component (ReactNode
-return) or another hook function — the same coloring pattern as Exception.
-Hook calls must be straight-line: unconditional, un-looped, and before any
-early return. `Setter<T>` accepts `T` or `fn(T) T`; `Ref<T>.current` is
-mutable. Emission is the call as written plus `import { useState } from` the
-React module implied by `jsxRuntime` (`@js/react/jsx-runtime` → `@js/react`).
+`useState` and `useRef` are compiler-known hooks (no import). Hook-ness is
+part of the function type (`Hook<fn(...) T>`), the same Generic-wrapper
+shape as `Exception<>` on a signature: any function that calls a hook-typed
+function is itself hook-typed (fixed-point, transitive). Aliasing preserves
+the color; a hook-typed function is not assignable to a plain `fn(...)`
+parameter. Hook-typed functions are callable only from a Component
+(`ReactNode` return) or another hook function. Hook calls must be
+straight-line: unconditional, un-looped, and before any early return.
+`Setter<T>` accepts `T` or `fn(T) T` and stays a plain value; `Ref<T>.current`
+is mutable. Emission is the call as written plus `import { useState } from`
+the React module implied by `jsxRuntime` (`@js/react/jsx-runtime` →
+`@js/react`), keyed off resolved references so aliases still import.
 
 `data-deka-id` is injected on host JSX elements only when the compile graph
 hydrates islands: any `client:*` directive, or interactive-component analysis

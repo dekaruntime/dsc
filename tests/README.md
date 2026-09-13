@@ -52,10 +52,23 @@ explicit emission error instead of returning from an artificial IIFE.
 
 ## Hooks v1 (rfd#64 amendment 3, lane A)
 
-`useState` / `useRef` are compiler-known. Checker coverage lives in
-`crates/deka_syntax/src/typeck/hooks_tests.rs` (coloring, straight-line,
-Setter dual call, Ref mutation). Emission coverage lives in `deka_emit`
-(`emit_usestate_is_byte_idiomatic`, `emit_counter_component_end_to_end`).
+`useState` / `useRef` are compiler-known. Hook color lives on the function
+type as `Hook<fn(...) T>` (Exception-shaped), inferred as a fixed-point: any
+fn that calls a hook-typed fn is hook-typed. Aliasing preserves the color;
+hook-typed values are not assignable to plain `fn(...)` parameters.
+
+Checker coverage lives in `crates/deka_syntax/src/typeck/hooks_tests.rs`
+(transitive coloring, aliasing, HOF assignability, shadowing, straight-line,
+Setter dual call, Ref mutation, `useState(None)` requiring an explicit
+`Option` annotation). Emission coverage lives in `deka_emit`
+(`emit_usestate_is_byte_idiomatic`, `emit_usestate_alias_imports_resolved_reference`,
+`emit_counter_component_end_to_end`). Imports are keyed off resolved
+identifier references, not call-site text.
+
+`useState(None)` without a type argument is a compile error naming Option
+explicitly — `None` is the empty Option payload, not a state type. Write
+`useState<Option<T>>(None)`.
+
 `useEffect`, context, and memoization are absent — they belong to later lanes.
 
 The React value-import specifier is derived from `jsxRuntime` by dropping a

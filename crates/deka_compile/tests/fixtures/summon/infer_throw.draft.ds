@@ -18,10 +18,10 @@ opaque type S
 opaque type UsesHelper
 
 summon {
-  boom(): Exception<void, JsError>,
-  total ok(): number,
-  parses(s: S): Exception<Parses, JsError>,
-  callsUnknown(): Exception<CallsUnknown, JsError>,
-  usesHelper(): Exception<UsesHelper, JsError>,
-  total caught(): number
+  boom() Exception<void, JsError>,
+  total ok() number,
+  parses(s: S) Exception<Parses, JsError>,
+  callsUnknown() Exception<CallsUnknown, JsError>,
+  usesHelper() Exception<UsesHelper, JsError>,
+  total caught() number
 } from "./infer_throw.mjs"

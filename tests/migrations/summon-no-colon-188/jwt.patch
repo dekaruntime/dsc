@@ -1,0 +1,35 @@
+--- a/index.ds
++++ b/index.ds
+@@ -25,11 +25,11 @@
+ interface JwtParts { header: string; payload: string; signature: string; input: string }
+ 
+ summon {
+-  parse_header_json(json: string): Exception<JwtHeader, JsError>,
+-  parse_claims_json(json: string): Exception<JwtClaims, JsError>,
+-  serialize_claims(payload: JwtClaims, iat: number, exp: Option<number>, iss: Option<string>, aud: Option<string>, sub: Option<string>): Exception<string, JsError>,
+-  total now_seconds(): number,
+-  total valid_b64url(value: string): boolean
++  parse_header_json(json: string) Exception<JwtHeader, JsError>,
++  parse_claims_json(json: string) Exception<JwtClaims, JsError>,
++  serialize_claims(payload: JwtClaims, iat: number, exp: Option<number>, iss: Option<string>, aud: Option<string>, sub: Option<string>) Exception<string, JsError>,
++  total now_seconds() number,
++  total valid_b64url(value: string) boolean
+ } from "./boundary.mjs"
+ 
+ fn b64url_encode(data: bytes) string {
+--- a/tests/roundtrip.ds
++++ b/tests/roundtrip.ds
+@@ -5,10 +5,10 @@
+ interface Header { alg?: string }
+ 
+ summon {
+-  parse_header_json(json: string): Exception<Header, JsError>,
+-  parse_claims_json(json: string): Exception<Claims, JsError>
++  parse_header_json(json: string) Exception<Header, JsError>,
++  parse_claims_json(json: string) Exception<Claims, JsError>
+ } from "../boundary.mjs"
+-summon { total log(value: string): void } from "./log.mjs"
++summon { total log(value: string) void } from "./log.mjs"
+ 
+ fn unwrap_token(value: Result<string, string>) string { return match (value) { Ok(v) => v, Err(e) => e } }
+ fn error_of<T>(value: Result<T, string>) string { return match (value) { Ok(v) => "", Err(e) => e } }

@@ -557,7 +557,7 @@ impl<'src> Formatter<'src> {
                     self.write(f.name);
                     self.write("(");
                     self.fmt_param_list(f.params);
-                    self.write("): ");
+                    self.write(") ");
                     self.fmt_type(&f.return_type);
                 }
                 self.write(" } from ");

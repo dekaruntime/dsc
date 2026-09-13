@@ -1,0 +1,11 @@
+--- a/tests/roundtrip.ds
++++ b/tests/roundtrip.ds
+@@ -1,7 +1,7 @@
+ import { from_string, from_array, to_hex, len } from "@deka/bytes"
+ import { random_bytes, digest, secure_compare, sha256, hs256, aes_256_gcm_encrypt, aes_256_gcm_decrypt, bcrypt_verify, uuid_v4, random_hex } from "../index.ds"
+ 
+-summon { total log(message: string): void } from "./log.mjs"
++summon { total log(message: string) void } from "./log.mjs"
+ 
+ fn go() {
+   let abc = from_string("abc");

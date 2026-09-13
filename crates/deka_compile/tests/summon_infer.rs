@@ -76,3 +76,20 @@ fn rejects_unparseable_javascript() {
     let err = infer_draft("export function broken( {", "./broken.mjs").unwrap_err();
     assert!(!err.is_empty(), "{err}");
 }
+
+#[test]
+fn inferred_signatures_are_colon_free_and_parseable() {
+    for fixture in ["infer_basic.mjs", "infer_throw.mjs"] {
+        let got = draft(fixture);
+        let arena = bumpalo::Bump::new();
+        let parsed = deka_syntax::parse::parse(&got, &arena);
+        assert!(parsed.errors.is_empty(), "{got}\n{:?}", parsed.errors);
+        assert!(parsed.program.is_some());
+        for line in got
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+        {
+            assert!(!line.contains("):"), "{line}");
+        }
+    }
+}

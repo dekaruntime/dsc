@@ -1,4 +1,4 @@
 import { claims } from "./api.ds"
-summon { total log(value: string): void } from "./log.mjs"
+summon { total log(value: string) void } from "./log.mjs"
 const sub = match (claims()) { Ok(c) => match (c.sub) { Some(v) => v, None => "missing" }, Err(e) => e }
 log(sub)

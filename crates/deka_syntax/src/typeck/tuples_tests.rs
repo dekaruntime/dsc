@@ -29,7 +29,7 @@ fn tuples_context_and_consumption() {
         "const [n, s]: [number, string] = [1, \"ok\"];",
         "alias Pair = [number, string]; fn f(p: Pair = [1, \"a\"]) Pair { return p; } const [n, s] = f();",
         "fn id<T>(p: [T, string]) [T, string] { return p; } const p: [number, string] = [1, \"a\"]; const q: [number, string] = id(p);",
-        "summon { total fn pair(): [number, string], total fn consume(p: [number, string]): void, } from \"./shim.mjs\"; const [n, s] = pair(); consume([n, s]);",
+        "summon { total fn pair() [number, string], total fn consume(p: [number, string]) void, } from \"./shim.mjs\"; const [n, s] = pair(); consume([n, s]);",
     ] {
         assert!(errors(source).is_empty(), "{source}\n{:?}", errors(source));
     }

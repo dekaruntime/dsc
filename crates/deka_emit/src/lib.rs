@@ -114,7 +114,7 @@ assert.equal(descriptor.fields[0].type.kind, 'tuple');
             .canonicalize()
             .unwrap();
         let source = format!(
-            r#"summon {{ total fn pair(): [number, string], total fn empty(): [number, string], total fn optional(): Option<[number, string]>, total fn consume(p: [number, string]): string, }} from "{}";
+            r#"summon {{ total fn pair() [number, string], total fn empty() [number, string], total fn optional() Option<[number, string]>, total fn consume(p: [number, string]) string, }} from "{}";
 const [n, s] = pair();
 const joined = consume([n, s]);
 fn guarded() [number, string] {{ return empty(); }}

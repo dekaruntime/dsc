@@ -1,0 +1,21 @@
+--- a/index.ds
++++ b/index.ds
+@@ -6,7 +6,7 @@
+ // Exception channel for invalid input (rfd#62). Abort helpers that existed
+ // only to turn `throw` into `unsafe` Err are gone — totals do not fail, and
+ // decode failures raise.
+-summon { total encode_utf8(value: string): bytes, total decode_utf8(value: bytes): string, total slice_from(value: bytes, start: number): bytes, total concat_bytes(a: bytes, b: bytes): bytes, total from_numbers(values: Array<number>): bytes, total encode_hex(value: bytes): string, from_hex_bytes(value: string): Exception<bytes, JsError>, total encode_base64(value: bytes): string, from_base64_bytes(value: string): Exception<bytes, JsError> } from "./shim.mjs"
++summon { total encode_utf8(value: string) bytes, total decode_utf8(value: bytes) string, total slice_from(value: bytes, start: number) bytes, total concat_bytes(a: bytes, b: bytes) bytes, total from_numbers(values: Array<number>) bytes, total encode_hex(value: bytes) string, from_hex_bytes(value: string) Exception<bytes, JsError>, total encode_base64(value: bytes) string, from_base64_bytes(value: string) Exception<bytes, JsError> } from "./shim.mjs"
+ 
+ export fn from_string(value: string) bytes {
+   return encode_utf8(value)
+--- a/tests/roundtrip.ds
++++ b/tests/roundtrip.ds
+@@ -1,6 +1,6 @@
+ import { from_string, to_string, len, get, slice, concat, from_array, to_hex, from_hex, to_base64, from_base64 } from "../index.ds"
+ 
+-summon { total log(message: string): void } from "./log.mjs"
++summon { total log(message: string) void } from "./log.mjs"
+ 
+ log(string(len(from_string("hello"))))
+ log(to_string(from_string("hello")))

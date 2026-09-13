@@ -1,0 +1,118 @@
+--- a/corpus/summon/arity_mismatch/arity_mismatch.fail.ds
++++ b/corpus/summon/arity_mismatch/arity_mismatch.fail.ds
+@@ -1 +1 @@
+-summon { total read(): number } from "./foreign.mjs"
++summon { total read() number } from "./foreign.mjs"
+--- a/corpus/summon/async_return/async_return.pass.ds
++++ b/corpus/summon/async_return/async_return.pass.ds
+@@ -1,3 +1,3 @@
+-summon { total later(): Promise<number> } from "./foreign.mjs"
++summon { total later() Promise<number> } from "./foreign.mjs"
+ const n = await later()
+ if (n != 9) { panic("async boundary"); }
+--- a/corpus/summon/boundary_checked/boundary_checked.fail.ds
++++ b/corpus/summon/boundary_checked/boundary_checked.fail.ds
+@@ -1,2 +1,2 @@
+-summon { missing(): Exception<number, string> } from "./foreign.mjs"
++summon { missing() Exception<number, string> } from "./foreign.mjs"
+ const n = match missing() { Ok(v) => v, Throw(e) => 0 }
+--- a/corpus/summon/boundary_total/boundary_total.fail.ds
++++ b/corpus/summon/boundary_total/boundary_total.fail.ds
+@@ -1,2 +1,2 @@
+-summon { total absent(): number } from "./foreign.mjs"
++summon { total absent() number } from "./foreign.mjs"
+ const n = absent()
+--- a/corpus/summon/marshal_option/marshal_option.pass.ds
++++ b/corpus/summon/marshal_option/marshal_option.pass.ds
+@@ -1,4 +1,4 @@
+-summon { total absent(): Option<number>, total missing(): Option<number>, total number(): Option<number>, total optional(v: Option<number>): number, total noop(): void } from "./foreign.mjs"
++summon { total absent() Option<number>, total missing() Option<number>, total number() Option<number>, total optional(v: Option<number>) number, total noop() void } from "./foreign.mjs"
+ const a = match absent() { Some(v) => false, None => true }
+ const b = match missing() { Some(v) => false, None => true }
+ const c = match number() { Some(v) => v, None => 0 }
+--- a/corpus/summon/missing_export/missing_export.fail.ds
++++ b/corpus/summon/missing_export/missing_export.fail.ds
+@@ -1 +1 @@
+-summon { total nonexistent(): number } from "./foreign.mjs"
++summon { total nonexistent() number } from "./foreign.mjs"
+--- a/corpus/summon/missing_total/missing_total.fail.ds
++++ b/corpus/summon/missing_total/missing_total.fail.ds
+@@ -1 +1 @@
+-summon { number(): number } from "./foreign.mjs"
++summon { number() number } from "./foreign.mjs"
+--- a/corpus/summon/native_throw/native_throw.pass.ds
++++ b/corpus/summon/native_throw/native_throw.pass.ds
+@@ -1,3 +1,3 @@
+-summon { fail(): Exception<number, string> } from "./foreign.mjs"
++summon { fail() Exception<number, string> } from "./foreign.mjs"
+ const error = match fail() { Ok(v) => "wrong", Throw(e) => e }
+ if (error != "foreign failure") { panic("native throw identity"); }
+--- a/corpus/summon/non_function/non_function.fail.ds
++++ b/corpus/summon/non_function/non_function.fail.ds
+@@ -1 +1 @@
+-summon { total scalar(): number } from "./foreign.mjs"
++summon { total scalar() number } from "./foreign.mjs"
+--- a/corpus/summon/opaque_construct/opaque_construct.fail.ds
++++ b/corpus/summon/opaque_construct/opaque_construct.fail.ds
+@@ -1,3 +1,3 @@
+ opaque type Handle
+-summon { total handle(): Handle, total read(h: Handle): number } from "./foreign.mjs"
++summon { total handle() Handle, total read(h: Handle) number } from "./foreign.mjs"
+ const h = Handle {}
+--- a/corpus/summon/opaque_destructure/opaque_destructure.fail.ds
++++ b/corpus/summon/opaque_destructure/opaque_destructure.fail.ds
+@@ -1,3 +1,3 @@
+ opaque type Handle
+-summon { total handle(): Handle, total read(h: Handle): number } from "./foreign.mjs"
++summon { total handle() Handle, total read(h: Handle) number } from "./foreign.mjs"
+ const n = match handle() { Handle { secret } => secret }
+--- a/corpus/summon/opaque_field/opaque_field.fail.ds
++++ b/corpus/summon/opaque_field/opaque_field.fail.ds
+@@ -1,3 +1,3 @@
+ opaque type Handle
+-summon { total handle(): Handle, total read(h: Handle): number } from "./foreign.mjs"
++summon { total handle() Handle, total read(h: Handle) number } from "./foreign.mjs"
+ const n = handle().secret
+--- a/corpus/summon/opaque_hold/opaque_hold.pass.ds
++++ b/corpus/summon/opaque_hold/opaque_hold.pass.ds
+@@ -1,5 +1,5 @@
+ opaque type Handle
+-summon { total handle(): Handle, total read(h: Handle): number } from "./foreign.mjs"
++summon { total handle() Handle, total read(h: Handle) number } from "./foreign.mjs"
+ struct Stored { h: Handle }
+ const held = Stored { h: handle() }
+ if (read(held.h) != 42) { panic("handle identity"); }
+--- a/corpus/summon/opaque_nominal/opaque_nominal.fail.ds
++++ b/corpus/summon/opaque_nominal/opaque_nominal.fail.ds
+@@ -1,4 +1,4 @@
+ opaque type Handle
+-summon { total handle(): Handle, total read(h: Handle): number } from "./foreign.mjs"
++summon { total handle() Handle, total read(h: Handle) number } from "./foreign.mjs"
+ opaque type Other
+ const h: Other = handle()
+--- a/corpus/summon/private_escape/private_escape.fail.ds
++++ b/corpus/summon/private_escape/private_escape.fail.ds
+@@ -1,3 +1,3 @@
+ opaque type Handle
+-summon { total handle(): Handle, total read(h: Handle): number } from "./foreign.mjs"
++summon { total handle() Handle, total read(h: Handle) number } from "./foreign.mjs"
+ const saved = handle
+--- a/corpus/summon/private_export/private_export.fail.ds
++++ b/corpus/summon/private_export/private_export.fail.ds
+@@ -1,3 +1,3 @@
+ opaque type Handle
+-summon { total handle(): Handle, total read(h: Handle): number } from "./foreign.mjs"
++summon { total handle() Handle, total read(h: Handle) number } from "./foreign.mjs"
+ export { handle }
+--- a/corpus/summon/unhandled_exception/unhandled_exception.fail.ds
++++ b/corpus/summon/unhandled_exception/unhandled_exception.fail.ds
+@@ -1,2 +1,2 @@
+-summon { fail(): Exception<number, string> } from "./foreign.mjs"
++summon { fail() Exception<number, string> } from "./foreign.mjs"
+ const x = fail()
+--- a/corpus/summon/void_exempt/void_exempt.pass.ds
++++ b/corpus/summon/void_exempt/void_exempt.pass.ds
+@@ -1,2 +1,2 @@
+-summon { total noop(): void } from "./foreign.mjs"
++summon { total noop() void } from "./foreign.mjs"
+ noop()

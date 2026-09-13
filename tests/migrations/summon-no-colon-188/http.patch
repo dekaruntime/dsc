@@ -1,0 +1,31 @@
+--- a/tests/format.ds
++++ b/tests/format.ds
+@@ -1,4 +1,4 @@
+-summon { total log(value: string): void } from "./log.mjs"
++summon { total log(value: string) void } from "./log.mjs"
+ import { from_string, to_string, len } from "bytes"
+ import { parse_url, format_request, parse_response, no_body } from "../url.ds"
+ 
+--- a/tests/refused.ds
++++ b/tests/refused.ds
+@@ -1,4 +1,4 @@
+-summon { total log(value: string): void } from "./log.mjs"
++summon { total log(value: string) void } from "./log.mjs"
+ import { get } from "../index.ds"
+ 
+ fn go() {
+--- a/url.ds
++++ b/url.ds
+@@ -21,9 +21,9 @@
+ }
+ 
+ summon {
+-  parse_http_url(url: string): Exception<Url, JsError>,
+-  total format_http_request(method: string, path: string, host: string, headers: Headers, body: bytes): string,
+-  parse_http_response(buf: bytes): Exception<ParsedResponse, JsError>
++  parse_http_url(url: string) Exception<Url, JsError>,
++  total format_http_request(method: string, path: string, host: string, headers: Headers, body: bytes) string,
++  parse_http_response(buf: bytes) Exception<ParsedResponse, JsError>
+ } from "./boundary.mjs"
+ 
+ export fn parse_url(url: string) Exception<Url, JsError> {

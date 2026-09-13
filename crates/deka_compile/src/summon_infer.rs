@@ -139,7 +139,7 @@ fn render_signature(
         let ty = param_ds_type(name, param, opaques);
         sig.push_str(&ty);
     }
-    sig.push_str("): ");
+    sig.push_str(") ");
     let inner = return_ds_type(name, returns, opaques);
     let inner = if function.arity.asynchronous {
         if total {

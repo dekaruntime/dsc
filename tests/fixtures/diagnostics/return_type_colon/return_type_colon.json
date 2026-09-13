@@ -1,6 +1,6 @@
 {
   "title": "Return types take no colon",
   "stage": "parse",
-  "notes": "dsc#169: adjacent and spaced return-type colons must point at the colon (1:7 and 2:8).",
+  "notes": "dsc#171/#188: fn, interface, and summon return-type colons point at the colon, including multiline blocks.",
   "expectedDiagnosticContains": "return types take no colon; remove `:`"
 }

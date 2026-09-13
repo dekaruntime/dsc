@@ -131,3 +131,13 @@ The pinned corpus's former parser rejection for array destructuring needs a
 metadata-only diagnostic migration. See
 [migrations/tuples-66/README.md](migrations/tuples-66/README.md) for the owner
 patch, rule details, and full validation summaries.
+
+## Colon-free summon returns (dsc#188, 0.52.0)
+
+Summon signatures and generated drafts now use `name(params) ReturnType`.
+The shared return-colon diagnostic also covers function types. Parser tests check
+both spellings and exact diagnostic positions; summon infer library/CLI golden
+tests and formatter roundtrips protect generated output. See
+[migrations/summon-no-colon-188/README.md](migrations/summon-no-colon-188/README.md)
+for the eight package patches, exact files/lines, pinned corpus patch, tour syntax
+unblock, and full validation summaries. Ava coordinates the external releases.

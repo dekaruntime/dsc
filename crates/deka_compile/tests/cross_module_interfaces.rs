@@ -82,7 +82,7 @@ fn nested_recursive_fields_and_aliases_keep_the_declaring_namespace() {
 alias Subject = string
 interface Child { sub?: Subject; next?: Child }
 interface Claims { child: Child }
-summon { parse(json: string): Exception<Claims, JsError> } from "./parse.mjs"
+summon { parse(json: string) Exception<Claims, JsError> } from "./parse.mjs"
 export fn claims() {
  return match (parse("{\"child\":{\"sub\":\"alice\",\"next\":{\"sub\":\"bob\"}}}")) { Ok(c) => Ok(c), Throw(e) => Err("bad JSON") }
 }
@@ -102,7 +102,7 @@ import { forwarded } from "./forward.ds"
 alias Subject = number
 interface Claims { wrong: boolean }
 interface Child { sub: number }
-summon { total log(value: string): void } from "./log.mjs"
+summon { total log(value: string) void } from "./log.mjs"
 const first = match (forwarded()) { Ok(c) => match (c.child.sub) { Some(s) => s, None => "missing" }, Err(e) => e }
 const second = match (forwarded()) { Ok(c) => match (c.child.next) { Some(n) => match (n.sub) { Some(s) => s, None => "missing" }, None => "none" }, Err(e) => e }
 log(first)
@@ -206,7 +206,7 @@ fn private_interface_methods_keep_types_and_mutability() {
         r#"
 alias Text = string
 interface Claims { fn subject(prefix: Text) Text; mut fn update() void }
-summon { total make(): Claims } from "./parse.mjs"
+summon { total make() Claims } from "./parse.mjs"
 export fn claims() Claims { return make() }
 "#,
     )
@@ -218,7 +218,7 @@ export fn claims() Claims { return make() }
 import { claims } from "./api.ds"
 alias Text = number
 interface Claims { sub: number }
-summon { total log(value: string): void } from "./log.mjs"
+summon { total log(value: string) void } from "./log.mjs"
 log(claims().subject("hello "))
 "#,
     )
@@ -251,7 +251,7 @@ fn recursive_interface_arguments_terminate_and_check_nonrecursive_fields() {
     fs::write(dir.path().join("accept.ds"), "interface Claims { next?: Claims; sub: string }\nexport fn accept(c: Claims) string { return c.sub }\n").unwrap();
     for (field_type, value, valid) in [("string", "\"alice\"", true), ("number", "42", false)] {
         fs::write(dir.path().join("api.ds"), format!("interface Claims {{ next?: Claims; sub: {field_type} }}\nexport fn claims() Claims {{ return {{ sub: {value} }} }}\n")).unwrap();
-        fs::write(dir.path().join("main.ds"), "import { accept } from \"./accept.ds\"\nimport { claims } from \"./api.ds\"\nsummon { total log(value: string): void } from \"./log.mjs\"\nlog(accept(claims()))\n").unwrap();
+        fs::write(dir.path().join("main.ds"), "import { accept } from \"./accept.ds\"\nimport { claims } from \"./api.ds\"\nsummon { total log(value: string) void } from \"./log.mjs\"\nlog(accept(claims()))\n").unwrap();
         if valid {
             run(dir.path(), "main.ds", "alice\n");
         } else {

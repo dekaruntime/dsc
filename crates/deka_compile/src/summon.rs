@@ -3,9 +3,14 @@
 //! an author claim; the scaffolder emits `total` only where visible analysis
 //! of the vendored module proves there are no throw sites.
 use deka_syntax::{Diagnostic, Program, Stmt};
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, io::ErrorKind, path::Path};
 use swc_ecma_ast as js;
 use swc_ecma_visit::{Visit, VisitWith};
+
+/// Recorded when a summoned module cannot be read because the host has no
+/// filesystem (wasm/browser). Never an error; native compilation remains the
+/// verifying authority.
+pub const UNVERIFIED_NO_MODULE_ACCESS: &str = "unverified: platform has no module access";
 
 #[path = "summon_infer.rs"]
 mod infer;
@@ -257,12 +262,45 @@ fn is_promise(
     }
 }
 
+enum ModuleRead {
+    Bytes(String),
+    Unavailable,
+}
+
+fn read_summoned_module(
+    spec: &str,
+    file_path: &str,
+    virtual_modules: &HashMap<String, String>,
+    skip_fs: bool,
+) -> Result<ModuleRead, String> {
+    if let Some(bytes) = virtual_modules.get(spec) {
+        return Ok(ModuleRead::Bytes(bytes.clone()));
+    }
+    // Browser/wasm hosts have no filesystem. Skip rather than hard-fail so
+    // diagnostics that do not need module bytes still run. Hosts that want
+    // verification in wasm supply `CompileOptions.foreign_modules`.
+    if skip_fs || cfg!(target_arch = "wasm32") {
+        return Ok(ModuleRead::Unavailable);
+    }
+    match std::fs::read_to_string(
+        Path::new(file_path)
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join(spec),
+    ) {
+        Ok(bytes) => Ok(ModuleRead::Bytes(bytes)),
+        Err(error) if error.kind() == ErrorKind::Unsupported => Ok(ModuleRead::Unavailable),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
 pub fn validate(
     program: &Program<'_>,
     file_path: &str,
     virtual_modules: &HashMap<String, String>,
+    skip_fs: bool,
 ) -> Vec<Diagnostic> {
-    let mut errors = Vec::new();
+    let mut diagnostics = Vec::new();
     for stmt in program.statements {
         let Stmt::Summon {
             functions,
@@ -272,70 +310,82 @@ pub fn validate(
         else {
             continue;
         };
-        let parsed = (|| {
-            let spec = module_spec(source)?;
-            let bytes = if let Some(bytes) = virtual_modules.get(&spec) {
-                bytes.clone()
-            } else {
-                std::fs::read_to_string(
-                    Path::new(file_path)
-                        .parent()
-                        .unwrap_or(Path::new("."))
-                        .join(&spec),
-                )
-                .map_err(|e| e.to_string())?
-            };
-            crate::catalog::parse_js(&bytes)
-        })();
-        match parsed {
-            Err(message) => errors.push(Diagnostic::error(
-                span.start.line,
-                span.start.column,
-                format!("cannot verify summoned module `{source}`: {message}"),
-            )),
-            Ok(module) => {
-                let exports = exports(&module);
-                for f in *functions {
-                    let problem = match exports.get(f.name) {
-                        None => {
-                            Some("export does not exist or is an unresolved re-export".to_string())
-                        }
-                        Some(None) => {
-                            Some("export is not a statically verifiable function".to_string())
-                        }
-                        Some(Some(a))
-                            if a.asynchronous
-                                && !is_promise(
-                                    program,
-                                    &f.return_type,
-                                    &mut std::collections::HashSet::new(),
-                                ) =>
-                        {
-                            Some("async export requires a Promise<T> signature".to_string())
-                        }
-                        Some(Some(a))
-                            if f.params.len() < a.min
-                                || a.max.is_some_and(|max| f.params.len() > max) =>
-                        {
-                            Some(format!(
-                                "incompatible arity: declaration has {}, JavaScript accepts {}..{}",
-                                f.params.len(),
-                                a.min,
-                                a.max.map_or("unbounded".to_string(), |n| n.to_string())
-                            ))
-                        }
-                        _ => None,
-                    };
-                    if let Some(problem) = problem {
-                        errors.push(Diagnostic::error(
-                            f.span.start.line,
-                            f.span.start.column,
-                            format!("summoned module `{source}`, export `{}`: {problem}", f.name),
-                        ));
-                    }
+        let spec = match module_spec(source) {
+            Ok(spec) => spec,
+            Err(message) => {
+                diagnostics.push(Diagnostic::error(
+                    span.start.line,
+                    span.start.column,
+                    format!("cannot verify summoned module `{source}`: {message}"),
+                ));
+                continue;
+            }
+        };
+        let bytes = match read_summoned_module(&spec, file_path, virtual_modules, skip_fs) {
+            Ok(ModuleRead::Bytes(bytes)) => bytes,
+            Ok(ModuleRead::Unavailable) => {
+                diagnostics.push(Diagnostic::info(
+                    span.start.line,
+                    span.start.column,
+                    UNVERIFIED_NO_MODULE_ACCESS,
+                ));
+                continue;
+            }
+            Err(message) => {
+                diagnostics.push(Diagnostic::error(
+                    span.start.line,
+                    span.start.column,
+                    format!("cannot verify summoned module `{source}`: {message}"),
+                ));
+                continue;
+            }
+        };
+        let module = match crate::catalog::parse_js(&bytes) {
+            Ok(module) => module,
+            Err(message) => {
+                diagnostics.push(Diagnostic::error(
+                    span.start.line,
+                    span.start.column,
+                    format!("cannot verify summoned module `{source}`: {message}"),
+                ));
+                continue;
+            }
+        };
+        let exports = exports(&module);
+        for f in *functions {
+            let problem = match exports.get(f.name) {
+                None => Some("export does not exist or is an unresolved re-export".to_string()),
+                Some(None) => Some("export is not a statically verifiable function".to_string()),
+                Some(Some(a))
+                    if a.asynchronous
+                        && !is_promise(
+                            program,
+                            &f.return_type,
+                            &mut std::collections::HashSet::new(),
+                        ) =>
+                {
+                    Some("async export requires a Promise<T> signature".to_string())
                 }
+                Some(Some(a))
+                    if f.params.len() < a.min || a.max.is_some_and(|max| f.params.len() > max) =>
+                {
+                    Some(format!(
+                        "incompatible arity: declaration has {}, JavaScript accepts {}..{}",
+                        f.params.len(),
+                        a.min,
+                        a.max.map_or("unbounded".to_string(), |n| n.to_string())
+                    ))
+                }
+                _ => None,
+            };
+            if let Some(problem) = problem {
+                diagnostics.push(Diagnostic::error(
+                    f.span.start.line,
+                    f.span.start.column,
+                    format!("summoned module `{source}`, export `{}`: {problem}", f.name),
+                ));
             }
         }
     }
-    errors
+    diagnostics
 }

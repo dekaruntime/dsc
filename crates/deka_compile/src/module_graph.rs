@@ -272,6 +272,10 @@ pub struct GraphCompileOptions {
     /// Forwarded to [`CompileOptions::module_root`] for every module so plan
     /// and graph emission agree on `deka:dev/<id>` identities.
     pub module_root: Option<PathBuf>,
+    /// When true, summoned `.mjs` files are not read from the host filesystem.
+    /// Browser/wasm project hosts set this; native graph compilation leaves it
+    /// false. Virtual loaders still supply bytes through [`ModuleLoader::load`].
+    pub skip_summon_fs: bool,
 }
 
 /// A discovered module and its outgoing dependencies.
@@ -1013,6 +1017,7 @@ pub fn compile_module_graph_with_options(
                 HashSet::new()
             },
             inject_deka_id: Some(inject_deka_id),
+            skip_summon_fs: options.skip_summon_fs,
             ..Default::default()
         };
         match compile_to_js_with_imports_and_options(

@@ -1,4 +1,5 @@
 use deka_compile::{compile_to_js, compile_to_js_with_options, CompileOptions};
+use deka_syntax::Severity;
 use std::process::Command;
 fn compile(source: &str) -> Result<deka_compile::CompileResult, Vec<deka_syntax::Diagnostic>> {
     compile_to_js(
@@ -218,6 +219,122 @@ fn opaque_types_across_files_keep_identity() {
     assert!(
         compile_module_graph(&entry, &loader).is_err(),
         "same-spelled opaque declarations in different modules must differ"
+    );
+}
+
+#[test]
+fn skip_fs_records_unverified_note_and_compiles() {
+    let result = compile_to_js_with_options(
+        "summon { total noop() void } from \"./foreign.mjs\"\nnoop()\n",
+        "virtual.ds",
+        CompileOptions {
+            skip_summon_fs: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Info
+                && d.message
+                    .contains(deka_compile::summon::UNVERIFIED_NO_MODULE_ACCESS)),
+        "{:?}",
+        result.diagnostics
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .all(|d| d.severity != Severity::Error),
+        "{:?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn skip_fs_still_reports_diagnostics_that_do_not_need_module_bytes() {
+    let skip = CompileOptions {
+        skip_summon_fs: true,
+        ..Default::default()
+    };
+    let errors = compile_to_js_with_options(
+        "opaque type Handle\nsummon { total handle() Handle } from \"./foreign.mjs\"\nexport { handle }\n",
+        "virtual.ds",
+        skip.clone(),
+    )
+    .unwrap_err();
+    assert!(
+        errors.iter().any(|d| d.message.contains("file-private")),
+        "{errors:?}"
+    );
+    assert!(
+        errors.iter().all(|d| d.severity == Severity::Error),
+        "{errors:?}"
+    );
+
+    let errors = compile_to_js_with_options(
+        "summon { fail() Exception<number, string> } from \"./foreign.mjs\"\nconst x = fail()\n",
+        "virtual.ds",
+        skip.clone(),
+    )
+    .unwrap_err();
+    assert!(
+        errors.iter().any(|d| d.message.contains("match")),
+        "{errors:?}"
+    );
+
+    let errors = compile_to_js_with_options(
+        "summon { number() number } from \"./foreign.mjs\"",
+        "virtual.ds",
+        skip.clone(),
+    )
+    .unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|d| d.message.contains("explicit `total`")),
+        "{errors:?}"
+    );
+
+    let result = compile_to_js_with_options(
+        "summon { total read() number } from \"./foreign.mjs\"",
+        "virtual.ds",
+        skip,
+    )
+    .unwrap();
+    assert!(
+        result.diagnostics.iter().any(|d| d
+            .message
+            .contains(deka_compile::summon::UNVERIFIED_NO_MODULE_ACCESS)),
+        "{:?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn skip_fs_still_verifies_when_module_bytes_are_supplied() {
+    let options = CompileOptions {
+        skip_summon_fs: true,
+        foreign_modules: [(
+            "./foreign.mjs".into(),
+            include_str!("fixtures/summon/foreign.mjs").into(),
+        )]
+        .into(),
+        ..Default::default()
+    };
+    let errors = compile_to_js_with_options(
+        "summon { total read() number } from \"./foreign.mjs\"",
+        "virtual.ds",
+        options,
+    )
+    .unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|d| d.message.contains("incompatible arity")),
+        "{errors:?}"
     );
 }
 

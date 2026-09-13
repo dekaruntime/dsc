@@ -157,6 +157,7 @@ impl ProjectState {
             // Virtual in-memory project: paths are already project-relative,
             // so no root relativization is needed.
             module_root: None,
+            skip_summon_fs: true,
         };
         match compile_module_graph_with_options(&entry, &loader, options) {
             Ok(result) => {

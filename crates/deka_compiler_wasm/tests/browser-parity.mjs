@@ -44,6 +44,18 @@ if (!success.ok || success.metadata.language !== "deka" || !success.output?.code
   throw new Error(`successful .ds compile did not match the ABI contract: ${JSON.stringify(success)}`);
 }
 
+const summon = compile(
+  'summon { total noop() void } from "./foreign.mjs"\nnoop();\n',
+  "lesson.ds",
+  "deka",
+);
+if (!summon.ok) {
+  throw new Error(`summon without fs must compile, not hard-fail: ${JSON.stringify(summon)}`);
+}
+if (!summon.diagnostics?.some((diagnostic) => diagnostic.severity === "info" && String(diagnostic.message).includes("unverified: platform has no module access"))) {
+  throw new Error(`summon without fs must record an unverified note: ${JSON.stringify(summon)}`);
+}
+
 const rejectedFilename = compile("function greeting($name: string): string { return $name; }", "legacy.phpx", "phpx");
 if (rejectedFilename.ok || !rejectedFilename.diagnostics?.[0]?.message.includes("only accepts .ds")) {
   throw new Error(`PHPX filename fallback was not rejected: ${JSON.stringify(rejectedFilename)}`);

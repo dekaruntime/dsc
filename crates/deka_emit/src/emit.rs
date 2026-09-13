@@ -14,6 +14,32 @@ use deka_syntax::{
 
 use crate::util::{bin_op_str, escape_string, is_primitive_receiver, un_op_str, write_indent};
 
+/// React value-import specifier from the configured jsxRuntime (rfd#64 #189 family).
+///
+/// `jsxRuntime` is `{react-module}/jsx-runtime` by default. Dropping a final
+/// `jsx-runtime` / `jsx-dev-runtime` segment yields the React module:
+/// `@js/react/jsx-runtime` → `@js/react`. Amendment 2 resolves that specifier
+/// as a runtime builtin, so emission does not change when React graduates.
+pub fn react_module_specifier(jsx_runtime: &str) -> String {
+    let (parent, last) = match jsx_runtime.rsplit_once('/') {
+        Some(parts) => parts,
+        None => return "react".to_string(),
+    };
+    let (stem, ext) = match last.find('.') {
+        Some(i) => (&last[..i], &last[i..]),
+        None => (last, ""),
+    };
+    if stem == "jsx-runtime" || stem == "jsx-dev-runtime" {
+        if parent.is_empty() || parent == "." {
+            format!("./react{ext}")
+        } else {
+            parent.to_string()
+        }
+    } else {
+        format!("{parent}/react{ext}")
+    }
+}
+
 fn is_panic_callee(callee: &Expr<'_>) -> bool {
     match callee {
         Expr::Identifier { name: "panic", .. } => true,
@@ -1529,6 +1555,16 @@ impl<'a> Emitter<'a> {
             self.out.push_str(&json_string(&self.jsx_runtime));
             self.out.push(';');
         }
+        let hooks = self.hook_builtins_used();
+        if !hooks.is_empty() {
+            if !first { self.out.push('\n'); }
+            first = false;
+            self.out.push_str("import { ");
+            self.out.push_str(&hooks.join(", "));
+            self.out.push_str(" } from ");
+            self.out.push_str(&json_string(&react_module_specifier(&self.jsx_runtime)));
+            self.out.push(';');
+        }
 
         // Imports end without a trailing newline; separate them from the
         // prelude so each `import` stays on its own line. Hosts transform
@@ -2520,6 +2556,45 @@ impl<'a> Emitter<'a> {
             });
             found
         })
+    }
+
+    fn user_imported(&self, name: &str) -> bool {
+        self.program.statements.iter().any(|stmt| {
+            matches!(
+                stmt,
+                Stmt::Import { specifiers, .. }
+                    if specifiers.iter().any(|spec| spec.local == name)
+            )
+        })
+    }
+
+    fn hook_builtins_used(&self) -> Vec<&'static str> {
+        let mut saw_state = false;
+        let mut saw_ref = false;
+        for stmt in self.program.statements.iter() {
+            if !self.should_emit_stmt(stmt) {
+                continue;
+            }
+            deka_syntax::visit::walk_stmt(stmt, &mut |expr| {
+                // Resolved references, not call-site text: `const f = useState`
+                // must emit the import even when the call is `f(0)`.
+                if let Expr::Identifier { name, .. } = expr {
+                    match *name {
+                        "useState" if !self.user_imported("useState") => saw_state = true,
+                        "useRef" if !self.user_imported("useRef") => saw_ref = true,
+                        _ => {}
+                    }
+                }
+            });
+        }
+        let mut names = Vec::new();
+        if saw_state {
+            names.push("useState");
+        }
+        if saw_ref {
+            names.push("useRef");
+        }
+        names
     }
 
     fn configure_jsx_names(&mut self, source: &str) {

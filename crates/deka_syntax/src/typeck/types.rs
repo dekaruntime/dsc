@@ -80,12 +80,40 @@ impl<'a> Type<'a> {
     pub fn is_react_node(&self) -> bool { matches!(self, Type::Opaque { name: "ReactNode", identity: usize::MAX }) }
 
     /// Component is nominal in diagnostics and an ordinary function at calls.
+    /// `Hook<fn...>` unwraps to the inner function so JSX and call checking
+    /// reuse the ordinary contract; callers that care about hook color must
+    /// inspect [`Type::is_hook_fn`] before unwrapping.
     pub fn function_contract(&self) -> Self {
         match self {
+            Type::Generic { base: "Hook", args } if args.len() == 1 => args[0].function_contract(),
             Type::Generic { base: "Component", args } if args.len() == 1 => Type::Function {
                 params: vec![args[0].clone()], ret: Box::new(Type::react_node()), optional: 0,
             },
             _ => self.clone(),
+        }
+    }
+
+    /// Hook color lives on the function type (`Hook<fn(...) T>`), the same
+    /// Generic-wrapper shape as `Exception<>` on a signature (rfd#64).
+    pub fn is_hook_fn(&self) -> bool {
+        matches!(self, Type::Generic { base: "Hook", args } if args.len() == 1)
+    }
+
+    pub fn as_hook(self) -> Self {
+        if self.is_hook_fn() {
+            self
+        } else {
+            Type::Generic {
+                base: "Hook",
+                args: vec![self],
+            }
+        }
+    }
+
+    pub fn unhook(&self) -> Self {
+        match self {
+            Type::Generic { base: "Hook", args } if args.len() == 1 => args[0].clone(),
+            other => other.clone(),
         }
     }
 

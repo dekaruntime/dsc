@@ -12,7 +12,8 @@ mod util;
 pub use emit::{
     build_factory_names, collect_js_identifier_tokens, dev_slot_id,
     dev_slot_source_path, dev_uses_name, emit_dev_entry, emit_js, emit_js_module_with_options,
-    emit_js_with_imports, emit_js_with_options, live_dev_uses_name, ModuleEmit,
+    emit_js_with_imports, emit_js_with_options, live_dev_uses_name, react_module_specifier,
+    ModuleEmit,
 };
 
 #[cfg(test)]
@@ -2234,6 +2235,249 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
             1,
             "{out}"
         );
+    }
+
+    #[test]
+    fn react_module_specifier_follows_jsx_runtime_family() {
+        assert_eq!(react_module_specifier("@js/react/jsx-runtime"), "@js/react");
+        assert_eq!(react_module_specifier("react/jsx-runtime"), "react");
+        assert_eq!(react_module_specifier("react/jsx-dev-runtime"), "react");
+        assert_eq!(react_module_specifier("./jsx-runtime.mjs"), "./react.mjs");
+        assert_eq!(react_module_specifier("./runtime.mjs"), "./react.mjs");
+        assert_eq!(react_module_specifier("runtime"), "react");
+    }
+
+    #[test]
+    fn emit_usestate_is_byte_idiomatic() {
+        let out = parse_check_and_emit(
+            "fn Counter() ReactNode {\n\
+               const [count, setCount] = useState(0);\n\
+               setCount(1);\n\
+               setCount(fn(c: number) number { return c + 1 });\n\
+               return <p>{string(count)}</p>;\n\
+             }",
+        );
+        assert!(
+            out.contains("import { useState } from \"@js/react\";"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("const [count, setCount] = useState(0);"),
+            "got: {out}"
+        );
+        assert!(out.contains("setCount(1);"), "got: {out}");
+        assert!(
+            out.contains("setCount(function(c) {\n    return c + 1;\n  });")
+                || out.contains("setCount(function(c) {\nreturn c + 1;\n});"),
+            "got: {out}"
+        );
+        assert!(
+            !out.contains("function useState") && !out.contains("__deka_useState"),
+            "hooks must not be wrapped: {out}"
+        );
+    }
+
+    #[test]
+    fn emit_usestate_alias_imports_resolved_reference() {
+        let out = parse_check_and_emit(
+            "fn Counter() ReactNode {\n\
+               const f = useState;\n\
+               const [count, setCount] = f(0);\n\
+               return <p>{string(count)}</p>;\n\
+             }",
+        );
+        assert!(
+            out.contains("import { useState } from \"@js/react\";"),
+            "alias must still emit the resolved builtin import, got: {out}"
+        );
+        assert!(
+            out.contains("const f = useState;") && out.contains("f(0)"),
+            "got: {out}"
+        );
+    }
+
+    #[test]
+    fn emit_useref_is_byte_idiomatic() {
+        let out = parse_check_and_emit(
+            "fn Counter() ReactNode {\n\
+               const r = useRef(0);\n\
+               r.current = 1;\n\
+               return <p>{string(r.current)}</p>;\n\
+             }",
+        );
+        assert!(
+            out.contains("import { useRef } from \"@js/react\";"),
+            "got: {out}"
+        );
+        assert!(out.contains("const r = useRef(0);"), "got: {out}");
+        assert!(out.contains("r.current = 1;"), "got: {out}");
+    }
+
+    #[test]
+    fn emit_counter_component_end_to_end() {
+        let out = parse_check_and_emit(
+            "fn Counter() ReactNode {\n\
+               const [count, setCount] = useState(0);\n\
+               return <button onClick={fn() { setCount(count + 1) }}>{string(count)}</button>;\n\
+             }\n\
+             const page = <Counter client:load />;",
+        );
+        assert!(
+            out.contains("import { jsx, jsxs, Fragment } from \"@js/react/jsx-runtime\";"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("import { useState } from \"@js/react\";"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("const [count, setCount] = useState(0);"),
+            "got: {out}"
+        );
+        assert!(out.contains("setCount(count + 1)"), "got: {out}");
+    }
+
+    /// SSR of a useState component through real React 19.1.1, matching the
+    /// #189 oracle pattern: vendor CJS into workspace `.cache/` (never /tmp)
+    /// and point `jsxRuntime` at `react/jsx-runtime` so the derived React
+    /// specifier is `react`.
+    #[test]
+    fn hooks_react_ssr_renders_initial_state() {
+        let cache = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.cache/react-hooks-ssr");
+        if let Err(err) = ensure_react_ssr_harness(&cache) {
+            eprintln!("React SSR harness unavailable ({err}); exact emission still covers the lowering");
+            return;
+        }
+        let arena = bumpalo::Bump::new();
+        let source = "export fn Counter() ReactNode {\n\
+               const [count, setCount] = useState(7);\n\
+               return <p>{string(count)}</p>;\n\
+             }";
+        let parsed = parse(source, &arena);
+        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        let program = parsed.program.expect("parse produced no program");
+        let typeck = deka_syntax::typeck::check_program(&program, source);
+        assert!(typeck.errors.is_empty(), "{:?}", typeck.errors);
+        let out = emit_js_module_with_options(
+            &program,
+            source,
+            &std::collections::HashMap::new(),
+            None,
+            &typeck.exception_forms,
+            &typeck.unwrap_calls,
+            &typeck.operator_rewrites,
+            &typeck.method_calls,
+            &typeck.type_of_calls,
+            &typeck.signature_calls,
+            &typeck.json_calls,
+            &typeck.array_builtin_calls,
+            &typeck.number_math_calls,
+            &typeck.static_type_calls,
+            &typeck.super_trees,
+            &typeck.enum_case_patterns,
+            &typeck.union_type_patterns,
+            &std::collections::HashMap::new(),
+            &std::collections::HashSet::new(),
+            "module.ds",
+            None,
+            None,
+            false,
+            Some("react/jsx-runtime".into()),
+            false,
+            false,
+        )
+        .expect("emit failed")
+        .js;
+        assert!(
+            out.contains("import { useState } from \"react\";"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("const [count, setCount] = useState(7);"),
+            "got: {out}"
+        );
+        std::fs::write(cache.join("counter.mjs"), &out).unwrap();
+        let runner = r#"
+import { createElement } from 'react';
+import { renderToString } from 'react-dom/server';
+import { Counter } from './counter.mjs';
+import assert from 'node:assert/strict';
+const html = renderToString(createElement(Counter));
+assert.ok(html.includes('7'), html);
+"#;
+        std::fs::write(cache.join("runner.mjs"), runner).unwrap();
+        let result = std::process::Command::new("node")
+            .arg("runner.mjs")
+            .current_dir(&cache)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "stdout: {}\nstderr: {}\nemitted: {out}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+
+    fn ensure_react_ssr_harness(cache: &std::path::Path) -> Result<(), String> {
+        let react_dir = cache.join("node_modules/react");
+        let react_dom_dir = cache.join("node_modules/react-dom");
+        let scheduler_dir = cache.join("node_modules/scheduler");
+        std::fs::create_dir_all(react_dir.join("cjs")).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(react_dom_dir.join("cjs")).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(scheduler_dir.join("cjs")).map_err(|e| e.to_string())?;
+        fetch_if_missing(
+            "https://unpkg.com/react@19.1.1/cjs/react.production.js",
+            &react_dir.join("cjs/react.production.js"),
+        )?;
+        fetch_if_missing(
+            "https://unpkg.com/react@19.1.1/cjs/react-jsx-runtime.production.js",
+            &react_dir.join("cjs/react-jsx-runtime.production.js"),
+        )?;
+        fetch_if_missing(
+            "https://unpkg.com/react-dom@19.1.1/cjs/react-dom.production.js",
+            &react_dom_dir.join("cjs/react-dom.production.js"),
+        )?;
+        fetch_if_missing(
+            "https://unpkg.com/react-dom@19.1.1/cjs/react-dom-server-legacy.node.production.js",
+            &react_dom_dir.join("cjs/react-dom-server-legacy.node.production.js"),
+        )?;
+        fetch_if_missing(
+            "https://unpkg.com/scheduler@0.26.0/cjs/scheduler.production.js",
+            &scheduler_dir.join("cjs/scheduler.production.js"),
+        )?;
+        std::fs::write(
+            react_dir.join("package.json"),
+            r#"{"name":"react","version":"19.1.1","main":"./cjs/react.production.js","exports":{".":"./cjs/react.production.js","./jsx-runtime":"./cjs/react-jsx-runtime.production.js"}}"#,
+        )
+        .map_err(|e| e.to_string())?;
+        std::fs::write(
+            react_dom_dir.join("package.json"),
+            r#"{"name":"react-dom","version":"19.1.1","main":"./cjs/react-dom.production.js","exports":{".":"./cjs/react-dom.production.js","./server":"./cjs/react-dom-server-legacy.node.production.js"}}"#,
+        )
+        .map_err(|e| e.to_string())?;
+        std::fs::write(
+            scheduler_dir.join("package.json"),
+            r#"{"name":"scheduler","version":"0.26.0","main":"./cjs/scheduler.production.js"}"#,
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    fn fetch_if_missing(url: &str, dest: &std::path::Path) -> Result<(), String> {
+        if dest.exists() && dest.metadata().map(|m| m.len() > 0).unwrap_or(false) {
+            return Ok(());
+        }
+        let status = std::process::Command::new("curl")
+            .args(["-fsSL", "-o", dest.to_str().unwrap(), url])
+            .status()
+            .map_err(|e| e.to_string())?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!("curl {url} failed: {status}"))
+        }
     }
 }
 

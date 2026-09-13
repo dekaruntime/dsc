@@ -22,6 +22,9 @@ mod ast_type;
 mod descriptor;
 mod exceptions;
 mod expr;
+mod hooks;
+#[cfg(test)]
+mod hooks_tests;
 mod indexing;
 mod stmt;
 #[cfg(test)]
@@ -48,6 +51,13 @@ pub(super) fn with_union_narrowing_hint<'a>(
 ) -> String {
     if matches!(expected, Type::Named { name: "Component" } | Type::Generic { base: "Component", .. }) {
         return format!("{message}; Component is a props interface or struct → ReactNode function; use ReactNode for a JSX value or return type");
+    }
+
+    if actual.is_hook_fn() && matches!(expected, Type::Function { .. }) {
+        return format!(
+            "{message}; {}",
+            hooks::HOOK_ASSIGN
+        );
     }
 
     if matches!(actual, Type::Union { .. }) && !matches!(expected, Type::Union { .. }) {
@@ -139,6 +149,9 @@ pub struct TypeckResult<'a> {
     pub union_type_patterns: HashMap<*const ast::Pattern<'a>, types::UnionMemberTest<'a>>,
     /// Typed build-only expressions consumed by the compiler into a dev plan.
     pub dev_blocks: HashMap<*const ast::Expr<'a>, DevBlock<'a>>,
+    /// Identifier references that resolved to compiler-known hook builtins.
+    /// Emission keys imports off resolved references, not call-site text.
+    pub hook_builtin_refs: HashSet<&'static str>,
 }
 
 /// Compiler-owned information for one `build { ... }` initializer.
@@ -789,6 +802,7 @@ pub fn check_program_with_imports<'a>(
         enum_case_patterns: checker.enum_case_patterns,
         union_type_patterns: checker.union_type_patterns,
         dev_blocks: checker.dev_blocks,
+        hook_builtin_refs: checker.hook_builtin_refs,
     }
 }
 
@@ -1263,6 +1277,7 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
                 | "JsError" | "SyntaxError" | "TypeError" | "RangeError" | "Error" | "Type" => {
                     Type::Named { name }
                 }
+                "Setter" | "Ref" => Type::Named { name },
                 _ => {
                     if structs.contains_key(name) {
                         Type::Struct { name }
@@ -1298,6 +1313,13 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
                         elem: Box::new(ast_type_to_export_type(
                             &args[0], structs, enums, aliases, newtypes, seen,
                         )),
+                    }
+                } else if (*base == "Setter" || *base == "Ref" || *base == "Hook") && args.len() == 1 {
+                    Type::Generic {
+                        base,
+                        args: vec![ast_type_to_export_type(
+                            &args[0], structs, enums, aliases, newtypes, seen,
+                        )],
                     }
                 } else if (*base == "Result" || *base == "Exception" || *base == "Promise")
                     && args.len() <= 2
@@ -1890,6 +1912,15 @@ struct Checker<'a> {
     return_type: Option<Type<'a>>,
     /// How many nested loops currently enclose the checked statement?
     loop_depth: usize,
+    /// Enclosing function's hook frame (rfd#64). Color lives on the function
+    /// type (`Hook<fn...>`), not a name table.
+    hook_fn_name: Option<&'a str>,
+    hook_is_component: bool,
+    hook_seen_return: bool,
+    hook_conditional_depth: usize,
+    hook_body_called: bool,
+    /// Identifier references that resolved to compiler-known hook builtins.
+    hook_builtin_refs: HashSet<&'static str>,
     /// When true, diagnostics are suppressed. Used during the pre-check
     /// inference pass that resolves forward-referenced function return types.
     infer_only: bool,
@@ -1951,6 +1982,12 @@ impl<'a> Checker<'a> {
             exception_catches: Vec::new(),
             return_type: None,
             loop_depth: 0,
+            hook_fn_name: None,
+            hook_is_component: false,
+            hook_seen_return: false,
+            hook_conditional_depth: 0,
+            hook_body_called: false,
+            hook_builtin_refs: HashSet::new(),
             infer_only: false,
         };
         this.seed_imports(imports);
@@ -1964,6 +2001,12 @@ impl<'a> Checker<'a> {
         // global, language and stdlib stay imports. It is declared here so
         // the native and browser (wasm) compilers agree on it (deka#481).
         self.globals.insert("deka", Type::Infer);
+        // Compiler-known React hooks (rfd#64). The bindings are hook-typed
+        // functions, so aliasing (`const f = useState`) preserves the color.
+        self.globals
+            .insert("useState", Self::builtin_hook_type(true));
+        self.globals
+            .insert("useRef", Self::builtin_hook_type(false));
     }
 
     fn seed_imports(&mut self, imports: &HashMap<&str, &ModuleExports<'a>>) {
@@ -2137,6 +2180,7 @@ impl<'a> Checker<'a> {
         self.number_math_calls.clear();
         self.unwrap_calls.clear();
         self.operator_rewrites.clear();
+        self.hook_builtin_refs.clear();
     }
 
     // ------------------------------------------------------------------
@@ -2144,6 +2188,7 @@ impl<'a> Checker<'a> {
     // ------------------------------------------------------------------
 
     fn declare_var(&mut self, name: &'a str, ty: Type<'a>) {
+        self.reject_hook_shadow(name, ast::Span::dummy());
         self.index_flow.shadow(name);
         if self.program.statements.iter().any(|stmt| matches!(stmt, ast::Stmt::Summon { functions, .. } if functions.iter().any(|f| f.name == name))) {
             self.error_span(ast::Span::dummy(), format!("cannot shadow summoned binding `{name}`"));
@@ -2152,6 +2197,7 @@ impl<'a> Checker<'a> {
     }
 
     fn declare_mutable_var(&mut self, name: &'a str, ty: Type<'a>) {
+        self.reject_hook_shadow(name, ast::Span::dummy());
         self.index_flow.shadow(name);
         if self.program.statements.iter().any(|stmt| matches!(stmt, ast::Stmt::Summon { functions, .. } if functions.iter().any(|f| f.name == name))) {
             self.error_span(ast::Span::dummy(), format!("cannot shadow summoned binding `{name}`"));
@@ -2446,6 +2492,14 @@ impl<'a> Checker<'a> {
                     .map(|(_, actual_ty)| self.is_assignable(expected_ty, actual_ty))
                     .unwrap_or(false)
             });
+        }
+        // Hook-typed functions are not plain functions. A plain function is
+        // assignable to a hook-typed slot (calling it during render is safe).
+        if expected.is_hook_fn() && !actual.is_hook_fn() {
+            return self.is_assignable(&expected.unhook(), actual);
+        }
+        if actual.is_hook_fn() && matches!(expected, Type::Function { .. }) {
+            return false;
         }
         // Function subtyping: parameters are contravariant, return type is covariant.
         if let (

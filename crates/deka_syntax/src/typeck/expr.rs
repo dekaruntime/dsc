@@ -514,7 +514,16 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::None { .. } => Type::None,
             ast::Expr::Identifier { name, span } => match self.lookup_var(name) {
-                Some(ty) => ty,
+                Some(ty) => {
+                    if super::hooks::is_hook_builtin(name) {
+                        self.note_hook_builtin_ref(if *name == "useState" {
+                            "useState"
+                        } else {
+                            "useRef"
+                        });
+                    }
+                    ty
+                }
                 None => {
                     let message = if *name == "Math" {
                         "`Math` is not available in DekaScript; import { PI } from \"math\" instead for PI, or use number methods such as `x.sqrt()`"
@@ -945,9 +954,9 @@ impl<'a> Checker<'a> {
                 self.expect_boolean(&cond_type, condition.span());
                 let saved = self.index_flow.clone();
                 self.assume_index_condition(condition);
-                let then_type = self.check_expr(then_branch);
+                let then_type = self.with_hook_conditional(|this| this.check_expr(then_branch));
                 self.index_flow.restrict_to(&saved);
-                let else_type = self.check_expr(else_branch);
+                let else_type = self.with_hook_conditional(|this| this.check_expr(else_branch));
                 self.index_flow.restrict_to(&saved);
                 self.unify_ternary_arms(then_type, else_type, *span)
             }
@@ -1026,6 +1035,7 @@ impl<'a> Checker<'a> {
         let saved_in_async = self.in_async_function;
         let saved_return_type = self.return_type.clone();
         let saved_catches = std::mem::take(&mut self.exception_catches);
+        let hook_frame = self.push_hook_frame(None, Self::is_component_return(&explicit_ret));
         self.in_function = true;
         self.in_async_function = is_async;
         self.return_type = body_expected_ret.clone();
@@ -1034,6 +1044,7 @@ impl<'a> Checker<'a> {
             self.check_statement(stmt);
         }
 
+        let body_called_hook = self.pop_hook_frame(hook_frame);
         self.in_async_function = saved_in_async;
 
         let final_ret = if is_async {
@@ -1067,10 +1078,15 @@ impl<'a> Checker<'a> {
             .take_while(|p| p.default_value.is_some())
             .count();
 
-        Type::Function {
+        let fn_type = Type::Function {
             params: param_types,
             ret: Box::new(final_ret),
             optional,
+        };
+        if body_called_hook {
+            fn_type.as_hook()
+        } else {
+            fn_type
         }
     }
 
@@ -1435,6 +1451,16 @@ impl<'a> Checker<'a> {
                         Type::Error
                     }
                 }
+            }
+            Type::Generic { base: "Ref", args } if args.len() == 1 && field == "current" => {
+                args[0].clone()
+            }
+            Type::Generic { base: "Ref", .. } => {
+                self.error_span(
+                    span,
+                    format!("Ref has no field `{field}`; read or assign `.current`"),
+                );
+                Type::Error
             }
             Type::Object { fields } => {
                 if let Some((_, ty)) = fields.iter().find(|(name, _)| *name == field) {
@@ -2192,7 +2218,13 @@ impl<'a> Checker<'a> {
                 self.check_bodyless_arm(arm, &scrutinee_type);
                 Type::Never
             } else {
-                self.check_exception_use(&arm.body, super::exceptions::Use::Arm, expected.clone())
+                self.with_hook_conditional(|this| {
+                    this.check_exception_use(
+                        &arm.body,
+                        super::exceptions::Use::Arm,
+                        expected.clone(),
+                    )
+                })
             };
             self.pop_value_scope();
             self.mutables.pop();
@@ -2979,6 +3011,8 @@ impl<'a> Checker<'a> {
                 super::exceptions::Use::Value,
                 Some(left_type.clone()),
             )
+        } else if matches!(op, ast::BinOp::And | ast::BinOp::Or) {
+            self.with_hook_conditional(|this| this.check_expr(right))
         } else {
             self.check_expr(right)
         };
@@ -3185,11 +3219,21 @@ impl<'a> Checker<'a> {
                                 Type::Error
                             }
                         };
+                        if callee_type.is_hook_fn() {
+                            if super::hooks::is_hook_builtin(name) {
+                                self.note_hook_builtin_ref(if *name == "useState" {
+                                    "useState"
+                                } else {
+                                    "useRef"
+                                });
+                            }
+                            self.note_hook_call(name, *span, super::hooks::is_hook_builtin(name));
+                        }
                         if let Type::Function {
                             params,
                             ret,
                             optional,
-                        } = callee_type
+                        } = callee_type.function_contract()
                         {
                             let required = params.len().saturating_sub(optional);
                             if params.len() < 1 || required > 1 {
@@ -3231,7 +3275,9 @@ impl<'a> Checker<'a> {
                         args,
                         span,
                     } => {
-                        let callee_type = self.check_expr(callee).function_contract();
+                        let callee_type = self.check_expr(callee);
+                        self.note_hook_callee(callee, &callee_type, *span);
+                        let callee_type = callee_type.function_contract();
                         if let Type::Function {
                             params,
                             ret,
@@ -4440,6 +4486,7 @@ impl<'a> Checker<'a> {
     /// declared with `mut`.
     fn field_is_mutable(&self, receiver_type: &Type<'a>, field: &str) -> bool {
         match receiver_type {
+            Type::Generic { base: "Ref", .. } if field == "current" => true,
             Type::Interface { name, identity } => self
                 .interface_info(name, *identity)
                 .and_then(|info| {
@@ -4518,6 +4565,13 @@ impl<'a> Checker<'a> {
             }
             self.unwrap_calls.insert(expr as *const _, super::types::UnwrapKind::Isset);
             return Type::Named { name: "boolean" };
+        }
+
+        if let ast::Expr::Identifier { name: "useState", .. } = callee {
+            return self.check_use_state(type_args, args, span);
+        }
+        if let ast::Expr::Identifier { name: "useRef", .. } = callee {
+            return self.check_use_ref(type_args, args, span);
         }
 
         // `panic(msg)` / `deka.panic(msg)`: never-returning lang item (RFD 21).
@@ -4655,9 +4709,18 @@ impl<'a> Checker<'a> {
             }
         }
 
-        let callee_type = self.check_expr(callee).function_contract();
+        let callee_type = self.check_expr(callee);
+        self.note_hook_callee(callee, &callee_type, span);
+        let was_hook = callee_type.is_hook_fn();
+        let callee_type = callee_type.function_contract();
 
         match callee_type {
+            Type::Generic {
+                base: "Setter",
+                args: setter_args,
+            } if setter_args.len() == 1 => {
+                self.check_setter_call(setter_args[0].clone(), type_args, args, span)
+            }
             Type::Function {
                 params,
                 ret,
@@ -4671,6 +4734,11 @@ impl<'a> Checker<'a> {
                 } else {
                     HashMap::new()
                 };
+                if was_hook && type_args.is_empty() {
+                    if subst.values().any(|t| matches!(t, Type::None)) {
+                        self.error_span(span, super::hooks::NONE_INIT);
+                    }
+                }
 
                 // rfd#56 phase 2: a bound is a contract at the call site.
                 // After inference solves a type parameter, the solution is

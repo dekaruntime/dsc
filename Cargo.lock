@@ -204,7 +204,7 @@ dependencies = [
 
 [[package]]
 name = "bundler"
-version = "0.52.0"
+version = "0.52.1"
 dependencies = [
  "anyhow",
  "base64",
@@ -316,7 +316,7 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "cli"
-version = "0.52.0"
+version = "0.52.1"
 dependencies = [
  "bumpalo",
  "bundler",
@@ -381,7 +381,7 @@ dependencies = [
 
 [[package]]
 name = "core"
-version = "0.52.0"
+version = "0.52.1"
 dependencies = [
  "deka-cli-core",
 ]
@@ -547,7 +547,7 @@ checksum = "4497dd39924474f70880dcc0bf27d807850010a8398147f618e2cebc751d8825"
 
 [[package]]
 name = "deka-fmt"
-version = "0.52.0"
+version = "0.52.1"
 dependencies = [
  "bumpalo",
  "deka_syntax",
@@ -574,7 +574,7 @@ checksum = "60f5ba90afc9de293ed21a733f42c6315f542b64242f2a1a6edf5329a3e72d53"
 
 [[package]]
 name = "deka_compile"
-version = "0.52.0"
+version = "0.52.1"
 dependencies = [
  "bumpalo",
  "deka_emit",
@@ -592,7 +592,7 @@ dependencies = [
 
 [[package]]
 name = "deka_compiler_wasm"
-version = "0.52.0"
+version = "0.52.1"
 dependencies = [
  "bumpalo",
  "deka-fmt",
@@ -606,7 +606,7 @@ dependencies = [
 
 [[package]]
 name = "deka_emit"
-version = "0.52.0"
+version = "0.52.1"
 dependencies = [
  "bumpalo",
  "deka_syntax",
@@ -617,7 +617,7 @@ dependencies = [
 
 [[package]]
 name = "deka_project"
-version = "0.52.0"
+version = "0.52.1"
 dependencies = [
  "deka-modules",
  "tempfile",
@@ -625,7 +625,7 @@ dependencies = [
 
 [[package]]
 name = "deka_syntax"
-version = "0.52.0"
+version = "0.52.1"
 dependencies = [
  "bumpalo",
  "insta",
@@ -634,11 +634,11 @@ dependencies = [
 
 [[package]]
 name = "deka_ui"
-version = "0.52.0"
+version = "0.52.1"
 
 [[package]]
 name = "dekascript_lsp"
-version = "0.52.0"
+version = "0.52.1"
 dependencies = [
  "anyhow",
  "deka_compile",
@@ -651,7 +651,7 @@ dependencies = [
 
 [[package]]
 name = "dekascript_lsp_wasm"
-version = "0.52.0"
+version = "0.52.1"
 dependencies = [
  "dekascript_lsp",
  "serde",
@@ -2179,7 +2179,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stdio"
-version = "0.52.0"
+version = "0.52.1"
 
 [[package]]
 name = "string_enum"

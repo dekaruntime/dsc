@@ -68,21 +68,30 @@ a checked interface or struct; JSX results use the opaque `ReactNode` type.
 A bare `Component` annotation on a binding infers its props from the checked
 function. Components evaluate dynamic expressions during render.
 
-`useState`, `useRef`, and `useEffect` are compiler-known hooks (no import).
-Hook-ness is part of the function type (`Hook<fn(...) T>`), the same
-Generic-wrapper shape as `Exception<>` on a signature: any function that
-calls a hook-typed function is itself hook-typed (fixed-point, transitive).
-Aliasing preserves the color; a hook-typed function is not assignable to a
-plain `fn(...)` parameter. Hook-typed functions are callable only from a
-Component (`ReactNode` return) or another hook function. Hook calls must be
-straight-line: unconditional, un-looped, and before any early return.
-`Setter<T>` accepts `T` or `fn(T) T` and stays a plain value; `Ref<T>.current`
-is mutable. `useEffect` takes `fn() Option<fn() void>` — `None` erases to
-`undefined` and `Some(cleanup)` erases to the cleanup function, matching
-React's contract. The dependency array is never written in DS; the compiler
-infers it from the effect's free reactive bindings (useState values, props,
-hook results) and omits stable identities (setters, refs). An unclassifiable
-capture is a compile error. Emission is the call as written plus
+`useState`, `useRef`, `useEffect`, `createContext`, and `useContext` are
+compiler-known (no import). Hook-ness is part of the function type
+(`Hook<fn(...) T>`), the same Generic-wrapper shape as `Exception<>` on a
+signature: any function that calls a hook-typed function is itself
+hook-typed (fixed-point, transitive). Aliasing preserves the color; a
+hook-typed function is not assignable to a plain `fn(...)` parameter.
+Hook-typed functions are callable only from a Component (`ReactNode` return)
+or another hook function. Hook calls must be straight-line: unconditional,
+un-looped, and before any early return. `Setter<T>` accepts `T` or `fn(T) T`
+and stays a plain value; `Ref<T>.current` is mutable. `useEffect` takes
+`fn() Option<fn() void>` — `None` erases to `undefined` and `Some(cleanup)`
+erases to the cleanup function, matching React's contract. The dependency
+array is never written in DS; the compiler infers it from the effect's free
+reactive bindings (useState values, props, hook results, including
+`useContext` values) and omits stable identities (setters, refs). An
+unclassifiable capture is a compile error.
+
+`createContext<T>(default)` is a module-scope factory (not a hook) that
+returns `Context<T>` with a total default — `useContext` of it is always
+legal. `createContext<T>()` has no default: every visible render path of a
+`useContext` use site must be wrapped in `<Ctx.Provider value={...}>`, or
+the checker diagnoses the missing provider instead of falling back silently.
+`<Ctx.Provider>` is the one allowed JSX member tag (RFD 8 otherwise).
+Emission is the call as written plus
 `import { useState } from` the React module implied by `jsxRuntime`
 (`@js/react/jsx-runtime` → `@js/react`), keyed off resolved references so
 aliases still import.

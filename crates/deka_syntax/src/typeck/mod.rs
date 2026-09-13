@@ -627,7 +627,9 @@ fn summarize_expr<'a>(
                 .any(|attribute| attribute.name.starts_with("client:"));
             let in_hydrated_subtree = inside_island || has_client_directive;
             if !in_hydrated_subtree && element.tag.chars().next().is_some_and(char::is_uppercase) {
-                references.insert(element.tag);
+                if element.context_provider().is_none() {
+                    references.insert(element.tag);
+                }
             }
             for attribute in element.attributes.iter() {
                 if is_event_handler(attribute) {
@@ -1323,7 +1325,13 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
                             &args[0], structs, enums, aliases, newtypes, seen,
                         )),
                     }
-                } else if (*base == "Setter" || *base == "Ref" || *base == "Hook") && args.len() == 1 {
+                } else if (*base == "Setter"
+                    || *base == "Ref"
+                    || *base == "Hook"
+                    || *base == "Context"
+                    || *base == "OpenContext")
+                    && args.len() == 1
+                {
                     Type::Generic {
                         base,
                         args: vec![ast_type_to_export_type(
@@ -1932,6 +1940,23 @@ struct Checker<'a> {
     hook_builtin_refs: HashSet<&'static str>,
     /// Parallel to `scopes`: how each binding participates in effect deps.
     capture_scopes: Vec<HashMap<&'a str, hooks::CaptureClass>>,
+    /// Parallel to `scopes`: createContext identity for a binding.
+    context_scopes: Vec<HashMap<&'a str, usize>>,
+    /// createContext identities, keyed by interned id.
+    contexts: HashMap<usize, hooks::ContextInfo<'a>>,
+    next_context_id: usize,
+    /// createContext call expressions already interned (seed + real check).
+    context_by_expr: HashMap<*const ast::Expr<'a>, usize>,
+    /// `<Ctx.Provider>` elements and the context they provide.
+    provider_elements: HashMap<*const ast::JsxElement<'a>, usize>,
+    /// Direct `useContext` consumption, keyed by the enclosing named function.
+    fn_uses_context: HashMap<&'a str, Vec<(usize, ast::Span)>>,
+    /// Direct `useContext` consumption, keyed by the enclosing function body.
+    body_uses_context: HashMap<*const [ast::Stmt<'a>], Vec<(usize, ast::Span)>>,
+    /// Hook-typed calls from a named function to another named function.
+    fn_hook_calls: HashMap<&'a str, HashSet<&'a str>>,
+    /// Body of the function currently being checked (provider-presence).
+    current_body: Option<&'a [ast::Stmt<'a>]>,
     /// Inferred `useEffect` dependency arrays, keyed by the call expression.
     effect_deps: HashMap<*const ast::Expr<'a>, Vec<&'a str>>,
     /// Auto-inserted `useMemo` / `useCallback` sites, keyed by expression.
@@ -1982,6 +2007,15 @@ impl<'a> Checker<'a> {
             scopes: vec![HashMap::new()],
             mutables: vec![HashSet::new()],
             capture_scopes: vec![HashMap::new()],
+            context_scopes: vec![HashMap::new()],
+            contexts: HashMap::new(),
+            next_context_id: 0,
+            context_by_expr: HashMap::new(),
+            provider_elements: HashMap::new(),
+            fn_uses_context: HashMap::new(),
+            body_uses_context: HashMap::new(),
+            fn_hook_calls: HashMap::new(),
+            current_body: None,
             effect_deps: HashMap::new(),
             memo_sites: HashMap::new(),
             pending_module_bindings: HashSet::new(),
@@ -2027,6 +2061,10 @@ impl<'a> Checker<'a> {
             .insert("useRef", Self::builtin_hook_type(false));
         self.globals
             .insert("useEffect", Self::builtin_use_effect_type());
+        self.globals
+            .insert("createContext", Self::builtin_create_context_type());
+        self.globals
+            .insert("useContext", Self::builtin_use_context_type());
     }
 
     fn seed_imports(&mut self, imports: &HashMap<&str, &ModuleExports<'a>>) {
@@ -2119,14 +2157,16 @@ impl<'a> Checker<'a> {
                 }
 
                 if let Some(ty) = exports.values.get(imported) {
-                    self.declare_var(local, exceptions::localize_export(ty, specifiers, exports));
+                    let ty = exceptions::localize_export(ty, specifiers, exports);
+                    self.intern_imported_context(local, &ty);
+                    self.declare_var(local, ty.clone());
                     // A value can carry a private struct type (for example,
                     // `export const origin = Point { ... }`). Reuse the
                     // compiler-private closure from dsc#86 for field lookup
                     // without adding the struct to `self.structs`, which
                     // would make it nameable or constructible by importers.
                     let mut names = HashSet::new();
-                    collect_struct_type_names(ty, &mut names);
+                    collect_struct_type_names(&ty, &mut names);
                     for name in names {
                         if let Some(closure) = exports.promotion_structs.get(name) {
                             self.promotion_structs.insert(name, closure.clone());
@@ -2203,6 +2243,14 @@ impl<'a> Checker<'a> {
         self.hook_builtin_refs.clear();
         self.effect_deps.clear();
         self.memo_sites.clear();
+        // Module-level createContext identities are interned in
+        // `collect_module_value_bindings` before the silent inference pass.
+        // Function bodies are checked before those declarations run in
+        // source order, so the identities must survive this reset.
+        self.provider_elements.clear();
+        self.fn_uses_context.clear();
+        self.body_uses_context.clear();
+        self.fn_hook_calls.clear();
     }
 
     // ------------------------------------------------------------------
@@ -2212,6 +2260,7 @@ impl<'a> Checker<'a> {
     pub(super) fn push_value_scope(&mut self) {
         self.scopes.push(HashMap::new());
         self.capture_scopes.push(HashMap::new());
+        self.context_scopes.push(HashMap::new());
     }
 
     fn declare_var(&mut self, name: &'a str, ty: Type<'a>) {
@@ -2435,6 +2484,14 @@ impl<'a> Checker<'a> {
         }
         if expected == actual {
             return true;
+        }
+        // Total and no-default contexts are the same user-facing `Context<T>`;
+        // default-ness is a checker fact on the binding, not a type split
+        // the programmer writes.
+        if let (Some(expected_value), Some(actual_value)) =
+            (expected.context_value_type(), actual.context_value_type())
+        {
+            return self.is_assignable(expected_value, actual_value);
         }
         // `never` is the bottom type: assignable to anything.
         if matches!(actual, Type::Never) {

@@ -135,6 +135,7 @@ impl<'a> Checker<'a> {
             }
         }
         self.capture_scopes.pop();
+        self.context_scopes.pop();
     }
 
     /// Fourth proof source (rfd#66): tuple length is fixed by its type.

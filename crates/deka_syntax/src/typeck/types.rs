@@ -121,6 +121,39 @@ impl<'a> Type<'a> {
         matches!(self, Type::Error)
     }
 
+    /// `createContext<T>(default)` is `Context<T>` (total). `createContext<T>()`
+    /// is `OpenContext<T>` internally and still displays as `Context<T>`.
+    pub fn context(value: Type<'a>, has_default: bool) -> Self {
+        Type::Generic {
+            base: if has_default { "Context" } else { "OpenContext" },
+            args: vec![value],
+        }
+    }
+
+    pub fn is_context(&self) -> bool {
+        matches!(
+            self,
+            Type::Generic {
+                base: "Context" | "OpenContext",
+                args
+            } if args.len() == 1
+        )
+    }
+
+    pub fn context_has_default(&self) -> bool {
+        matches!(self, Type::Generic { base: "Context", args } if args.len() == 1)
+    }
+
+    pub fn context_value_type(&self) -> Option<&Type<'a>> {
+        match self {
+            Type::Generic {
+                base: "Context" | "OpenContext",
+                args,
+            } if args.len() == 1 => Some(&args[0]),
+            _ => None,
+        }
+    }
+
     /// Return the element type exposed by a collection operation.
     ///
     /// `Var` is deliberately preserved for an unconstrained collection (for
@@ -320,6 +353,7 @@ impl fmt::Display for Type<'_> {
                 write!(f, ") {ret}")
             }
             Type::Generic { base, args } => {
+                let base = if *base == "OpenContext" { "Context" } else { base };
                 write!(f, "{base}<")?;
                 for (i, arg) in args.iter().enumerate() {
                     if i > 0 {

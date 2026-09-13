@@ -665,6 +665,22 @@ pub struct JsxElement<'a> {
     pub span: Span,
 }
 
+impl<'a> JsxElement<'a> {
+    /// `LocaleContext.Provider` → `Some("LocaleContext")`. RFD 8 forbids
+    /// every other JSX member tag; the parser only produces this shape.
+    pub fn context_provider(&self) -> Option<&'a str> {
+        self.tag
+            .strip_suffix(".Provider")
+            .filter(|name| !name.is_empty() && !name.contains('.'))
+    }
+
+    /// Binding the tag refers to: the context object for `.Provider`, else
+    /// the tag itself. Tree-shaking and "is this name used?" walk this.
+    pub fn referenced_name(&self) -> &'a str {
+        self.context_provider().unwrap_or(self.tag)
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct JsxAttribute<'a> {
     pub name: &'a str,

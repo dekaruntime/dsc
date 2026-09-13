@@ -2507,6 +2507,139 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
         );
     }
 
+    fn useeffect_dep_arrays(out: &str) -> Vec<&str> {
+        out.split("useEffect(function()")
+            .skip(1)
+            .filter_map(|chunk| {
+                let start = chunk.find(", [")?;
+                let rest = &chunk[start + 2..];
+                let end = rest.find(']')?;
+                Some(&rest[..=end])
+            })
+            .collect()
+    }
+
+    /// deka#951: Theme.dsx writes `document.documentElement`'s `data-theme`
+    /// from a `useState` value captured only inside `unsafe` (a member-call
+    /// argument). Inference must emit `[theme]`, not a synthesized `[]`.
+    #[test]
+    fn emit_useeffect_infers_unsafe_member_call_capture() {
+        let out = parse_check_and_emit(
+            "export fn ThemeToggle() ReactNode {\n\
+               const pair = useState(\"light\");\n\
+               const theme = pair[0];\n\
+               const setTheme = pair[1];\n\
+               useEffect(fn() Option<fn() void> {\n\
+                 const _ = unsafe {\n\
+                   var root = globalThis.document && globalThis.document.documentElement\n\
+                   if (root) {\n\
+                     root.setAttribute(\"data-theme\", theme)\n\
+                   }\n\
+                   return 1\n\
+                 };\n\
+                 return None;\n\
+               });\n\
+               let label = \"Dark\";\n\
+               if (theme == \"dark\") {\n\
+                 label = \"Light\";\n\
+               }\n\
+               return <button type=\"button\" id=\"theme-toggle\" class=\"theme-toggle\" data-theme={theme} onClick={fn() void {\n\
+                   if (theme == \"dark\") {\n\
+                     setTheme(\"light\");\n\
+                   } else {\n\
+                     setTheme(\"dark\");\n\
+                   }\n\
+                 }}>{label}</button>;\n\
+             }",
+        );
+        assert_eq!(
+            useeffect_dep_arrays(&out),
+            ["[theme]"],
+            "Theme.dsx shape must infer [theme], not []: {out}"
+        );
+        assert!(
+            out.contains("root.setAttribute(\"data-theme\", theme)"),
+            "unsafe body must still splice the member call, got: {out}"
+        );
+    }
+
+    #[test]
+    fn emit_useeffect_infers_destructured_state_inside_unsafe() {
+        let out = parse_check_and_emit(
+            "fn ThemeToggle() ReactNode {\n\
+               const [theme, setTheme] = useState(\"light\");\n\
+               useEffect(fn() Option<fn() void> {\n\
+                 const _ = unsafe { document.documentElement.setAttribute(\"data-theme\", theme); return 1 };\n\
+                 return None;\n\
+               });\n\
+               setTheme(\"dark\");\n\
+               return <p>{theme}</p>;\n\
+             }",
+        );
+        assert_eq!(
+            useeffect_dep_arrays(&out),
+            ["[theme]"],
+            "destructured useState captured in unsafe must be a dep, got: {out}"
+        );
+    }
+
+    fn emit_unsafe_template_effect(unsafe_body: &str) -> String {
+        parse_check_and_emit(&format!(
+            "fn Swatch() ReactNode {{\n\
+               const [color, setColor] = useState(\"red\");\n\
+               useEffect(fn() Option<fn() void> {{\n\
+                 const _ = unsafe {{ {unsafe_body} }};\n\
+                 return None;\n\
+               }});\n\
+               setColor(\"blue\");\n\
+               return <p>{{color}}</p>;\n\
+             }}"
+        ))
+    }
+
+    /// deka#951 class via template interpolation: identifiers inside
+    /// `${...}` in an `unsafe` body must be captures, same as a member-call
+    /// argument.
+    #[test]
+    fn emit_useeffect_infers_unsafe_template_interpolation_capture() {
+        let out = emit_unsafe_template_effect("el.style = `color: ${color}`; return 1");
+        assert_eq!(
+            useeffect_dep_arrays(&out),
+            ["[color]"],
+            "template interpolation must infer [color], not []: {out}"
+        );
+    }
+
+    #[test]
+    fn emit_useeffect_infers_nested_template_interpolation_capture() {
+        let out = emit_unsafe_template_effect("el.text = `${`a${color}`}`; return 1");
+        assert_eq!(
+            useeffect_dep_arrays(&out),
+            ["[color]"],
+            "nested template interpolation must infer [color], not []: {out}"
+        );
+    }
+
+    #[test]
+    fn emit_useeffect_infers_escaped_backtick_template_interpolation_capture() {
+        let out = emit_unsafe_template_effect("el.text = `hello \\`world ${color}`; return 1");
+        assert_eq!(
+            useeffect_dep_arrays(&out),
+            ["[color]"],
+            "escaped backtick must not hide the interpolation capture: {out}"
+        );
+    }
+
+    #[test]
+    fn emit_useeffect_plain_string_dollar_brace_is_not_a_capture() {
+        let out = emit_unsafe_template_effect("el.style = \"color: ${color}\"; return 1");
+        assert_eq!(
+            useeffect_dep_arrays(&out),
+            ["[]"],
+            "dollar-brace inside a plain string is literal, deps must stay []: {out}"
+        );
+    }
+
     #[test]
     fn emit_automemo_pure_expression_over_tracked_inputs() {
         let out = parse_check_and_emit(

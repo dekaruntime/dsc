@@ -1507,6 +1507,7 @@ mod tests {
 
     #[test]
     fn graph_requires_annotation_for_uninferable_exported_const() {
+        // Intentional unsafe fixture (RFD 21): bare unsafe yielding an uninferable exported value.
         let root = PathBuf::from("/project");
         let lib = root.join("lib.ds");
         let mut files = HashMap::new();
@@ -2523,6 +2524,7 @@ mod tests {
 
     #[test]
     fn graph_dev_entry_emits_helper_referenced_only_inside_unsafe() {
+        // Intentional unsafe fixture (RFD 21): helper liveness inside raw-JS arrow bodies.
         // dsc#59: a helper reachable only from inside an `unsafe` arrow body
         // in a build body was dropped from the dev plan entry, so executing
         // the entry failed with an unknown-identifier error even though the
@@ -2801,8 +2803,12 @@ mod tests {
 
         let mut files = HashMap::new();
         files.insert(
+            root.join("./crypto.mjs"),
+            "export function string_of(n) { return String(n); }".to_string(),
+        );
+        files.insert(
             crypto.clone(),
-            "export fn random_bytes(n: number) Result<string, string> {\n  return unsafe { String(n) }\n}".to_string(),
+            "summon { total string_of(n: number) string } from \"./crypto.mjs\"\nexport fn random_bytes(n: number) Result<string, string> {\n  return Ok(string_of(n))\n}".to_string(),
         );
         files.insert(
             main.clone(),

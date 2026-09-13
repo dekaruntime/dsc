@@ -37,6 +37,7 @@ fn diagnostic_fixtures_keep_original_spans() {
 
 #[test]
 fn user_packages_and_unknown_names_are_rejected() {
+    // Intentional unsafe fixture (RFD 21): raw-JS catalog gating and diagnostic spans.
     for source in [
         "const x = safe { deka.time.now() }",
         "const x = unsafe { deka.time.now() }",
@@ -65,6 +66,7 @@ fn user_packages_and_unknown_names_are_rejected() {
 
 #[test]
 fn unsafe_checks_nested_calls_and_preserves_unicode_spans() {
+    // Intentional unsafe fixture (RFD 21): raw-JS catalog gating and diagnostic spans.
     let errors =
         official("// café ☕\nconst x = unsafe { /*comment*/ deka.json.parse() }").unwrap_err();
     assert_eq!(errors[0].line, 2);
@@ -135,6 +137,7 @@ fn nearest_manifest_controls_disk_sources() {
 
 #[test]
 fn escaped_identifiers_do_not_bypass_the_gate() {
+    // Intentional unsafe fixture (RFD 21): raw-JS catalog gating and diagnostic spans.
     for source in [
         r"const x = unsafe { d\u0065ka.time.now() }",
         r"const x = unsafe { d\u0065ka.time.missing() }",
@@ -202,6 +205,7 @@ fn safe_types_and_formatting_are_preserved() {
 
 #[test]
 fn raw_span_points_past_comments_to_the_call() {
+    // Intentional unsafe fixture (RFD 21): raw-JS catalog gating and diagnostic spans.
     let source = "const x = unsafe { /* deka.time.missing() */ deka.time.missing() }";
     let errors = official(source).unwrap_err();
     assert_eq!(errors[0].column, source.rfind("deka").unwrap() + 1);

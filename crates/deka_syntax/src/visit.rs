@@ -3,7 +3,10 @@ use crate::{ExportDecl, Expr, Stmt};
 
 pub fn walk_stmt(stmt: &Stmt<'_>, visit: &mut dyn FnMut(&Expr<'_>)) {
     match stmt {
-        Stmt::Const { value, .. } | Stmt::Let { value, .. } | Stmt::Expr { expr: value, .. } => {
+        Stmt::TupleBinding { value, .. }
+        | Stmt::Const { value, .. }
+        | Stmt::Let { value, .. }
+        | Stmt::Expr { expr: value, .. } => {
             walk_expr(value, visit);
         }
         Stmt::UnwrapLet {

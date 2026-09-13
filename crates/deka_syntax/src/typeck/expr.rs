@@ -688,6 +688,9 @@ impl<'a> Checker<'a> {
                     self.error_span(*span, format!("cannot index opaque type `{name}`"));
                     return Type::Error;
                 }
+                if let Type::Tuple { elements } = &object_type {
+                    return self.tuple_index_type(elements, index, *span);
+                }
                 let index_type = self.check_expr(index);
                 let bounded_array = match &object_type {
                     Type::Array { .. } => true,
@@ -1167,7 +1170,11 @@ impl<'a> Checker<'a> {
                 }
             };
 
-            let value_type = self.check_expr(value);
+            let value_type = self.check_exception_use(
+                value,
+                super::exceptions::Use::Value,
+                Some(unsolved_params_to_var(&expected_type, &inferred)),
+            );
             // Infer the struct's type arguments from the field values before
             // checking assignability: `Signal { value: 0 }` pins `T` to
             // `int`, and a value that is itself a type parameter (`Signal {
@@ -2634,9 +2641,8 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Tuple patterns destructure the existing homogeneous Array<T> runtime
-    /// representation. They match only arrays with exactly the written arity;
-    /// each element is checked recursively against T.
+    /// Match patterns keep their existing parentheses syntax. Native tuples
+    /// supply position types; array patterns retain homogeneous element types.
     fn check_tuple_pattern(
         &mut self,
         elements: &'a [ast::Pattern<'a>],
@@ -2644,6 +2650,21 @@ impl<'a> Checker<'a> {
         scrutinee_type: &Type<'a>,
     ) {
         match scrutinee_type {
+            Type::Tuple { elements: types } => {
+                if elements.len() != types.len() {
+                    self.error_span(
+                        span,
+                        format!(
+                            "tuple has {} positions; pattern has {} (arity must match exactly)",
+                            types.len(),
+                            elements.len()
+                        ),
+                    );
+                }
+                for (pattern, ty) in elements.iter().zip(types) {
+                    self.check_pattern(pattern, ty);
+                }
+            }
             Type::Array { elem } => {
                 let elem_type = elem.as_ref().clone();
                 for element in elements {
@@ -2952,6 +2973,12 @@ impl<'a> Checker<'a> {
         }
         let right_type = if op == ast::BinOp::Pipe {
             Type::Infer
+        } else if op == ast::BinOp::Assign {
+            self.check_exception_use(
+                right,
+                super::exceptions::Use::Value,
+                Some(left_type.clone()),
+            )
         } else {
             self.check_expr(right)
         };
@@ -3327,8 +3354,10 @@ impl<'a> Checker<'a> {
                     }
                     ast::Expr::IndexAccess { object, .. } => {
                         let object_type = self.check_expr(object);
-                        if matches!(object_type, Type::Array { .. } | Type::Object { .. })
-                            && !self.is_mutable_expr(object)
+                        if matches!(
+                            object_type,
+                            Type::Array { .. } | Type::Tuple { .. } | Type::Object { .. }
+                        ) && !self.is_mutable_expr(object)
                         {
                             self.error_at_expr(
                                 left,
@@ -3744,7 +3773,11 @@ impl<'a> Checker<'a> {
                 );
             } else {
                 for (expected, arg) in expected_params.iter().zip(args.iter()) {
-                    let arg_type = self.check_expr(arg);
+                    let arg_type = self.check_exception_use(
+                        arg,
+                        super::exceptions::Use::Value,
+                        Some(expected.clone()),
+                    );
                     if !self.is_assignable(expected, &arg_type) {
                         self.error_at_expr(
                             arg,
@@ -4710,7 +4743,11 @@ impl<'a> Checker<'a> {
                         if Self::is_hole_expr(arg) {
                             continue;
                         }
-                        let arg_type = self.check_expr(arg);
+                        let arg_type = self.check_exception_use(
+                            arg,
+                            super::exceptions::Use::Value,
+                            Some(expected.clone()),
+                        );
                         if !self.is_assignable(expected, &arg_type) {
                             self.error_at_expr(
                                 arg,
@@ -4760,7 +4797,11 @@ impl<'a> Checker<'a> {
                     );
                 } else {
                     for (expected, arg) in substituted_params.iter().zip(args.iter()) {
-                        let arg_type = self.check_expr(arg);
+                        let arg_type = self.check_exception_use(
+                            arg,
+                            super::exceptions::Use::Value,
+                            Some(expected.clone()),
+                        );
                         if !self.is_assignable(expected, &arg_type) {
                             self.error_at_expr(
                                 arg,
@@ -4905,7 +4946,7 @@ fn json_shape_error(
             }
             Ok(())
         }
-        T::Union { members } => {
+        T::Tuple { elements: members } | T::Union { members } => {
             for member in members {
                 json_shape_error(member, field)?;
             }
@@ -4947,7 +4988,9 @@ impl<'a> Checker<'a> {
             if !contains_param(param_ty) {
                 continue;
             }
-            let arg_type = self.check_expr(arg);
+            let context = unsolved_params_to_var(param_ty, &subst);
+            let arg_type =
+                self.check_exception_use(arg, super::exceptions::Use::Value, Some(context));
             infer_type_args(param_ty, &arg_type, &param_names, &mut subst);
         }
         subst
@@ -4982,7 +5025,7 @@ fn collect_param_names_rec<'a>(
             }
             collect_param_names_rec(ret, names, seen);
         }
-        Type::Generic { args, .. } => {
+        Type::Generic { args, .. } | Type::Tuple { elements: args } => {
             for a in args {
                 collect_param_names_rec(a, names, seen);
             }
@@ -4999,7 +5042,9 @@ fn contains_param(ty: &Type<'_>) -> bool {
         Type::Function { params, ret, .. } => {
             params.iter().any(contains_param) || contains_param(ret)
         }
-        Type::Generic { args, .. } => args.iter().any(contains_param),
+        Type::Generic { args, .. } | Type::Tuple { elements: args } => {
+            args.iter().any(contains_param)
+        }
         _ => false,
     }
 }
@@ -5015,6 +5060,12 @@ fn unsolved_params_to_var<'a>(ty: &Type<'a>, subst: &HashMap<&'a str, Type<'a>>)
         Type::Param { name } if !subst.contains_key(name) => Type::Var,
         Type::Option { inner } => Type::Option {
             inner: Box::new(unsolved_params_to_var(inner, subst)),
+        },
+        Type::Tuple { elements } => Type::Tuple {
+            elements: elements
+                .iter()
+                .map(|t| unsolved_params_to_var(t, subst))
+                .collect(),
         },
         Type::Array { elem } => Type::Array {
             elem: Box::new(unsolved_params_to_var(elem, subst)),
@@ -5058,6 +5109,11 @@ fn infer_type_args<'a>(
         }
         (Type::Option { inner: d }, Type::Option { inner: a }) => {
             infer_type_args(d, a, params, out)
+        }
+        (Type::Tuple { elements: d }, Type::Tuple { elements: a }) if d.len() == a.len() => {
+            for (d, a) in d.iter().zip(a) {
+                infer_type_args(d, a, params, out);
+            }
         }
         (Type::Array { elem: d }, Type::Array { elem: a }) => infer_type_args(d, a, params, out),
         // Function-typed parameters carry type parameters too: `map`'s

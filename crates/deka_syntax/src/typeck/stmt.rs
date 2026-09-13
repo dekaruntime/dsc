@@ -919,6 +919,29 @@ impl<'a> Checker<'a> {
         let prev_infer_only = self.infer_only;
         self.infer_only = true;
         for stmt in self.program.statements {
+            if let ast::Stmt::TupleBinding {
+                names,
+                ty,
+                is_const,
+                ..
+            } = stmt
+            {
+                let resolved = ty.as_ref().map(|t| self.resolve_ast_type(t));
+                for (i, name) in names.iter().enumerate() {
+                    let seed = match &resolved {
+                        Some(Type::Tuple { elements }) => {
+                            elements.get(i).cloned().unwrap_or(Type::Error)
+                        }
+                        _ => Type::Infer,
+                    };
+                    self.scopes[0].insert(name, seed);
+                    if !*is_const {
+                        self.mutables[0].insert(name);
+                    }
+                    self.pending_module_bindings.insert(name);
+                }
+                continue;
+            }
             let (name, ty, mutable) = match stmt {
                 ast::Stmt::Const { name, ty, .. } => (*name, ty.as_ref(), false),
                 ast::Stmt::Let { name, ty, .. } => (*name, ty.as_ref(), true),
@@ -1042,6 +1065,49 @@ impl<'a> Checker<'a> {
                 catch_body,
                 span,
             } => self.check_try(body, catch_name, catch_type.as_ref(), catch_body, *span),
+            ast::Stmt::TupleBinding {
+                names,
+                ty,
+                value,
+                is_const,
+                span,
+            } => {
+                let expected = ty.as_ref().map(|t| self.resolve_ast_type(t));
+                let actual = self.check_exception_use(
+                    value,
+                    super::exceptions::Use::Value,
+                    expected.clone(),
+                );
+                if let Some(expected) = &expected {
+                    if !self.is_assignable(expected, &actual) {
+                        self.error_span(*span, format!("expected `{expected}`, found `{actual}`"));
+                    }
+                }
+                let binding_type = expected.unwrap_or(actual);
+                let elements = if let Type::Tuple { elements } = binding_type {
+                    if names.len() != elements.len() {
+                        self.error_span(*span, format!("tuple has {} positions, but destructuring binds {} names; bind every position exactly once", elements.len(), names.len()));
+                    }
+                    elements
+                } else {
+                    self.error_span(*span, format!("destructuring requires a tuple, found `{binding_type}`; annotate the value with a tuple type such as [number, string]"));
+                    Vec::new()
+                };
+                for (i, name) in names.iter().enumerate() {
+                    if names[..i].contains(name) {
+                        self.error_span(*span, format!("duplicate tuple binding `{name}`; use a distinct name for each position"));
+                    }
+                    let ty = elements.get(i).cloned().unwrap_or(Type::Error);
+                    if *is_const {
+                        self.declare_var(name, ty);
+                    } else {
+                        self.declare_mutable_var(name, ty);
+                    }
+                    if self.scopes.len() == 1 {
+                        self.pending_module_bindings.remove(name);
+                    }
+                }
+            }
             ast::Stmt::Const {
                 name,
                 ty,
@@ -1494,9 +1560,9 @@ impl<'a> Checker<'a> {
         if let ast::Expr::Build { body, .. } = value {
             return self.check_dev_binding(name, ty, body, mutable, value, span);
         }
-        let value_type = self.check_expr(value);
-        let final_type = if let Some(annot) = ty {
-            let expected = self.resolve_ast_type(annot);
+        let expected = ty.map(|t| self.resolve_ast_type(t));
+        let value_type = self.check_exception_use(value, super::exceptions::Use::Value, expected.clone());
+        let final_type = if let Some(expected) = expected {
             if let Type::Option { inner } = &expected {
                 // Explicit `Option<T>` bindings must be initialized with
                 // `Some(...)` or `none`; the struct-field sugar that accepts a

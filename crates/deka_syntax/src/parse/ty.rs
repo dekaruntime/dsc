@@ -104,7 +104,23 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
         let (start, start_byte) = self.span_start();
 
-        if self.eat(TokenKind::Fn) {
+        if self.eat(TokenKind::LBracket) {
+            let mut elements = Vec::new();
+            self.skip_newlines();
+            while !self.at(TokenKind::RBracket) {
+                elements.push(self.parse_type()?);
+                self.skip_newlines();
+                if !self.eat(TokenKind::Comma) {
+                    break;
+                }
+                self.skip_newlines();
+            }
+            self.expect(TokenKind::RBracket)?;
+            Some(Type::Tuple {
+                elements: alloc_slice(self.arena, elements),
+                span: self.span_from(start, start_byte),
+            })
+        } else if self.eat(TokenKind::Fn) {
             // Function type: `fn(T, U) R`.
             self.expect(TokenKind::LParen)?;
             let mut params = Vec::new();

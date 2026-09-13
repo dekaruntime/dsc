@@ -327,6 +327,23 @@ impl<'src> Formatter<'src> {
         match stmt {
             Stmt::Export { decl, .. } => self.fmt_export_decl(decl, stmt_end_line),
             Stmt::Import { .. } => self.write(&import_to_string(stmt)),
+            Stmt::TupleBinding {
+                names,
+                ty,
+                value,
+                is_const,
+                ..
+            } => {
+                self.write(if *is_const { "const [" } else { "let [" });
+                self.write(&names.join(", "));
+                self.write("]");
+                if let Some(ty) = ty {
+                    self.write(": ");
+                    self.fmt_type(ty);
+                }
+                self.write(" = ");
+                self.fmt_expr(value);
+            }
             Stmt::Const {
                 name, ty, value, ..
             } => {
@@ -1671,7 +1688,7 @@ fn type_to_string(ty: &Type<'_>) -> String {
         }
         Type::Tuple { elements, .. } => {
             let parts: Vec<String> = elements.iter().map(type_to_string).collect();
-            format!("({})", parts.join(", "))
+            format!("[{}]", parts.join(", "))
         }
         Type::Record { fields, .. } => {
             let parts: Vec<String> = fields
@@ -1750,7 +1767,7 @@ fn stmt_span(stmt: &Stmt<'_>) -> Span {
     match stmt {
         Stmt::Export { span, .. } => *span,
         Stmt::Import { span, .. } => *span,
-        Stmt::Const { span, .. } => *span,
+        Stmt::TupleBinding { span, .. } | Stmt::Const { span, .. } => *span,
         Stmt::Let { span, .. } => *span,
         Stmt::UnwrapLet { span, .. } => *span,
         Stmt::Function { span, .. } => *span,

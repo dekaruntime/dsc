@@ -213,6 +213,19 @@ fn transform_stmt<'a>(
             }
         }
         Stmt::Import { .. } => return stmt.clone(),
+        Stmt::TupleBinding {
+            names,
+            ty,
+            value,
+            is_const,
+            span,
+        } => Stmt::TupleBinding {
+            names,
+            ty: ty.clone(),
+            value: transform_expr(value, arena, enums).clone(),
+            is_const: *is_const,
+            span: *span,
+        },
         Stmt::Const {
             name,
             ty,
@@ -918,6 +931,19 @@ fn lower_stmt<'a>(
             }
         }
         Stmt::Import { .. } => stmt.clone(),
+        Stmt::TupleBinding {
+            names,
+            ty,
+            value,
+            is_const,
+            span,
+        } => Stmt::TupleBinding {
+            names,
+            ty: ty.clone(),
+            value: lower_expr(value, arena, method_calls).clone(),
+            is_const: *is_const,
+            span: *span,
+        },
         Stmt::Const {
             name,
             ty,

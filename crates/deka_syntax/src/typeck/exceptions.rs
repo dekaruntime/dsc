@@ -68,6 +68,9 @@ pub(super) fn localize_export<'a>(
             Type::Option { inner } => Type::Option {
                 inner: Box::new(rename(inner, names)),
             },
+            Type::Tuple { elements } => Type::Tuple {
+                elements: elements.iter().map(|t| rename(t, names)).collect(),
+            },
             Type::Array { elem } => Type::Array {
                 elem: Box::new(rename(elem, names)),
             },
@@ -136,6 +139,64 @@ impl<'a> Checker<'a> {
         let usage = std::mem::take(&mut self.exception_use);
         let expected = self.exception_expected.take();
         let ptr = expr as *const ast::Expr<'a>;
+        if let (ast::Expr::Array { elements, .. }, Some(Type::Array { elem })) =
+            (expr, expected.as_ref())
+        {
+            if matches!(elem.as_ref(), Type::Tuple { .. }) {
+                for element in *elements {
+                    let actual =
+                        self.check_exception_use(element, Use::Value, Some((**elem).clone()));
+                    if !self.is_assignable(elem, &actual) {
+                        self.error_span(
+                            element.span(),
+                            format!("array element expects `{elem}`, found `{actual}`"),
+                        );
+                    }
+                }
+                return Type::Array { elem: elem.clone() };
+            }
+        }
+        if let (ast::Expr::Array { elements, span }, Some(Type::Tuple { elements: types })) =
+            (expr, expected.as_ref())
+        {
+            if elements.len() != types.len() {
+                self.error_span(*span, format!("tuple has {} positions; literal supplies {} elements (tuple arity must match exactly)", types.len(), elements.len()));
+            }
+            let mut actual_types = Vec::new();
+            for (i, element) in elements.iter().enumerate() {
+                let actual = self.check_exception_use(element, Use::Value, types.get(i).cloned());
+                if let Some(expected) = types.get(i) {
+                    if !self.is_assignable(expected, &actual) {
+                        self.error_span(
+                            element.span(),
+                            format!("tuple position {i} expects `{expected}`, found `{actual}`"),
+                        );
+                    }
+                }
+                actual_types.push(actual);
+                if matches!(element, ast::Expr::Spread { .. }) {
+                    self.error_span(element.span(), "tuple spread/rest is not supported");
+                }
+            }
+            return Type::Tuple {
+                elements: actual_types,
+            };
+        }
+        if let (
+            ast::Expr::EnumConstructor {
+                enum_name: "Option",
+                case_name: "Some",
+                payload: Some(payload),
+                ..
+            },
+            Some(Type::Option { inner }),
+        ) = (expr, expected.as_ref())
+        {
+            let actual = self.check_exception_use(payload, Use::Value, Some((**inner).clone()));
+            return Type::Option {
+                inner: Box::new(actual),
+            };
+        }
         match expr {
             ast::Expr::Paren { expr: inner, .. } | ast::Expr::Safe { expr: inner, .. } => {
                 let ty = self.check_exception_use(inner, usage, expected);
@@ -167,7 +228,11 @@ impl<'a> Checker<'a> {
                     self.error_span(*span, format!("`{case_name}` requires a payload"));
                     return Type::Error;
                 };
-                let payload_type = self.check_expr(payload);
+                let payload_expected = expected
+                    .as_ref()
+                    .and_then(|t| channels(t, "Exception"))
+                    .map(|(ok, err)| if *case_name == "Throw" { err } else { ok });
+                let payload_type = self.check_exception_use(payload, Use::Value, payload_expected);
                 if *case_name == "Throw" {
                     if !matches!(usage, Use::Return | Use::Arm | Use::Statement) {
                         self.error_span(*span, "`Throw(e)` must be in escaping position; return it or raise it in a match arm");

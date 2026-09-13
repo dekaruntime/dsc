@@ -25,6 +25,11 @@ impl<'a> Checker<'a> {
                 self.checked_option((**inner).clone(), span);
                 self.validate_option_erasure(inner, span);
             }
+            Type::Tuple { elements } => {
+                for t in elements {
+                    self.validate_option_erasure(t, span);
+                }
+            }
             Type::Array { elem } => self.validate_option_erasure(elem, span),
             Type::Generic { args, .. } | Type::Union { members: args } => {
                 for arg in args { self.validate_option_erasure(arg, span); }
@@ -195,7 +200,13 @@ impl<'a> Checker<'a> {
                 Type::Union { members: resolved }
             }
 
-            ast::Type::Tuple { span, .. } | ast::Type::Record { span, .. } => {
+            ast::Type::Tuple { elements, .. } => Type::Tuple {
+                elements: elements
+                    .iter()
+                    .map(|t| self.resolve_ast_type_rec(t, seen))
+                    .collect(),
+            },
+            ast::Type::Record { span, .. } => {
                 self.error_span(*span, "tuple/record types are not supported in v2 typeck");
                 Type::Error
             }

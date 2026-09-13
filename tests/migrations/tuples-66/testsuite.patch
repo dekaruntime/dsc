@@ -1,0 +1,11 @@
+--- a/corpus/parser/destructuring_let_rejected/destructuring_let_rejected.json
++++ b/corpus/parser/destructuring_let_rejected/destructuring_let_rejected.json
+@@ -1,5 +1,5 @@
+ {
+-  "title": "Array destructuring in let is rejected",
+-  "stage": "parse",
+-  "expectedDiagnosticContains": "expected identifier, found ``[``"
++  "title": "Array destructuring requires a tuple annotation",
++  "stage": "typecheck",
++  "expectedDiagnosticContains": "destructuring requires a tuple, found `Array<number>`"
+ }

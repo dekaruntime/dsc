@@ -24,6 +24,8 @@ mod exceptions;
 mod expr;
 mod indexing;
 mod stmt;
+#[cfg(test)]
+mod tuples_tests;
 mod types;
 
 pub use descriptor::{DescriptorField, DescriptorTree, JsonCall, JsonOperation, StaticTypeCall};
@@ -429,9 +431,9 @@ fn summarize_stmt<'a>(
             summarize_statements(body, direct, references, inside_island);
             summarize_statements(catch_body, direct, references, inside_island);
         }
-        ast::Stmt::Const { value, .. } | ast::Stmt::Let { value, .. } => {
-            summarize_expr(value, direct, references, inside_island)
-        }
+        ast::Stmt::TupleBinding { value, .. }
+        | ast::Stmt::Const { value, .. }
+        | ast::Stmt::Let { value, .. } => summarize_expr(value, direct, references, inside_island),
         ast::Stmt::UnwrapLet {
             scrutinee,
             alternative,
@@ -714,7 +716,7 @@ fn collect_fragment_factory_kinds<'a>(
         DescriptorTree::Array { elem } | DescriptorTree::Option { inner: elem } => {
             collect_fragment_factory_kinds(elem, out);
         }
-        DescriptorTree::Union { members } => {
+        DescriptorTree::Tuple { elements: members } | DescriptorTree::Union { members } => {
             for member in members {
                 collect_fragment_factory_kinds(member, out);
             }
@@ -795,9 +797,9 @@ pub(crate) fn is_concrete_export_type(ty: &Type<'_>) -> bool {
         Type::Function { params, ret, .. } => {
             params.iter().all(is_concrete_export_type) && is_concrete_export_type(ret)
         }
-        Type::Generic { args, .. } | Type::Union { members: args } => {
-            args.iter().all(is_concrete_export_type)
-        }
+        Type::Generic { args, .. }
+        | Type::Tuple { elements: args }
+        | Type::Union { members: args } => args.iter().all(is_concrete_export_type),
         Type::Object { fields } => fields
             .iter()
             .all(|(_, field_type)| is_concrete_export_type(field_type)),
@@ -827,7 +829,7 @@ fn collect_struct_type_names<'a>(ty: &Type<'a>, names: &mut HashSet<&'a str>) {
                 collect_struct_type_names(arg, names);
             }
         }
-        Type::Union { members: args } => {
+        Type::Tuple { elements: args } | Type::Union { members: args } => {
             for arg in args {
                 collect_struct_type_names(arg, names);
             }
@@ -962,13 +964,14 @@ pub fn refresh_module_export_values<'a>(
     let local_constants: HashSet<&str> = program
         .statements
         .iter()
-        .filter_map(|stmt| match stmt {
-            ast::Stmt::Const { name, .. } | ast::Stmt::Let { name, .. } => Some(*name),
+        .flat_map(|stmt| match stmt {
+            ast::Stmt::Const { name, .. } | ast::Stmt::Let { name, .. } => vec![*name],
             ast::Stmt::Export {
                 decl: ast::ExportDecl::Const { name, .. },
                 ..
-            } => Some(*name),
-            _ => None,
+            } => vec![*name],
+            ast::Stmt::TupleBinding { names, .. } => names.to_vec(),
+            _ => Vec::new(),
         })
         .collect();
     let exported_constants: Vec<(&str, &str)> = program
@@ -1306,7 +1309,13 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
                     inner, structs, enums, aliases, newtypes, seen,
                 )),
             },
-            ast::Type::Tuple { .. } | ast::Type::Record { .. } => Type::Error,
+            ast::Type::Tuple { elements, .. } => Type::Tuple {
+                elements: elements
+                    .iter()
+                    .map(|t| ast_type_to_export_type(t, structs, enums, aliases, newtypes, seen))
+                    .collect(),
+            },
+            ast::Type::Record { .. } => Type::Error,
             ast::Type::Union { members, .. } => Type::Union {
                 members: members
                     .iter()
@@ -1381,6 +1390,14 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
                     // Do not misrepresent an unresolved type parameter as a
                     // concrete named type in the annotation-only fallback.
                     declared_values.insert(*name, Type::Infer);
+                }
+            }
+            ast::Stmt::TupleBinding { names, .. } => {
+                for name in *names {
+                    declared_values.insert(
+                        *name,
+                        inferred_globals.get(name).cloned().unwrap_or(Type::Infer),
+                    );
                 }
             }
             ast::Stmt::Const { name, ty, .. } | ast::Stmt::Let { name, ty, .. } => {
@@ -2363,6 +2380,9 @@ impl<'a> Checker<'a> {
                     .zip(actual_args.iter())
                     .all(|(e, a)| self.is_assignable(e, a));
             }
+        }
+        if let (Type::Tuple { elements: e }, Type::Tuple { elements: a }) = (expected, actual) {
+            return e.len() == a.len() && e.iter().zip(a).all(|(e, a)| self.is_assignable(e, a));
         }
         // Arrays are covariant in their element type.
         if let (

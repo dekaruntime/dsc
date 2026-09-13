@@ -115,3 +115,17 @@ binding importable, including through aliases and barrels; callers need not
 import the type merely to inspect a returned value. Direct `export interface`
 syntax is a separate gap (dsc#185). No corpus/tour pairing patch is required:
 the unchanged corpus-v0.51.1 and pinned 90-lesson tour pass.
+
+## Native tuples (rfd#66)
+
+`cargo test --locked -p deka_syntax -p deka_emit -p deka_compile -p deka-fmt tuples_`
+checks tuple construction/consumption, the intrinsic type-length index proof,
+exact erased output, Node summon boundaries, module exports, and formatter
+idempotence. Bracket literals acquire tuple types only from expected tuple
+context; bare literals remain arrays. Declaration destructuring binds exactly
+the tuple's arity.
+
+The pinned corpus's former parser rejection for array destructuring needs a
+metadata-only diagnostic migration. See
+[migrations/tuples-66/README.md](migrations/tuples-66/README.md) for the owner
+patch, rule details, and full validation summaries.

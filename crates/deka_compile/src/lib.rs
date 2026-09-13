@@ -116,7 +116,8 @@ fn program_contains_jsx(program: &Program<'_>) -> bool {
     }
     fn stmt_has_jsx(stmt: &Stmt<'_>) -> bool {
         match stmt {
-            Stmt::Const { value, .. }
+            Stmt::TupleBinding { value, .. }
+            | Stmt::Const { value, .. }
             | Stmt::Let { value, .. }
             | Stmt::Expr { expr: value, .. } => expr_has_jsx(value),
             Stmt::Return { value, .. } => value.as_ref().is_some_and(expr_has_jsx),

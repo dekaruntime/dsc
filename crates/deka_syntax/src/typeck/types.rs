@@ -50,7 +50,12 @@ pub enum Type<'a> {
     /// A user-defined struct type.
     Struct { name: &'a str },
     /// An array type, e.g. `Array<number>` or `number[]`.
-    Array { elem: Box<Type<'a>> },
+    Array {
+        elem: Box<Type<'a>>,
+    },
+    Tuple {
+        elements: Vec<Type<'a>>,
+    },
     /// An object record type with known fields.
     Object { fields: Vec<(&'a str, Type<'a>)> },
     /// A declared interface type. Identity is its member slice in the shared
@@ -134,6 +139,9 @@ pub fn substitute_type<'a>(ty: &Type<'a>, subst: &std::collections::HashMap<&'a 
             .unwrap_or_else(|| Type::Named { name }),
         Type::Option { inner } => Type::Option {
             inner: Box::new(substitute_type(inner, subst)),
+        },
+        Type::Tuple { elements } => Type::Tuple {
+            elements: elements.iter().map(|t| substitute_type(t, subst)).collect(),
         },
         Type::Array { elem } => Type::Array {
             elem: Box::new(substitute_type(elem, subst)),
@@ -294,6 +302,15 @@ impl fmt::Display for Type<'_> {
                 write!(f, ">")
             }
             Type::Struct { name } => write!(f, "{name}"),
+            Type::Tuple { elements } => write!(
+                f,
+                "[{}]",
+                elements
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             Type::Array { elem } => write!(f, "Array<{elem}>"),
             Type::Object { fields } => {
                 write!(f, "{{")?;

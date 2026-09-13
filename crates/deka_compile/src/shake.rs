@@ -229,7 +229,8 @@ fn collect_primitive_extension_uses(
 
 fn is_entry_seed(stmt: &Stmt<'_>) -> bool {
     match stmt {
-        Stmt::Const { .. }
+        Stmt::TupleBinding { .. }
+        | Stmt::Const { .. }
         | Stmt::Let { .. }
         | Stmt::Expr { .. }
         | Stmt::If { .. }
@@ -260,6 +261,7 @@ fn exported_names<'a>(stmt: &'a Stmt<'a>) -> Vec<&'a str> {
 
 fn declared_names<'a>(stmt: &'a Stmt<'a>) -> Vec<Cow<'a, str>> {
     match stmt {
+        Stmt::TupleBinding { names, .. } => names.iter().map(|n| Cow::Borrowed(*n)).collect(),
         Stmt::Const { name, .. }
         | Stmt::Let { name, .. }
         | Stmt::Function { name, .. }
@@ -357,7 +359,10 @@ fn walk_runtime_type(ty: &deka_syntax::Type<'_>, visit: &mut dyn FnMut(&Expr<'_>
 
 fn walk_stmt(stmt: &Stmt<'_>, visit: &mut dyn FnMut(&Expr<'_>)) {
     match stmt {
-        Stmt::Const { value, .. } | Stmt::Let { value, .. } | Stmt::Expr { expr: value, .. } => {
+        Stmt::TupleBinding { value, .. }
+        | Stmt::Const { value, .. }
+        | Stmt::Let { value, .. }
+        | Stmt::Expr { expr: value, .. } => {
             walk_expr(value, visit);
         }
         Stmt::Return { value, .. } => {

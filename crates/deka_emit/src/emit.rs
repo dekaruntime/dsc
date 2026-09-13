@@ -109,7 +109,7 @@ pub fn build_factory_names(
         DescriptorTree::Array { elem } | DescriptorTree::Option { inner: elem } => {
             build_factory_names(elem, names);
         }
-        DescriptorTree::Union { members } => {
+        DescriptorTree::Tuple { elements: members } | DescriptorTree::Union { members } => {
             for member in members {
                 build_factory_names(member, names);
             }
@@ -628,6 +628,14 @@ fn descriptor_tree_name(tree: &deka_syntax::typeck::DescriptorTree) -> String {
         | T::Interface { name }
         | T::Newtype { name, .. }
         | T::Enum { name, .. } => name.to_string(),
+        T::Tuple { elements } => format!(
+            "[{}]",
+            elements
+                .iter()
+                .map(descriptor_tree_name)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         T::Array { elem } => format!("Array<{}>", descriptor_tree_name(elem)),
         T::Option { inner } => format!("Option<{}>", descriptor_tree_name(inner)),
         T::Union { members } => members
@@ -708,6 +716,17 @@ fn emit_descriptor_tree(tree: &deka_syntax::typeck::DescriptorTree) -> Result<St
             }
             out.push_str("]) })");
         }
+        T::Tuple { elements } => {
+            header(&mut out, "tuple", &descriptor_tree_name(tree));
+            out.push_str(", get elements() { return Object.freeze([");
+            for (i, element) in elements.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                out.push_str(&emit_descriptor_tree(element)?);
+            }
+            out.push_str("]); } })");
+        }
         T::Array { elem } => {
             header(&mut out, "array", "Array");
             out.push_str(", elem: ");
@@ -775,7 +794,9 @@ fn tree_contains_recurse(tree: &deka_syntax::typeck::DescriptorTree) -> bool {
             .any(|(_, payload)| payload.as_ref().is_some_and(tree_contains_recurse)),
         T::Newtype { repr, .. } => tree_contains_recurse(repr),
         T::Array { elem } | T::Option { inner: elem } => tree_contains_recurse(elem),
-        T::Union { members } => members.iter().any(tree_contains_recurse),
+        T::Tuple { elements: members } | T::Union { members } => {
+            members.iter().any(tree_contains_recurse)
+        }
         T::Leaf { .. } | T::Interface { .. } => false,
     }
 }
@@ -802,7 +823,7 @@ fn collect_recurse_refs<'a>(
         }
         T::Newtype { repr, .. } => collect_recurse_refs(repr, out),
         T::Array { elem } | T::Option { inner: elem } => collect_recurse_refs(elem, out),
-        T::Union { members } => {
+        T::Tuple { elements: members } | T::Union { members } => {
             for member in members.iter() {
                 collect_recurse_refs(member, out);
             }
@@ -898,6 +919,17 @@ fn emit_super_tree(tree: &deka_syntax::typeck::DescriptorTree) -> Result<String,
             }
             out.push_str("]); } })");
         }
+        T::Tuple { elements } => {
+            header(&mut out, "tuple", &descriptor_tree_name(tree));
+            out.push_str(", get elements() { return Object.freeze([");
+            for (i, element) in elements.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                out.push_str(&emit_super_tree(element)?);
+            }
+            out.push_str("]); } })");
+        }
         T::Array { elem } => {
             header(&mut out, "array", "Array");
             out.push_str(", get elem() { return ");
@@ -957,6 +989,7 @@ fn json_encode(tree: &deka_syntax::typeck::DescriptorTree, value: &str) -> Strin
         ),
         T::Leaf { .. } => value.to_string(),
         T::Newtype { .. } => format!("{value}[__p]"),
+        T::Tuple { elements } => format!("[{}]", elements.iter().enumerate().map(|(i, t)| json_encode(t, &format!("{value}[{i}]"))).collect::<Vec<_>>().join(", ")),
         T::Array { elem } => format!("{value}.map((v) => {})", json_encode(elem, "v")),
         T::Option { inner } => format!(
             "(() => {{ const __option = {value}; return __option !== undefined ? {{ Option: {{ case: \"Some\", values: [{}] }} }} : {{ Option: {{ case: \"None\" }} }}; }})()",
@@ -1040,7 +1073,14 @@ fn json_predicate(tree: &deka_syntax::typeck::DescriptorTree, value: &str) -> St
         T::Enum { name: "Result", .. } => format!("typeof {value}?.ok === \"boolean\""),
         T::Enum { name, .. } => format!("{value}?.__enum === {}", json_string(name)),
         T::Newtype { name, .. } => format!("{value}?.__deka_newtype === {}", json_string(name)),
-        T::Option { inner } => format!("({value} === undefined || ({}))", json_predicate(inner, value)),
+        T::Option { inner } => format!(
+            "({value} === undefined || ({}))",
+            json_predicate(inner, value)
+        ),
+        T::Tuple { elements } => format!(
+            "(Array.isArray({value}) && {value}.length === {})",
+            elements.len()
+        ),
         T::Array { .. } => format!("Array.isArray({value})"),
         T::Union { .. } => "true".to_string(),
         T::Interface { .. } => "true".to_string(),
@@ -1069,6 +1109,14 @@ fn json_decode(tree: &deka_syntax::typeck::DescriptorTree, value: &str) -> Strin
             format!(
                 "(() => {{ const x = {inner}; return x === __invalid ? __invalid : {name}(x); }})()"
             )
+        }
+        T::Tuple { elements } => {
+            let mut checks = String::new();
+            for (i, t) in elements.iter().enumerate() {
+                checks.push_str(&format!("const v{i} = {}; if (v{i} === __invalid) return __invalid;", json_decode(t, &format!("{value}[{i}]"))));
+            }
+            let values = (0..elements.len()).map(|i| format!("v{i}")).collect::<Vec<_>>().join(", ");
+            format!("(Array.isArray({value}) && {value}.length === {}) ? (() => {{ {checks} return [{values}]; }})() : __invalid", elements.len())
         }
         T::Array { elem } => format!(
             "Array.isArray({value}) ? (() => {{ const a = []; for (const x of {value}) {{ const y = {}; if (y === __invalid) return __invalid; a.push(y); }} return a; }})() : __invalid",
@@ -1753,6 +1801,7 @@ impl<'a> Emitter<'a> {
         }
         match stmt {
             // Same rule as : kept when the bound name is live.
+            Stmt::TupleBinding { .. } => true,
             Stmt::UnwrapLet { name, .. } => self.is_live(name),
             Stmt::Import { specifiers, .. } => {
                 specifiers.is_empty()
@@ -1811,7 +1860,7 @@ impl<'a> Emitter<'a> {
     fn is_runtime_statement(stmt: &Stmt<'_>) -> bool {
         matches!(
             stmt,
-            Stmt::Const { .. }
+            Stmt::TupleBinding { .. } | Stmt::Const { .. }
                 | Stmt::Let { .. }
                 // Its initializer runs at load time like any other binding.
                 // Omitting it here classified the statement as a declaration,
@@ -2555,7 +2604,8 @@ impl<'a> Emitter<'a> {
         self.emit_has_temporaries(expressions);
         let saved = self.lifted_values.clone();
         let operand = match stmt {
-            Stmt::Const { value, .. }
+            Stmt::TupleBinding { value, .. }
+            | Stmt::Const { value, .. }
             | Stmt::Let { value, .. }
             | Stmt::Expr { expr: value, .. } => Some(value),
             Stmt::Return { value, .. } => value.as_ref(),
@@ -2621,6 +2671,19 @@ impl<'a> Emitter<'a> {
                 self.out.push('}');
             }
 
+            Stmt::TupleBinding {
+                names,
+                value,
+                is_const,
+                ..
+            } => {
+                self.out
+                    .push_str(if *is_const { "const [" } else { "let [" });
+                self.out.push_str(&names.join(", "));
+                self.out.push_str("] = ");
+                self.emit_expr(value)?;
+                self.out.push(';');
+            }
             Stmt::Const { name, value, .. } => {
                 if let Expr::Match {
                     scrutinee, arms, ..
@@ -5836,7 +5899,8 @@ fn source_is_math(source: &str) -> bool {
 
 fn visit_stmt_exprs(stmt: &Stmt, visitor: &mut dyn FnMut(&Expr)) {
     match stmt {
-        Stmt::Const { value, .. }
+        Stmt::TupleBinding { value, .. }
+        | Stmt::Const { value, .. }
         | Stmt::Let { value, .. }
         | Stmt::Expr { expr: value, .. }
         | Stmt::Return {

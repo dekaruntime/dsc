@@ -74,6 +74,44 @@ mod tests {
     }
 
     #[test]
+    fn flat_tuple_parameters_entries_map_node() {
+        let out = parse_check_and_emit(
+            r#"
+fn sum([a, b]: [number, number]) number { return a + b }
+const entries: Array<[string, number]> = [["a", 1], ["b", 2]];
+const keys: Array<string> = entries.map(fn([k, v]: [string, number]) string { return k });
+const values = entries.map(fn([k, v]: [string, number]) number { return v + 1 });
+const total = sum([2, 3]);
+fn fallback([a, b]: [number, number] = [3, 4]) number { return a + b }
+const defaultTotal = fallback();
+async fn asyncSum([a, b]: [number, number] = [4, 5]) Promise<number> { return a + b }
+"#,
+        );
+        assert!(out.contains("function sum([a, b])"), "{out}");
+        assert!(out.contains("function([k, v])"), "{out}");
+        let js = format!(
+            "{out}\nif (JSON.stringify(keys) !== '[\"a\",\"b\"]' || JSON.stringify(values) !== '[2,3]' || total !== 5 || defaultTotal !== 7 || await asyncSum() !== 9) throw new Error('tuple params');"
+        );
+        let result = std::process::Command::new("node")
+            .args(["--input-type=module", "-e", &js])
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}\n{out}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+
+    #[test]
+    fn flat_tuple_parameters_exact_output() {
+        assert_eq!(
+            parse_check_and_emit("fn f([k, v]: [string, number]) string { return k }"),
+            "\"use strict\";\nfunction f([k, v]) {\nreturn k;\n}"
+        );
+    }
+
+    #[test]
     fn tuples_descriptors_and_json_node() {
         let out = parse_check_and_emit(
             r#"

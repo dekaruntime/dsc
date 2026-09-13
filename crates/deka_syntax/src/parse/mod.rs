@@ -473,12 +473,57 @@ mod tests {
     }
 
     #[test]
+    fn flat_tuple_parameters_parse() {
+        for source in [
+            "fn f([a, b]: [number, number]) number { return a + b }",
+            "const f = fn([k, v]: [string, number]) string { return k };",
+            "fn f(prefix: string, [a, b,]: [number, number], suffix: string) {}",
+            "fn f([\n a,\n b,\n]: [number, number]) {}",
+            "fn f([a, b]) {}",
+        ] {
+            let arena = Bump::new();
+            let result = parse(source, &arena);
+            assert!(result.errors.is_empty(), "{source}: {:?}", result.errors);
+            assert!(result.program.is_some());
+        }
+        let arena = Bump::new();
+        let result = parse("fn f([a, b]: [number, number]) {}", &arena);
+        let program = result.program.unwrap();
+        let crate::Stmt::Function { params, .. } = &program.statements[0] else {
+            panic!("function")
+        };
+        assert!(matches!(
+            params[0].binding,
+            crate::ParamBinding::Tuple(["a", "b"])
+        ));
+    }
+
+    #[test]
+    fn tuple_parameters_require_tuple_annotations() {
+        for source in [
+            "fn f([x, y]: number[]) {}",
+            "const f = fn([x, y]: number[]) {};",
+            "fn f([a, b]: Array<number>) {}",
+            "const f = fn([a, b]: number) {};",
+            "fn f([x, y]: [number, number][]) {}",
+            "fn f([x, y]: [number, number] | number) {}",
+        ] {
+            let arena = Bump::new();
+            let result = parse(source, &arena);
+            assert!(result.program.is_none(), "{source}");
+            assert_eq!(result.errors.len(), 1, "{source}: {:?}", result.errors);
+            assert_eq!(result.errors[0].message, "destructuring parameter requires a tuple type with exact arity — annotate as [number, number], or take the array and index with proofs; expected identifier, found ``[`` for a non-tuple parameter");
+        }
+    }
+
+    #[test]
     fn nested_tuple_patterns_teach_at_the_inner_pattern() {
         let mut messages = Vec::new();
         for (source, line, column, length) in [
             ("const [[x, y], label] = f();", 1, 8, 6),
             ("let [label, [x, y]] = f();", 1, 13, 6),
             ("fn f([[x, y], label]) {}", 1, 7, 6),
+            ("fn f([[x, y], label]: [[number, number], string]) {}", 1, 7, 6),
             ("const f = fn ([[x, y], label]) {};", 1, 16, 6),
             ("const [[[x, y], z], label] = f();", 1, 8, 11),
             ("let [[[x, y], z], label] = f();", 1, 6, 11),
@@ -509,12 +554,10 @@ mod tests {
     }
 
     #[test]
-    fn flat_tuple_parameter_behavior_is_unchanged() {
-        // Main does not support arrow functions or tuple fn parameters. Keep
-        // those existing diagnostics; #200 must not add either feature.
+    fn arrow_function_diagnostic_is_unchanged() {
+        // Tuple parameters use the existing fn literal surface.
         for (source, column, count, message) in [
             ("const f = ([k, v]) => k;", 20, 1, "expected `;` or newline, found ``=>``"),
-            ("fn f([k, v]) {}", 6, 2, "expected identifier, found ``[``"),
         ] {
             let arena = Bump::new();
             let result = parse(source, &arena);
@@ -712,8 +755,8 @@ mod tests {
             } => {
                 assert_eq!(name.to_string(), "add");
                 assert_eq!(params.len(), 2);
-                assert_eq!(params[0].name.to_string(), "a");
-                assert_eq!(params[1].name.to_string(), "b");
+                assert_eq!(params[0].binding.to_string(), "a");
+                assert_eq!(params[1].binding.to_string(), "b");
                 assert!(matches!(
                     &params[0].ty,
                     Some(Type::Named { name, .. }) if name.to_string() == "number"
@@ -2486,8 +2529,8 @@ mod tests {
         match &program.statements[0] {
             Stmt::Function { params, .. } => {
                 assert_eq!(params.len(), 2);
-                assert_eq!(params[0].name.to_string(), "a");
-                assert_eq!(params[1].name.to_string(), "b");
+                assert_eq!(params[0].binding.to_string(), "a");
+                assert_eq!(params[1].binding.to_string(), "b");
             }
             _ => panic!("expected function"),
         }
@@ -2539,7 +2582,7 @@ mod tests {
                     ..
                 } => {
                     assert_eq!(params.len(), 1);
-                    assert_eq!(params[0].name, "x");
+                    assert_eq!(params[0].binding.to_string(), "x");
                     assert!(return_type.is_some());
                     assert_eq!(body.len(), 1);
                 }

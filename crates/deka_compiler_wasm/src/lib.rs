@@ -60,9 +60,12 @@ pub unsafe extern "C" fn deka_compiler_free(ptr: *mut u8, size: u32) {
 /// Compile DekaScript source using a JSON options blob and return a
 /// JSON-encoded `WasmResult`.
 ///
-/// The options blob has the form `{ "mode": "deka", "moduleBase": "..." }`.
-/// `mode` is required; `moduleBase` is optional. When `moduleBase` is supplied,
-/// bare import specifiers are rewritten to `<moduleBase>/<spec>.mjs`.
+/// The options blob has the form
+/// `{ "mode": "deka", "moduleBase": "...", "foreignModules": {...} }`.
+/// `mode` is required; `moduleBase` and `foreignModules` are optional. When
+/// `moduleBase` is supplied, bare import specifiers are rewritten to
+/// `<moduleBase>/<spec>.mjs`. `foreignModules` supplies summoned `.mjs`
+/// bytes for verification; without them, summon verification degrades to a note.
 ///
 /// # Safety
 /// Non-empty pointer/length pairs must point to valid, immutable UTF-8 buffers
@@ -270,6 +273,11 @@ struct CompileRequestOptions {
     mode: String,
     #[serde(rename = "moduleBase")]
     module_base: Option<String>,
+    /// Optional summoned-module bytes, keyed by relative specifier
+    /// (`"./foreign.mjs"`). Hosts that can mount the sibling file may supply
+    /// it so wasm can verify; when omitted, verification degrades to a note.
+    #[serde(default, rename = "foreignModules")]
+    foreign_modules: std::collections::HashMap<String, String>,
 }
 
 fn compile_request(source: &str, filename: &str, options_json: &str) -> String {
@@ -282,7 +290,10 @@ fn compile_request(source: &str, filename: &str, options_json: &str) -> String {
         jsx_runtime: options.jsx_runtime,
         jsx_dev_runtime: options.jsx_dev_runtime,
         dev: options.dev,
-        foreign_modules: std::collections::HashMap::new(),
+        foreign_modules: options.foreign_modules,
+        // The browser compiler has no filesystem. Skip summon module reads
+        // unless the host supplied bytes above (dsc#213).
+        skip_summon_fs: true,
         package_name: None,
         module_base: options.module_base,
         module_root: None,
@@ -852,5 +863,114 @@ const origin = Point { x: 3, y: 4 };
                 );
             }
         }
+    }
+
+    const FOREIGN_MJS: &str = include_str!("../../deka_compile/tests/fixtures/summon/foreign.mjs");
+    const NATIVE_SUMMON_PATH: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../deka_compile/tests/fixtures/summon/main.ds"
+    );
+
+    fn wasm_compile(source: &str, options: &str) -> Value {
+        serde_json::from_str(&compile_request(source, "lesson.ds", options)).expect("response JSON")
+    }
+
+    fn error_messages(diagnostics: &Value) -> Vec<String> {
+        diagnostics
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|d| d["severity"].as_str() == Some("error"))
+            .filter_map(|d| d["message"].as_str().map(str::to_string))
+            .collect()
+    }
+
+    #[test]
+    fn summon_without_module_bytes_compiles_with_unverified_note() {
+        let response = wasm_compile(
+            "summon { total noop() void } from \"./foreign.mjs\"\nnoop();\n",
+            r#"{"mode":"deka"}"#,
+        );
+        assert_eq!(response["ok"], true, "{response}");
+        let diagnostics = response["diagnostics"].as_array().expect("diagnostics");
+        assert!(
+            diagnostics.iter().any(|d| {
+                d["severity"].as_str() == Some("info")
+                    && d["message"].as_str().is_some_and(|m| {
+                        m.contains(deka_compile::summon::UNVERIFIED_NO_MODULE_ACCESS)
+                    })
+            }),
+            "expected unverified note, got: {response}"
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .all(|d| d["severity"].as_str() != Some("error")),
+            "{response}"
+        );
+    }
+
+    fn assert_identical_verdict(source: &str, expected_ok: bool, expected_error: Option<&str>) {
+        let native = deka_compile::compile_to_js(source, NATIVE_SUMMON_PATH);
+        let native_ok = native.is_ok();
+        let options = serde_json::json!({
+            "mode": "deka",
+            "foreignModules": { "./foreign.mjs": FOREIGN_MJS },
+        });
+        let wasm = wasm_compile(source, &options.to_string());
+        let wasm_ok = wasm["ok"].as_bool() == Some(true);
+        assert_eq!(native_ok, expected_ok, "native verdict: {native:?}");
+        assert_eq!(wasm_ok, expected_ok, "wasm verdict: {wasm}");
+        assert_eq!(native_ok, wasm_ok, "native={native:?} wasm={wasm}");
+        if let Some(needle) = expected_error {
+            match native {
+                Ok(result) => panic!("native compiled; diagnostics={:?}", result.diagnostics),
+                Err(errors) => assert!(
+                    errors.iter().any(|d| d.message.contains(needle)),
+                    "native missing `{needle}`: {errors:?}"
+                ),
+            }
+            let wasm_errors = error_messages(&wasm["diagnostics"]);
+            assert!(
+                wasm_errors.iter().any(|m| m.contains(needle)),
+                "wasm missing `{needle}`: {wasm}"
+            );
+        }
+    }
+
+    #[test]
+    fn summon_arity_mismatch_verdict_matches_native() {
+        assert_identical_verdict(
+            "summon { total read() number } from \"./foreign.mjs\"",
+            false,
+            Some("incompatible arity"),
+        );
+    }
+
+    #[test]
+    fn summon_private_export_verdict_matches_native() {
+        assert_identical_verdict(
+            "opaque type Handle\nsummon { total handle() Handle, total read(h: Handle) number } from \"./foreign.mjs\"\nexport { handle }\n",
+            false,
+            Some("file-private"),
+        );
+    }
+
+    #[test]
+    fn summon_unhandled_exception_verdict_matches_native() {
+        assert_identical_verdict(
+            "summon { fail() Exception<number, string> } from \"./foreign.mjs\"\nconst x = fail()\n",
+            false,
+            Some("match"),
+        );
+    }
+
+    #[test]
+    fn summon_void_exempt_verdict_matches_native() {
+        assert_identical_verdict(
+            "summon { total noop() void } from \"./foreign.mjs\"\nnoop()\n",
+            true,
+            None,
+        );
     }
 }

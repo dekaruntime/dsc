@@ -12,8 +12,8 @@ use bumpalo::Bump;
 use deka_emit::{dev_slot_id, dev_slot_source_path, emit_dev_entry, emit_js_module_with_options};
 use deka_syntax::typeck::Type;
 use deka_syntax::{
-    Diagnostic, Expr, ModuleExports, Program, Span, Stmt, check_program_with_imports, parse,
-    program_needs_hydration_ids, resolve_imported_enum_constructors,
+    Diagnostic, Expr, ModuleExports, Program, Severity, Span, Stmt, check_program_with_imports,
+    parse, program_needs_hydration_ids, resolve_imported_enum_constructors,
 };
 use serde::Serialize;
 
@@ -406,6 +406,10 @@ pub struct CompileOptions {
     /// Foreign module bytes supplied by a virtual host, keyed by relative specifier.
     /// Filesystem compilation reads these afresh when no virtual source is supplied.
     pub foreign_modules: HashMap<String, String>,
+    /// When true, summoned `.mjs` files are not read from the filesystem.
+    /// Browser/wasm hosts set this so verification degrades to a note instead
+    /// of a hard error. Native compilation leaves the default `false`.
+    pub skip_summon_fs: bool,
     /// Package identity supplied by a trusted virtual loader; disk sources use
     /// their nearest deka.json. None defaults to unprivileged for virtual files.
     pub package_name: Option<String>,
@@ -654,10 +658,22 @@ pub fn compile_to_js_with_imports_and_options<'a>(
     if !errors.is_empty() {
         return Err(errors);
     }
-    let errors = summon::validate(&program, file_path, &options.foreign_modules);
-    if !errors.is_empty() {
-        return Err(errors);
+    let summon_diagnostics = summon::validate(
+        &program,
+        file_path,
+        &options.foreign_modules,
+        options.skip_summon_fs,
+    );
+    if summon_diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == Severity::Error)
+    {
+        return Err(summon_diagnostics
+            .into_iter()
+            .filter(|diagnostic| diagnostic.severity == Severity::Error)
+            .collect());
     }
+    let summon_notes = summon_diagnostics;
     resolve_imported_enum_constructors(&mut program, arena, imports);
 
     let typeck_result = check_program_with_imports(&program, source, imports);
@@ -736,9 +752,11 @@ pub fn compile_to_js_with_imports_and_options<'a>(
         slot.entry = catalog::bundle_helpers(std::mem::take(&mut slot.entry))
             .map_err(|e| vec![Diagnostic::error(1, 1, e)])?;
     }
+    let mut diagnostics = summon_notes;
+    diagnostics.extend(typeck_result.warnings);
     Ok(CompileResult {
         js: catalog::bundle_helpers(emitted.js).map_err(|e| vec![Diagnostic::error(1, 1, e)])?,
-        diagnostics: typeck_result.warnings,
+        diagnostics,
         demand: emitted.demand,
         dev_plan,
     })

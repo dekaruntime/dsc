@@ -42,6 +42,17 @@ impl Diagnostic {
         }
     }
 
+    pub fn info(line: usize, column: usize, message: impl Into<String>) -> Self {
+        Self {
+            severity: Severity::Info,
+            line,
+            column,
+            message: message.into(),
+            help_text: None,
+            underline_length: 1,
+        }
+    }
+
     pub fn with_help(mut self, help: impl Into<String>) -> Self {
         self.help_text = Some(help.into());
         self

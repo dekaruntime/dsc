@@ -9,9 +9,12 @@ browser contract.
 - `deka_compiler_alloc(size)` and `deka_compiler_free(ptr, size)` own all input
   and result buffers.
 - `deka_compiler_compile(source, filename, options)` accepts UTF-8 byte ranges.
-  `options` is a JSON object: `{"mode": "deka", "moduleBase": "..."}`.
+  `options` is a JSON object: `{"mode": "deka", "moduleBase": "...", "foreignModules": {...}}`.
   `mode` is `auto` or `deka` (required); `moduleBase` is optional. When set,
   bare import specifiers are rewritten to `<moduleBase>/<spec>.mjs`.
+  `foreignModules` is optional summoned-module source, keyed by relative
+  specifier. When omitted, summon verification records
+  `unverified: platform has no module access` as a note instead of a hard error.
   Input filenames must end in `.ds` or `.dsx`. PHPX modes, filenames, and
   ABI aliases are intentionally unsupported.
 - The result is a pointer to `{ ptr: u32, len: u32 }`, followed by UTF-8 JSON:

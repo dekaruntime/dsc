@@ -31,13 +31,19 @@ return/throw and promise rejection are preserved. There is no catch-and-wrap
 adapter around the foreign function.
 
 Every compilation parses the relative `.mjs` module with the compiler's SWC
-parser. A missing/unparseable module, missing export, non-function export, or
-incompatible arity is a hard diagnostic naming the module and export. Function
-declarations, const function/arrow expressions, and local named export aliases
-are supported. Default parameters and rest parameters determine the accepted
-arity interval. Generators, mutable callable aliases, and unresolved re-exports
-are rejected rather than assumed callable. Virtual graph loaders supply the same
-module bytes; single-file hosts can use `CompileOptions.foreign_modules`.
+parser when the host can read it. A missing/unparseable module, missing export,
+non-function export, or incompatible arity is a hard diagnostic naming the
+module and export. On platforms without module-read capability (wasm/browser),
+verification is skipped with a note (`unverified: platform has no module access`)
+rather than a hard error; host (native) builds remain the verifying authority.
+Diagnostics that do not need module bytes (colon grammar, privacy, Exception
+discipline, call-site arity) still fire. Function declarations, const
+function/arrow expressions, and local named export aliases are supported.
+Default parameters and rest parameters determine the accepted arity interval.
+Generators, mutable callable aliases, and unresolved re-exports are rejected
+rather than assumed callable. Virtual graph loaders supply the same module
+bytes; single-file hosts can use `CompileOptions.foreign_modules`. The wasm
+compiler accepts the same map as `foreignModules` in its JSON options.
 No network fetch occurs. Tier-2 throw/totality analysis remains a later stage:
 `total` is an explicit author claim, not a totality proof in this implementation.
 

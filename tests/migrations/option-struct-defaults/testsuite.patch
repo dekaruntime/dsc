@@ -1,0 +1,185 @@
+diff --git a/corpus/interfaces/interface_optional_omitted_in_literal_fail/interface_optional_omitted_in_literal_fail.code b/corpus/interfaces/interface_optional_omitted_in_literal_fail/interface_optional_omitted_in_literal_fail.code
+--- a/corpus/interfaces/interface_optional_omitted_in_literal_fail/interface_optional_omitted_in_literal_fail.code
++++ b/corpus/interfaces/interface_optional_omitted_in_literal_fail/interface_optional_omitted_in_literal_fail.code
+@@ -1,15 +1 @@
+-interface Opts {
+-  path?: string;
+-}
+-
+-fn go(o: Opts) string {
+-  return match (o.path) {
+-    Some(p) => p,
+-    None => "/",
+-  }
+-}
+-
+-// A plain object literal is not a construction site the compiler owns, so an
+-// omitted optional would be JS `undefined` while the type says `Option<string>`
+-// -- the runtime hole deka#401 closed for `T?`. Write `path: None`.
+-const out = go({})
++0
+diff --git a/corpus/interfaces/interface_optional_omitted_in_literal_fail/interface_optional_omitted_in_literal_fail.fail.ds b/corpus/interfaces/interface_optional_omitted_in_literal_fail/interface_optional_omitted_in_literal_fail.fail.ds
+deleted file mode 100644
+--- a/corpus/interfaces/interface_optional_omitted_in_literal_fail/interface_optional_omitted_in_literal_fail.fail.ds
++++ /dev/null
+@@ -1,15 +0,0 @@
+-interface Opts {
+-  path?: string;
+-}
+-
+-fn go(o: Opts) string {
+-  return match (o.path) {
+-    Some(p) => p,
+-    None => "/",
+-  }
+-}
+-
+-// A plain object literal is not a construction site the compiler owns, so an
+-// omitted optional would be JS `undefined` while the type says `Option<string>`
+-// -- the runtime hole deka#401 closed for `T?`. Write `path: None`.
+-const out = go({})
+diff --git a/corpus/interfaces/interface_optional_omitted_in_literal_fail/interface_optional_omitted_in_literal_fail.json b/corpus/interfaces/interface_optional_omitted_in_literal_fail/interface_optional_omitted_in_literal_fail.json
+--- a/corpus/interfaces/interface_optional_omitted_in_literal_fail/interface_optional_omitted_in_literal_fail.json
++++ b/corpus/interfaces/interface_optional_omitted_in_literal_fail/interface_optional_omitted_in_literal_fail.json
+@@ -1,6 +1,5 @@
+ {
+-  "title": "Omitting an optional field in an object literal is rejected",
+-  "stage": "parse",
+-  "expectedDiagnosticContains": "expected argument type",
+-  "notes": "deka#416: JSX fills omitted optionals; a bare object literal does not."
++  "title": "Omitting an optional field in an object literal produces None",
++  "stage": "run",
++  "notes": "dsc#180: Option erasure makes missing properties safe; retain the fixture ID for continuity."
+ }
+diff --git a/corpus/interfaces/interface_optional_omitted_in_literal_fail/interface_optional_omitted_in_literal_fail.pass.ds b/corpus/interfaces/interface_optional_omitted_in_literal_fail/interface_optional_omitted_in_literal_fail.pass.ds
+new file mode 100644
+--- /dev/null
++++ b/corpus/interfaces/interface_optional_omitted_in_literal_fail/interface_optional_omitted_in_literal_fail.pass.ds
+@@ -0,0 +1,14 @@
++interface Opts {
++  path?: string;
++}
++
++fn go(o: Opts) string {
++  return match (o.path) {
++    Some(p) => p,
++    None => "/",
++  }
++}
++
++// An omitted optional property reads as undefined, the erased None.
++const out = go({});
++if (out != "/") { panic("omitted Option field must match None"); }
+diff --git a/corpus/interfaces/interface_optional_omitted_in_literal_fail/interface_optional_omitted_in_literal_fail.stdout b/corpus/interfaces/interface_optional_omitted_in_literal_fail/interface_optional_omitted_in_literal_fail.stdout
+new file mode 100644
+diff --git a/corpus/option_struct_defaults/defaults/defaults.code b/corpus/option_struct_defaults/defaults/defaults.code
+new file mode 100644
+--- /dev/null
++++ b/corpus/option_struct_defaults/defaults/defaults.code
+@@ -0,0 +1 @@
++0
+diff --git a/corpus/option_struct_defaults/defaults/defaults.json b/corpus/option_struct_defaults/defaults/defaults.json
+new file mode 100644
+--- /dev/null
++++ b/corpus/option_struct_defaults/defaults/defaults.json
+@@ -0,0 +1,4 @@
++{
++  "title": "Option struct fields: defaults",
++  "stage": "run"
++}
+diff --git a/corpus/option_struct_defaults/defaults/defaults.pass.ds b/corpus/option_struct_defaults/defaults/defaults.pass.ds
+new file mode 100644
+--- /dev/null
++++ b/corpus/option_struct_defaults/defaults/defaults.pass.ds
+@@ -0,0 +1,6 @@
++interface Options { path?: string; secure: boolean?; count: Option<number> }
++fn path(options: Options = {}) string {
++  return match options.path { Some(v) => v, None => "/" };
++}
++const empty: Options = {};
++if (path() != "/" || path(empty) != "/" || isset(empty.secure) || isset(empty.count)) { panic("omitted fields must be None"); }
+diff --git a/corpus/option_struct_defaults/defaults/defaults.stdout b/corpus/option_struct_defaults/defaults/defaults.stdout
+new file mode 100644
+diff --git a/corpus/option_struct_defaults/nested/nested.code b/corpus/option_struct_defaults/nested/nested.code
+new file mode 100644
+--- /dev/null
++++ b/corpus/option_struct_defaults/nested/nested.code
+@@ -0,0 +1 @@
++0
+diff --git a/corpus/option_struct_defaults/nested/nested.json b/corpus/option_struct_defaults/nested/nested.json
+new file mode 100644
+--- /dev/null
++++ b/corpus/option_struct_defaults/nested/nested.json
+@@ -0,0 +1,4 @@
++{
++  "title": "Option struct fields: nested",
++  "stage": "run"
++}
+diff --git a/corpus/option_struct_defaults/nested/nested.pass.ds b/corpus/option_struct_defaults/nested/nested.pass.ds
+new file mode 100644
+--- /dev/null
++++ b/corpus/option_struct_defaults/nested/nested.pass.ds
+@@ -0,0 +1,15 @@
++interface Options { path?: string; secure?: boolean }
++interface Request { options: Options; child?: Options }
++const request: Request = { options: {}, child: Some({ secure: Some(false) }) };
++if (isset(request.options.path)) { panic("nested missing field"); }
++const child = match request.child { Some(v) => v, None => panic("missing child") };
++const secure = match child.secure { Some(v) => v, None => panic("false lost") };
++if (secure || isset(child.path)) { panic("nested partial field"); }
++struct Inner { value: Option<number> }
++struct Outer { inner: Inner; extra: Option<Inner> }
++const nested = Outer { inner: Inner {} };
++if (isset(nested.inner.value) || isset(nested.extra)) { panic("named struct omission"); }
++const json = nested.inner.toJSON();
++if (json != "{\"Inner\":{\"value\":{\"Option\":{\"case\":\"None\"}}}}") { panic("typed JSON must retain tagged None"); }
++const decoded = match json.parseJSON<Inner>() { Ok(v) => v, Err(e) => panic(e) };
++if (isset(decoded.value)) { panic("typed JSON None round trip"); }
+diff --git a/corpus/option_struct_defaults/nested/nested.stdout b/corpus/option_struct_defaults/nested/nested.stdout
+new file mode 100644
+diff --git a/corpus/option_struct_defaults/partial/partial.code b/corpus/option_struct_defaults/partial/partial.code
+new file mode 100644
+--- /dev/null
++++ b/corpus/option_struct_defaults/partial/partial.code
+@@ -0,0 +1 @@
++0
+diff --git a/corpus/option_struct_defaults/partial/partial.json b/corpus/option_struct_defaults/partial/partial.json
+new file mode 100644
+--- /dev/null
++++ b/corpus/option_struct_defaults/partial/partial.json
+@@ -0,0 +1,4 @@
++{
++  "title": "Option struct fields: partial",
++  "stage": "run"
++}
+diff --git a/corpus/option_struct_defaults/partial/partial.pass.ds b/corpus/option_struct_defaults/partial/partial.pass.ds
+new file mode 100644
+--- /dev/null
++++ b/corpus/option_struct_defaults/partial/partial.pass.ds
+@@ -0,0 +1,7 @@
++interface Options { path?: string; secure?: boolean }
++fn path(options: Options) string { return match options.path { Some(v) => v, None => "/" }; }
++const partial: Options = { path: Some("/app") };
++if (path(partial) != "/app" || isset(partial.secure)) { panic("partial literal"); }
++if (path({ secure: Some(false) }) != "/") { panic("partial argument"); }
++const explicit: Options = { path: None, secure: None };
++if (path(explicit) != path({})) { panic("explicit and omitted None differ"); }
+diff --git a/corpus/option_struct_defaults/partial/partial.stdout b/corpus/option_struct_defaults/partial/partial.stdout
+new file mode 100644
+diff --git a/corpus/option_struct_defaults/required/required.fail.ds b/corpus/option_struct_defaults/required/required.fail.ds
+new file mode 100644
+--- /dev/null
++++ b/corpus/option_struct_defaults/required/required.fail.ds
+@@ -0,0 +1,2 @@
++interface Options { required: string; path?: string }
++const options: Options = { path: None };
+diff --git a/corpus/option_struct_defaults/required/required.json b/corpus/option_struct_defaults/required/required.json
+new file mode 100644
+--- /dev/null
++++ b/corpus/option_struct_defaults/required/required.json
+@@ -0,0 +1,5 @@
++{
++  "title": "Option struct fields: required",
++  "stage": "parse",
++  "expectedDiagnosticContains": "expected type `Options`, found type `{path: none}`"
++}

@@ -1,0 +1,2 @@
+interface Options { required: string; path?: string }
+const options: Options = { path: None };

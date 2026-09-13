@@ -1,0 +1,15 @@
+interface Options { path?: string; secure?: boolean }
+interface Request { options: Options; child?: Options }
+const request: Request = { options: {}, child: Some({ secure: Some(false) }) };
+if (isset(request.options.path)) { panic("nested missing field"); }
+const child = match request.child { Some(v) => v, None => panic("missing child") };
+const secure = match child.secure { Some(v) => v, None => panic("false lost") };
+if (secure || isset(child.path)) { panic("nested partial field"); }
+struct Inner { value: Option<number> }
+struct Outer { inner: Inner; extra: Option<Inner> }
+const nested = Outer { inner: Inner {} };
+if (isset(nested.inner.value) || isset(nested.extra)) { panic("named struct omission"); }
+const json = nested.inner.toJSON();
+if (json != "{\"Inner\":{\"value\":{\"Option\":{\"case\":\"None\"}}}}") { panic("typed JSON must retain tagged None"); }
+const decoded = match json.parseJSON<Inner>() { Ok(v) => v, Err(e) => panic(e) };
+if (isset(decoded.value)) { panic("typed JSON None round trip"); }

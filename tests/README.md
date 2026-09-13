@@ -85,3 +85,17 @@ are outside this array-indexing lane.
 
 The required external owner patches and pin coordination are documented in
 [migrations/indexing-98/README.md](migrations/indexing-98/README.md).
+
+## Omitted Option fields (dsc#180)
+
+`tests/fixtures/option_struct_defaults/` covers empty/default and partial object
+literals, nested interfaces and named structs, and required-field rejection.
+`cargo test -p deka_emit option_struct_defaults` checks the Hats fixtures with
+Node.js and exact emitted output: omitted object properties stay absent, while
+explicit `None` emits as `undefined`. Named structs retain their existing
+optional-field emission convention. The nested fixture also checks that typed
+JSON still encodes None in its tagged Option envelope.
+
+The pinned corpus has one intentional old rejection to migrate. Its prepared
+owner patch and landing dependency are in
+[migrations/option-struct-defaults/README.md](migrations/option-struct-defaults/README.md).

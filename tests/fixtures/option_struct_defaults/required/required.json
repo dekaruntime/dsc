@@ -1,0 +1,5 @@
+{
+  "title": "Option struct fields: required",
+  "stage": "parse",
+  "expectedDiagnosticContains": "expected type `Options`, found type `{path: none}`"
+}

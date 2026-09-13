@@ -128,8 +128,8 @@ pub struct TypeckResult<'a> {
     /// How each JSX element's optional props must be materialised.
     ///
     /// A component's props interface is a construction site the compiler owns,
-    /// so `?:` props are filled and bare values wrapped there. A plain object
-    /// literal is not, which is why omitting one is a type error (deka#416).
+    /// so `?:` props are filled and bare values wrapped there. Plain object
+    /// literals may omit Option fields: absent properties are erased None.
     pub jsx_optional_props: HashMap<*const ast::JsxElement<'a>, JsxOptionalProps<'a>>,
     /// Identifier patterns that name a payload-free case of the scrutinee's
     /// enum rather than binding it (deka#450).
@@ -2340,13 +2340,10 @@ impl<'a> Checker<'a> {
                                 let Some((_, actual_ty)) =
                                     actual_fields.iter().find(|(n, _)| n == field_name)
                                 else {
-                                    // Omission is not allowed in a plain object
-                                    // literal: there is no construction site
-                                    // for the compiler to fill, so the field
-                                    // would be JS `undefined` while the type
-                                    // says `Option<T>` -- the exact runtime
-                                    // hole deka#401 closed for `T?`. JSX is
-                                    // different and fills it; see the emitter.
+                                    // An absent property reads as undefined, the erased None.
+                                    if matches!(expected_ty, Type::Option { .. }) {
+                                        continue;
+                                    }
                                     return false;
                                 };
                                 if !self.is_assignable(&expected_ty, actual_ty) {
@@ -3284,6 +3281,56 @@ mod tests {
     #[test]
     fn option_binding_none_passes() {
         assert!(typeck("const o: Option<number> = None;").is_empty());
+    }
+
+    #[test]
+    fn option_struct_defaults_and_partial_literals() {
+        for field in ["path?: string", "path: string?", "path: Option<string>", "path: Maybe"] {
+            let source = format!(r#"
+                alias Maybe = Option<string>;
+                interface Options {{ {field}; secure?: boolean }}
+                fn path(options: Options = {{}}) string {{
+                    return match options.path {{ Some(v) => v, None => "/" }};
+                }}
+                const omitted: Options = {{}};
+                const partial: Options = {{ path: Some("/app") }};
+                const a = path();
+                const b = path({{}});
+                const c = path({{ secure: Some(false) }});
+                fn defaults() Options {{ return {{}}; }}
+                interface Request {{ options: Options; child?: Options }}
+                const nested: Request = {{ options: {{}} }};
+                const partial_nested: Request = {{ options: {{ secure: Some(false) }}, child: Some({{}}) }};
+                struct Named {{ {field} }}
+                const named = Named {{}};
+            "#);
+            let errors = typeck(&source);
+            assert!(errors.is_empty(), "{field}: {errors:?}");
+        }
+        let errors = typeck("struct Inner { value: Option<number> } struct Outer { inner: Inner; extra: Option<Inner> } const nested = Outer { inner: Inner {} };");
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn option_struct_defaults_preserve_required_field_diagnostics() {
+        for (source, expected) in [
+            ("interface Options { required: string; path?: string } const o: Options = {};",
+             "expected type `Options`, found type `{}`"),
+            ("interface Options { required: string; path?: string } fn f(o: Options = {}) void {}",
+             "expected default type `Options`, found type `{}`"),
+            ("interface Options { required: string; path?: string } fn f(o: Options) void {} f({});",
+             "expected argument type `Options`, found type `{}`"),
+            ("interface Inner { required: string; path?: string } interface Outer { inner: Inner } const o: Outer = { inner: {} };",
+             "expected type `Outer`, found type `{inner: {}}`"),
+            ("struct Options { required: string; path: Option<string> } const o = Options {};",
+             "missing required field `required` in struct literal for `Options`"),
+            ("interface Options { path?: string } const o: Options = { path: 42 };",
+             "expected type `Options`, found type `{path: number}`"),
+        ] {
+            let errors = typeck(source);
+            assert_eq!(errors.len(), 1, "{source}: {errors:?}");
+            assert_eq!(errors[0].message, expected, "{source}");
+        }
     }
 
     #[test]

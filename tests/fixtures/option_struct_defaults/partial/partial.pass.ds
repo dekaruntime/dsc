@@ -1,0 +1,7 @@
+interface Options { path?: string; secure?: boolean }
+fn path(options: Options) string { return match options.path { Some(v) => v, None => "/" }; }
+const partial: Options = { path: Some("/app") };
+if (path(partial) != "/app" || isset(partial.secure)) { panic("partial literal"); }
+if (path({ secure: Some(false) }) != "/") { panic("partial argument"); }
+const explicit: Options = { path: None, secure: None };
+if (path(explicit) != path({})) { panic("explicit and omitted None differ"); }

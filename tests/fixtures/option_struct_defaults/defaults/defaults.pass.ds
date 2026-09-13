@@ -1,0 +1,6 @@
+interface Options { path?: string; secure: boolean?; count: Option<number> }
+fn path(options: Options = {}) string {
+  return match options.path { Some(v) => v, None => "/" };
+}
+const empty: Options = {};
+if (path() != "/" || path(empty) != "/" || isset(empty.secure) || isset(empty.count)) { panic("omitted fields must be None"); }

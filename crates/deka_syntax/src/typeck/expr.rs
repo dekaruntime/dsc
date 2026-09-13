@@ -1200,6 +1200,13 @@ impl<'a> Checker<'a> {
         for field in info.fields {
             if field.default_value.is_none() && !field.optional && !seen_fields.contains(field.name)
             {
+                self.push_type_params(info.type_params);
+                let field_ty = self.resolve_ast_type(&field.ty);
+                self.pop_type_params();
+                let field_ty = substitute_type(&field_ty, &inferred);
+                if matches!(field_ty, Type::Option { .. }) {
+                    continue;
+                }
                 self.error_span(
                     span,
                     format!(

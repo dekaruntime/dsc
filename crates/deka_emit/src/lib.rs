@@ -68,6 +68,41 @@ mod tests {
     fn option_erasure_runtime() { run_hats_fixtures("option_erasure", 1); }
 
     #[test]
+    fn option_struct_defaults_hats_fixtures() {
+        run_hats_fixtures("option_struct_defaults", 4);
+    }
+
+    #[test]
+    fn option_struct_defaults_exact_output() {
+        let out = parse_check_and_emit(r#"
+interface Options { path?: string; secure?: boolean }
+const omitted: Options = {};
+const partial: Options = { path: Some("/app") };
+const explicit: Options = { path: None, secure: None };
+fn defaults(options: Options = {}) Options { return options; }
+interface Request { options: Options }
+const nested: Request = { options: {} };
+"#);
+        assert_eq!(out, concat!(
+            "\"use strict\";\n\n",
+            "function defaults(options = {}) {\nreturn options;\n}\n\n",
+            "const omitted = {};\n",
+            "const partial = {path: (\"/app\")};\n",
+            "const explicit = {path: undefined, secure: undefined};\n",
+            "const nested = {options: {}};",
+        ));
+        // Keep the authored fields in named struct factory arguments too.
+        let omitted = parse_check_and_emit(
+            "struct Value { item: Option<number> } const value = Value {};",
+        );
+        let explicit = parse_check_and_emit(
+            "struct Value { item: Option<number> } const value = Value { item: None };",
+        );
+        assert_eq!(omitted.lines().last(), Some("const value = Value({  });"));
+        assert_eq!(explicit.lines().last(), Some("const value = Value({ item: undefined });"));
+    }
+
+    #[test]
     fn option_erasure_exact_output() {
         assert_eq!(parse_check_and_emit("const a = Some(0); const b: Option<number> = None; const c = isset(a);"),
             "\"use strict\";\nconst a = (0);\nconst b = undefined;\nconst c = (a !== undefined);");

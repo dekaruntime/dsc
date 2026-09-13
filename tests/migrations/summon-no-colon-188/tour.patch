@@ -1,0 +1,35 @@
+--- a/tests/tour/README.md
++++ b/tests/tour/README.md
+@@ -51,5 +51,5 @@
+ was also checked with `deka run` using the same pinned compiler and io package.
+ 
+ [Summon intro](blocked/summon-intro/README.md) is an excluded draft, blocked on
+-sibling-module delivery and the compiler's colon-only summon signature syntax.
++sibling-module delivery. dsc#188 (0.52.0) unblocks its colon-free summon syntax.
+ It is not a manifest entry or a published runnable page.
+--- a/tests/tour/blocked/summon-intro/README.md
++++ b/tests/tour/blocked/summon-intro/README.md
+@@ -9,11 +9,9 @@
+ would fail. This nested directory is deliberately outside `manifest.json` and
+ the runner's top-level source scan. It must not be published as a runnable page.
+ 
+-**blocked-on-syntax:** dsc 0.51.1 requires a colon before a summon signature's
+-return type (`expected ':'`). This lane forbids colon return types. The draft
+-uses the requested colon-free spelling, which is not yet accepted for summon.
+-Do not add it to the manifest until that syntax is supported (or the content
+-rule is explicitly changed), as well as sibling-module delivery being available.
++**syntax unblocked by dsc#188 (0.52.0):** summon return types are colon-free,
++like `fn`. The draft already uses this spelling. Sibling-module delivery above
++still blocks publication; keep the lesson out of the manifest until it is fixed.
+ 
+ The example keeps one DekaScript source and one small vendored module. `double`
+ is declared total; `decode` can raise a native URIError, represented by JsError.
+@@ -21,7 +19,7 @@
+ not proof that arbitrary JavaScript cannot fail. No fetch or package workflow is
+ needed to understand this boundary.
+ 
+-Validation with released dsc 0.51.1 + deka 0.50.0: the exact draft is rejected at
++Historical validation with released dsc 0.51.1 + deka 0.50.0: the exact draft is rejected at
+ the first summon return type. A scratch copy using the compiler's required
+ signature punctuation, alongside `vendor.mjs`, runs and prints `6`, `Deka`, and
+ `could not decode`, one per line. This does **not** count as a passing lesson;

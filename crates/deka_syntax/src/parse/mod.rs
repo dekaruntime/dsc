@@ -306,7 +306,8 @@ impl<'a> Parser<'a> {
     }
 
     /// Diagnose the colon at its position, then consume it so the rest of the
-    /// signature can still be parsed without cascading errors (dsc#169).
+    /// signature can still be parsed without cascading errors (#171, #188).
+    /// Keep this validation permanent, including summoned signatures.
     fn reject_return_type_colon(&mut self) {
         if self.at(TokenKind::Colon) {
             self.error("return types take no colon; remove `:`");
@@ -433,6 +434,14 @@ mod tests {
             "export async fn f(): number { return 1 }",
             "const f = fn (): number { return 1 }",
             "const f = fn () : number { return 1 }",
+            r#"summon { parse(json: string): Exception<Claims, JsError> } from "./parse.mjs""#,
+            r#"summon { parse(json: string) : Exception<Claims, JsError> } from "./parse.mjs""#,
+            r#"summon { total get(): number } from "./shim.mjs""#,
+            r#"summon { fn get(): number } from "./shim.mjs""#,
+            r#"summon { total fn get() : number } from "./shim.mjs""#,
+            "alias Callback = fn(number): string",
+            "alias Callback = fn(number) : string",
+            r#"summon { total map(f: fn(number): string) string } from "./shim.mjs""#,
             "interface P { fn get(): number }",
             "interface P { fn get() : number }",
         ] {
@@ -466,13 +475,17 @@ mod tests {
         let arena = Bump::new();
         let result = parse(source, &arena);
         assert!(result.program.is_none());
-        assert_eq!(result.errors.len(), 2, "{:?}", result.errors);
-        for (error, column) in result.errors.iter().zip([7, 8]) {
+        assert_eq!(result.errors.len(), 5, "{:?}", result.errors);
+        for (error, (line, column)) in
+            result
+                .errors
+                .iter()
+                .zip([(1, 7), (2, 8), (3, 25), (4, 18), (6, 15)])
+        {
             assert_eq!(error.message, "return types take no colon; remove `:`");
             assert_eq!(error.column, column);
+            assert_eq!(error.line, line);
         }
-        assert_eq!(result.errors[0].line, 1);
-        assert_eq!(result.errors[1].line, 2);
     }
 
     #[test]

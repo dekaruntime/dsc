@@ -87,7 +87,7 @@ impl<'a> Parser<'a> {
                 self.skip_newlines();
                 let params = self.parse_params()?;
                 self.expect(TokenKind::RParen)?;
-                self.expect(TokenKind::Colon)?;
+                self.reject_return_type_colon();
                 let return_type = self.parse_type()?;
                 functions.push(crate::ast::SummonedFunction {
                     name,

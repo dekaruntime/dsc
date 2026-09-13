@@ -1,2 +1,7 @@
 fn f(): number {}
 fn g() : number {}
+interface P { fn value(): number }
+summon { value() : number } from "./shim.mjs"
+summon {
+  total fn f(): number
+} from "./shim.mjs"

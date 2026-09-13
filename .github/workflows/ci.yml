@@ -211,6 +211,37 @@ jobs:
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
         run: scripts/ci-seed-tour-io.sh "$GITHUB_WORKSPACE/.cache/deka-runtime/deka"
 
+      # dsc#188 bootstrap (self-retiring): registry io still carries the old
+      # colon grammar until io v0.3.1 publishes against dsc 0.52.0. Until then,
+      # migrate the seeded cache with the exact staged patch io's release
+      # applies, so the tour gate tests the bytes 0.3.1 will ship. Once the
+      # registry serves colon-free io the guard no-ops; remove after the train.
+      - name: Bootstrap seeded io to colon-free (dsc#188)
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
+        run: |
+          f=".cache/deka-packages/io/ds_modules/@deka/io/index.ds"
+          if [ -f "$f" ] && grep -qE '\)[[:space:]]*:' "$f"; then
+            git apply --include='*index.ds' --directory=".cache/deka-packages/io/ds_modules/@deka/io" tests/migrations/summon-no-colon-188/io.patch
+            python3 - <<'REHASH'
+          import json
+          # Reviewed migrated-io fsGraph hash from the migration README
+          # (tests/migrations/summon-no-colon-188). Wrong value fails the
+          # gate loudly, so this cannot false-green.
+          lock_path = ".cache/deka-packages/io/deka.lock"
+          lock = json.load(open(lock_path))
+          # packages: name -> [id, source, {entry}, ""] (lockfileVersion 1)
+          val = lock["packages"]["@deka/io"]
+          entry = next(x for x in val if isinstance(x, dict))
+          assert entry["fsGraph"]["algo"] == "sha256"
+          entry["fsGraph"]["hash"] = "d7b4daec01ac1fd2e0738e9f100e9c6abea22dd37cf02f9197bb8c15c32da565"
+          json.dump(lock, open(lock_path, "w"), indent=2)
+          open(lock_path, "a").write("\n")
+          REHASH
+            echo "migrated seeded io to colon-free (lock rehashed)"
+          else
+            echo "seeded io already colon-free; no-op"
+          fi
+
       - name: Run the pinned tour against dsc (native)
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
         env:

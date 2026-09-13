@@ -3,14 +3,16 @@
 ```ds
 opaque type Scene
 summon {
-  scene(): Exception<Scene, JsError>,
-  total sceneAdd(scene: Scene, child: Scene): void,
-  total selected(): Option<Scene>
+  scene() Exception<Scene, JsError>,
+  total sceneAdd(scene: Scene, child: Scene) void,
+  total selected() Option<Scene>
 } from "./vendor/scene.mjs"
 ```
 
-The block uses the RFD's `name(parameters): Return` signatures. `total` prefixes
-a signature; an optional `fn` is also accepted (`total fn name(...): Return`).
+As of 0.52.0 (dsc#188), the block uses colon-free `name(parameters) Return`
+signatures, like `fn`. A return-type colon is a permanent validation error:
+``return types take no colon; remove `:` ``. `total` prefixes
+a signature; an optional `fn` is also accepted (`total fn name(...) Return`).
 Every parameter and return needs an explicit type. Defaults belong to the JS
 module, not the declaration. Opaque and summon declarations are top-level only.
 

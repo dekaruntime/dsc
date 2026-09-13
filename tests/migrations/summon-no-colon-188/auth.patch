@@ -1,0 +1,15 @@
+--- a/index.ds
++++ b/index.ds
+@@ -36,9 +36,9 @@
+ }
+ 
+ summon {
+-  total now_seconds(): number,
+-  stringify_session(user: SessionUser, now: number, maxAge: number): Exception<string, JsError>,
+-  parse_session_json(json: string, now: number): Exception<SessionUser, JsError>
++  total now_seconds() number,
++  stringify_session(user: SessionUser, now: number, maxAge: number) Exception<string, JsError>,
++  parse_session_json(json: string, now: number) Exception<SessionUser, JsError>
+ } from "./boundary.mjs"
+ 
+ fn b64url_encode(data: bytes) string {

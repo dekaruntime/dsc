@@ -136,6 +136,7 @@ impl<'a> Parser<'a> {
             }
             self.skip_newlines();
             self.expect(TokenKind::RParen)?;
+            self.reject_return_type_colon();
             let ret = self.parse_type()?;
             Some(Type::Function {
                 params: alloc_slice(self.arena, params),

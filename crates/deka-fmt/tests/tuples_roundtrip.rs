@@ -8,7 +8,7 @@ const [text,maybe]=pair;
 const singleton:[number]=[1];
 const empty:[]=[];
 const []=empty;
-summon {total fn foreign(value:[number,string]): [number,string],} from "./shim.mjs";
+summon {total fn foreign(value:[number,string]) [number,string],} from "./shim.mjs";
 "#;
     let arena = bumpalo::Bump::new();
     let parsed = deka_syntax::parse(source, &arena);

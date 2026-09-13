@@ -26,11 +26,11 @@ opaque type Secret
 opaque type Values
 
 summon {
-  total add(a: A, b: B): Add,
-  total noop(): void,
-  total secret(handle: Handle): Secret,
-  total scene(): Scene,
-  total count(values: Array<Values>): number,
-  total withDefault(n: number): number,
-  total later(): Promise<number>
+  total add(a: A, b: B) Add,
+  total noop() void,
+  total secret(handle: Handle) Secret,
+  total scene() Scene,
+  total count(values: Array<Values>) number,
+  total withDefault(n: number) number,
+  total later() Promise<number>
 } from "./infer_basic.mjs"

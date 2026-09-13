@@ -15,7 +15,7 @@ fn reject(source: &str, message: &str) {
 }
 #[test]
 fn nominal_and_contained() {
-    let prefix = "opaque type Handle\nsummon { total handle(): Handle, total read(h: Handle): number } from \"./foreign.mjs\"\n";
+    let prefix = "opaque type Handle\nsummon { total handle() Handle, total read(h: Handle) number } from \"./foreign.mjs\"\n";
     compile(&format!("{prefix}struct Stored {{ h: Handle }}\nconst h = handle()\nconst stored = Stored {{ h: h }}\nconst n = read(stored.h)\n")).unwrap();
     for (body, diagnostic) in [
         ("const h = Handle {}", "cannot construct opaque"),
@@ -37,24 +37,24 @@ fn nominal_and_contained() {
         reject(&format!("{prefix}{body}"), diagnostic);
     }
     reject(
-        "summon { number(): number } from \"./foreign.mjs\"",
+        "summon { number() number } from \"./foreign.mjs\"",
         "explicit `total`",
     );
     reject(
-        "summon { fail(): Exception<number, string> } from \"./foreign.mjs\"\nconst x = fail()",
+        "summon { fail() Exception<number, string> } from \"./foreign.mjs\"\nconst x = fail()",
         "match",
     );
 }
 #[test]
 fn structural_gate() {
     for (signature, diagnostic) in [
-        ("total nonexistent(): number", "export does not exist"),
+        ("total nonexistent() number", "export does not exist"),
         (
-            "total scalar(): number",
+            "total scalar() number",
             "not a statically verifiable function",
         ),
-        ("total read(): number", "incompatible arity"),
-        ("total number(n: number): number", "incompatible arity"),
+        ("total read() number", "incompatible arity"),
+        ("total number(n: number) number", "incompatible arity"),
     ] {
         let errors =
             compile(&format!("summon {{ {signature} }} from \"./foreign.mjs\"")).unwrap_err();
@@ -65,13 +65,13 @@ fn structural_gate() {
             "{errors:?}"
         );
     }
-    compile("summon { total defaulted(): number, total variadic(a: number, b: number): number, total renamed(v: number): number } from \"./foreign.mjs\"").unwrap();
+    compile("summon { total defaulted() number, total variadic(a: number, b: number) number, total renamed(v: number) number } from \"./foreign.mjs\"").unwrap();
     let options = CompileOptions {
         foreign_modules: [("./foreign.mjs".into(), "export function broken( {".into())].into(),
         ..Default::default()
     };
     assert!(compile_to_js_with_options(
-        "summon { total broken(): number } from \"./foreign.mjs\"",
+        "summon { total broken() number } from \"./foreign.mjs\"",
         "virtual.ds",
         options
     )
@@ -84,16 +84,16 @@ fn native_marshaling_and_exception_identity() {
     let source = r#"
 opaque type Handle
 summon {
- total handle(): Handle,
- total read(h: Handle): number,
- total absent(): Option<number>,
- total missing(): Option<number>,
- total number(): Option<number>,
- total noop(): void,
- total optional(v: Option<number>): number,
- fail(): Exception<number, string>,
- total renamed(n: number): number,
- total later(): Promise<number>
+ total handle() Handle,
+ total read(h: Handle) number,
+ total absent() Option<number>,
+ total missing() Option<number>,
+ total number() Option<number>,
+ total noop() void,
+ total optional(v: Option<number>) number,
+ fail() Exception<number, string>,
+ total renamed(n: number) number,
+ total later() Promise<number>
 } from "./foreign.mjs"
 fn (h Handle) value() number { return read(h); }
 export fn inspect() number { return handle().value(); }
@@ -147,7 +147,7 @@ assert.equal(await m.asynchronous(), 9);
 fn contract_bug_bypasses_checked_ledger() {
     let source = r#"
 opaque type Handle
-summon { total handle(): Handle, total absent(): number, missing(): Exception<number, string> } from "./foreign.mjs"
+summon { total handle() Handle, total absent() number, missing() Exception<number, string> } from "./foreign.mjs"
 fn (h Handle) wrong() number { return absent(); }
 export fn receiver_lie() number { return handle().wrong(); }
 export fn total_lie() number { return absent(); }
@@ -183,7 +183,7 @@ fn opaque_types_across_files_keep_identity() {
     let dir = tempfile::tempdir().unwrap();
     let foreign = include_str!("fixtures/summon/foreign.mjs");
     std::fs::write(dir.path().join("foreign.mjs"), foreign).unwrap();
-    let a = "opaque type Handle\nexport { Handle }\nsummon { total handle(): Handle } from \"./foreign.mjs\"\nexport fn get() Handle { return handle(); }";
+    let a = "opaque type Handle\nexport { Handle }\nsummon { total handle() Handle } from \"./foreign.mjs\"\nexport fn get() Handle { return handle(); }";
     std::fs::write(dir.path().join("a.ds"), a).unwrap();
     std::fs::write(dir.path().join("b.ds"), a).unwrap();
     let entry = dir.path().join("main.ds");
@@ -226,7 +226,7 @@ fn verification_is_repeated_and_reassignment_is_not_callable_proof() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("main.ds");
     let module = dir.path().join("foreign.mjs");
-    let source = "summon { total f(): number } from \"./foreign.mjs\"";
+    let source = "summon { total f() number } from \"./foreign.mjs\"";
     std::fs::write(&module, "export function f() { return 1; }").unwrap();
     compile_to_js(source, path.to_str().unwrap()).unwrap();
     std::fs::write(&module, "export function f() { return 1; } f = 3;").unwrap();

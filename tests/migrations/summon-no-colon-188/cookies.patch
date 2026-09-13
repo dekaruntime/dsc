@@ -1,0 +1,37 @@
+--- a/index.ds
++++ b/index.ds
+@@ -41,13 +41,13 @@
+ 
+ opaque type CookieBag
+ summon {
+-  total empty_bag(): CookieBag,
+-  total bag_has(bag: CookieBag, key: string): boolean,
+-  total bag_set(bag: CookieBag, key: string, value: string): CookieBag,
+-  total bag_get(bag: CookieBag, key: string): Option<string>,
+-  encode_uri(value: string): Exception<string, JsError>,
+-  decode_uri(value: string): Exception<string, JsError>,
+-  total gmt_expires(unix: number): string
++  total empty_bag() CookieBag,
++  total bag_has(bag: CookieBag, key: string) boolean,
++  total bag_set(bag: CookieBag, key: string, value: string) CookieBag,
++  total bag_get(bag: CookieBag, key: string) Option<string>,
++  encode_uri(value: string) Exception<string, JsError>,
++  decode_uri(value: string) Exception<string, JsError>,
++  total gmt_expires(unix: number) string
+ } from "./boundary.mjs"
+ 
+ fn header_fields(headers: CookieHeaders) string {
+--- a/tests/roundtrip.ds
++++ b/tests/roundtrip.ds
+@@ -1,8 +1,8 @@
+ summon {
+-  encode_uri(value: string): Exception<string, JsError>,
+-  decode_uri(value: string): Exception<string, JsError>
++  encode_uri(value: string) Exception<string, JsError>,
++  decode_uri(value: string) Exception<string, JsError>
+ } from "../boundary.mjs"
+-summon { total lone_surrogate(): string } from "./fixtures.mjs"
++summon { total lone_surrogate() string } from "./fixtures.mjs"
+ import { echo } from "io"
+ 
+ import { header, value, parse, all, has, get, build_set_cookie, clear_cookie, bag_value } from "../index.ds"

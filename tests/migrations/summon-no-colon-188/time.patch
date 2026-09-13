@@ -1,0 +1,21 @@
+--- a/index.ds
++++ b/index.ds
+@@ -1,7 +1,7 @@
+ // Host-granted time. now() is Date.now; only sleep_ms is a host op.
+ 
+ // Date.now is total: expose the timestamp directly instead of hiding errors as zero.
+-summon { total now_ms(): number } from "./shim.mjs"
++summon { total now_ms() number } from "./shim.mjs"
+ 
+ export fn now() number {
+   return now_ms()
+--- a/tests/roundtrip.ds
++++ b/tests/roundtrip.ds
+@@ -1,6 +1,6 @@
+ import { now, sleep_ms } from "../index.ds"
+ 
+-summon { total log(message: string): void } from "./log.mjs"
++summon { total log(message: string) void } from "./log.mjs"
+ 
+ fn go() {
+   const before = now();

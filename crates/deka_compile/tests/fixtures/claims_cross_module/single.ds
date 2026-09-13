@@ -1,8 +1,8 @@
 interface Claims { sub?: string }
-summon { parse(json: string): Exception<Claims, JsError> } from "./parse.mjs"
+summon { parse(json: string) Exception<Claims, JsError> } from "./parse.mjs"
 fn claims() {
   return match (parse("{\"sub\":\"alice\"}")) { Ok(c) => Ok(c), Throw(e) => Err("bad JSON") }
 }
-summon { total log(value: string): void } from "./log.mjs"
+summon { total log(value: string) void } from "./log.mjs"
 const sub = match (claims()) { Ok(c) => match (c.sub) { Some(v) => v, None => "missing" }, Err(e) => e }
 log(sub)

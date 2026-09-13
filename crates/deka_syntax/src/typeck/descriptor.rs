@@ -58,6 +58,9 @@ pub enum DescriptorTree<'a> {
         name: &'a str,
         cases: Vec<(&'a str, Option<DescriptorTree<'a>>)>,
     },
+    Tuple {
+        elements: Vec<DescriptorTree<'a>>,
+    },
     Array {
         elem: Box<DescriptorTree<'a>>,
     },
@@ -98,7 +101,7 @@ pub fn collect_recurse_refs<'a>(tree: &DescriptorTree<'a>, out: &mut Vec<&'a str
         DescriptorTree::Array { elem } | DescriptorTree::Option { inner: elem } => {
             collect_recurse_refs(elem, out)
         }
-        DescriptorTree::Union { members } => {
+        DescriptorTree::Tuple { elements: members } | DescriptorTree::Union { members } => {
             for member in members.iter() {
                 collect_recurse_refs(member, out);
             }
@@ -181,6 +184,12 @@ impl<'a> Checker<'a> {
         allow_recurse: bool,
     ) -> Result<DescriptorTree<'a>, String> {
         match ty {
+            Type::Tuple { elements } => Ok(DescriptorTree::Tuple {
+                elements: elements
+                    .iter()
+                    .map(|t| self.descriptor_tree_rec(t, span, seen, allow_recurse))
+                    .collect::<Result<_, _>>()?,
+            }),
             Type::Opaque { name, .. } => Err(format!(
                 "opaque type `{name}` has no inspectable descriptor"
             )),
@@ -549,7 +558,7 @@ impl<'a> Checker<'a> {
             Type::Option { inner } | Type::Array { elem: inner } => {
                 self.referenced_decl_names(inner, out);
             }
-            Type::Union { members } => {
+            Type::Tuple { elements: members } | Type::Union { members } => {
                 for member in members.iter() {
                     self.referenced_decl_names(member, out);
                 }

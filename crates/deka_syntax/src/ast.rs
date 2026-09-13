@@ -70,6 +70,13 @@ pub enum Stmt<'a> {
         value: Expr<'a>,
         span: Span,
     },
+    TupleBinding {
+        names: &'a [&'a str],
+        ty: Option<Type<'a>>,
+        value: Expr<'a>,
+        is_const: bool,
+        span: Span,
+    },
     Let {
         name: &'a str,
         ty: Option<Type<'a>>,

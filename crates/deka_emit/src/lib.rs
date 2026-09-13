@@ -64,6 +64,92 @@ mod tests {
     }
 
     #[test]
+    fn tuples_descriptors_and_json_node() {
+        let out = parse_check_and_emit(
+            r#"
+const pair: [number, Option<string>] = [7, None];
+const shape = pair.signature();
+const encoded = pair.toJSON();
+const decoded = encoded.parseJSON<[number, Option<string>]>();
+const bad = "[1]".parseJSON<[number, string]>();
+const wrong = "[1,2]".parseJSON<[number, string]>();
+super struct Container { pair: [number, string] }
+const descriptor = Container.type();
+"#,
+        );
+        let js = format!(
+            "{out}\n{}",
+            r#"
+import assert from 'node:assert/strict';
+assert.equal(shape.kind, 'tuple');
+assert.equal(shape.elements.length, 2);
+assert.equal(shape.elements[1].kind, 'option');
+assert.deepEqual(decoded, {ok: true, value: [7, undefined]});
+assert.equal(bad.ok, false);
+assert.equal(wrong.ok, false);
+assert.equal(descriptor.fields[0].type.kind, 'tuple');
+"#
+        );
+        let result = std::process::Command::new("node")
+            .args(["--input-type=module", "-e", &js])
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}\n{out}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+
+    #[test]
+    fn tuples_exact_output() {
+        assert_eq!(parse_check_and_emit("const pair: [number, string] = [1, \"ok\"]; const [n, s] = pair; const value = pair[1];"),
+            "\"use strict\";\nconst pair = [1, \"ok\"];\nconst [n, s] = pair;\nconst value = pair[1];");
+    }
+
+    #[test]
+    fn tuples_summon_node() {
+        let shim = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/tuples/shim.mjs")
+            .canonicalize()
+            .unwrap();
+        let source = format!(
+            r#"summon {{ total fn pair(): [number, string], total fn empty(): [number, string], total fn optional(): Option<[number, string]>, total fn consume(p: [number, string]): string, }} from "{}";
+const [n, s] = pair();
+const joined = consume([n, s]);
+fn guarded() [number, string] {{ return empty(); }}
+const absent = optional();
+const p: [number, Option<string>] = [1, None];
+const q: Option<[number, string]> = Some([2, "x"]);
+"#,
+            shim.display()
+        );
+        let out = parse_check_and_emit(&source);
+        let js = format!(
+            "{out}\n{}",
+            r#"
+import assert from 'node:assert/strict';
+assert.equal(n, 7);
+assert.equal(s, 'seven');
+assert.equal(joined, '7:seven');
+assert.deepEqual(p, [1, undefined]);
+assert.deepEqual(q, [2, 'x']);
+assert.equal(absent, undefined);
+assert.throws(() => guarded());
+"#
+        );
+        let result = std::process::Command::new("node")
+            .args(["--input-type=module", "-e", &js])
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}\n{out}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+
+    #[test]
     fn option_erasure_runtime() { run_hats_fixtures("option_erasure", 1); }
 
     #[test]

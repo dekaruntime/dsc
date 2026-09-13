@@ -136,6 +136,33 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Fourth proof source (rfd#66): tuple length is fixed by its type.
+    /// Unlike flow facts, this proof survives calls and alias writes because
+    /// tuple operations cannot change the length or a position's type.
+    pub(super) fn tuple_index_type(
+        &mut self,
+        elements: &[super::Type<'a>],
+        index: &Expr<'a>,
+        span: Span,
+    ) -> super::Type<'a> {
+        self.check_expr(index);
+        if let Expr::Number { value, .. } = plain(index) {
+            if *value >= 0.0 && value.fract() == 0.0 && *value < elements.len() as f64 {
+                return elements[*value as usize].clone();
+            }
+            self.error_span(
+                span,
+                format!(
+                    "tuple index {value} is out of range for {} positions",
+                    elements.len()
+                ),
+            );
+        } else {
+            self.error_span(span, "tuple indexing requires an in-range integer literal; use destructuring: const [a, b] = pair");
+        }
+        super::Type::Error
+    }
+
     pub(super) fn require_index_proof(&mut self, object: &Expr<'a>, index: &Expr<'a>, span: Span) {
         if self.index_flow.proves(object, index) {
             return;

@@ -152,6 +152,34 @@ impl<'a> Parser<'a> {
                 let is_const = self.current_kind() == TokenKind::Const;
                 self.advance();
 
+                if self.eat(TokenKind::LBracket) {
+                    let mut names = Vec::new();
+                    self.skip_newlines();
+                    while !self.at(TokenKind::RBracket) {
+                        names.push(self.expect_identifier()?);
+                        self.skip_newlines();
+                        if !self.eat(TokenKind::Comma) {
+                            break;
+                        }
+                        self.skip_newlines();
+                    }
+                    self.expect(TokenKind::RBracket)?;
+                    let ty = if self.eat(TokenKind::Colon) {
+                        Some(self.parse_type()?)
+                    } else {
+                        None
+                    };
+                    self.expect(TokenKind::Eq)?;
+                    let value = self.parse_expression()?;
+                    self.expect_statement_end(in_block)?;
+                    return Some(Stmt::TupleBinding {
+                        names: alloc_slice(self.arena, names),
+                        ty,
+                        value,
+                        is_const,
+                        span: self.span_from(start, start_byte),
+                    });
+                }
                 let name = self.expect_identifier()?;
                 let ty = if self.eat(TokenKind::Colon) {
                     Some(self.parse_type()?)
@@ -1309,9 +1337,10 @@ pub(crate) fn program_has_top_level_await(statements: &[Stmt<'_>]) -> bool {
 
 fn stmt_has_top_level_await(stmt: &Stmt<'_>) -> bool {
     match stmt {
-        Stmt::Const { value, .. } | Stmt::Let { value, .. } | Stmt::Expr { expr: value, .. } => {
-            expr_has_top_level_await(value)
-        }
+        Stmt::TupleBinding { value, .. }
+        | Stmt::Const { value, .. }
+        | Stmt::Let { value, .. }
+        | Stmt::Expr { expr: value, .. } => expr_has_top_level_await(value),
         Stmt::UnwrapLet {
             scrutinee,
             alternative,

@@ -10,7 +10,7 @@ pub mod prelude;
 mod util;
 
 pub use emit::{
-    build_factory_names, collect_js_identifier_tokens, css_scope_hash, dev_slot_id,
+    build_factory_names, collect_js_identifier_tokens, dev_slot_id,
     dev_slot_source_path, dev_uses_name, emit_dev_entry, emit_js, emit_js_module_with_options,
     emit_js_with_imports, emit_js_with_options, live_dev_uses_name, ModuleEmit,
 };
@@ -54,7 +54,6 @@ mod tests {
             &typeck.number_math_calls,
             &typeck.static_type_calls,
             &typeck.super_trees,
-            &typeck.jsx_optional_props,
             &typeck.enum_case_patterns,
             &typeck.union_type_patterns,
             &std::collections::HashSet::new(),
@@ -1136,7 +1135,7 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
     fn emit_jsx_element() {
         let out = parse_and_emit("const el = <div class=\"box\" />;");
         assert!(
-            out.contains("import { jsx, jsxs, Fragment } from \"ui/jsx\""),
+            out.contains("import { jsx, jsxs, Fragment } from \"@js/react/jsx-runtime\""),
             "got: {}",
             out
         );
@@ -1163,35 +1162,18 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
     }
 
     #[test]
-    fn emit_jsx_with_children() {
-        let out = parse_and_emit("const el = <p>hello {name}</p>;");
-        assert!(out.contains("jsxs("), "expected jsxs call, got: {}", out);
-        assert!(
-            out.contains("}, ["),
-            "children must be a separate argument, not a props field: {out}"
-        );
-        assert!(
-            !out.contains("\"children\":"),
-            "children must not be emitted inside the props object: {out}"
-        );
-        assert!(
-            out.contains("import { live } from \"ui/reactive\""),
-            "non-literal interpolations must import live: {out}"
-        );
-        assert!(
-            out.contains("live(function() { return name; })"),
-            "non-literal interpolations must wrap live(): {out}"
-        );
-    }
-
-    #[test]
-    fn emit_jsx_single_child_is_a_scalar_argument() {
-        let out = parse_and_emit("const el = <p>hi</p>;");
-        assert!(out.contains("jsx("), "expected jsx call, got: {}", out);
-        assert!(
-            out.contains("}, \"hi\")"),
-            "a single child must be passed as the third argument: {out}"
-        );
+    fn emit_jsx_automatic_runtime_exact_output() {
+        for (source, expression) in [
+            ("const el = <p>hi</p>;", r#"jsx("p", {"data-deka-id": "module:_/i0", "children": "hi"})"#),
+            ("const el = <p>hello {name}</p>;", r#"jsxs("p", {"data-deka-id": "module:_/i0", "children": ["hello ", name]})"#),
+            ("const el = <p>{items}</p>;", r#"jsx("p", {"data-deka-id": "module:_/i0", "children": items})"#),
+            ("const el = <><Card title=\"ok\" /><p>x</p></>;", r#"jsxs(Fragment, {"children": [jsx(Card, {"title": "ok"}), jsx("p", {"data-deka-id": "module:_/i0/i1", "children": "x"})]})"#),
+            ("const el = <p key={id} ref={ref} onClick={click} data-deka-id=\"forwarded\">x</p>;", r#"jsx("p", {"data-deka-id": "module:_/i0", "ref": ref, "onClick": click, "data-deka-id": "forwarded", "children": "x"}, id)"#),
+            ("const el = <>x</>;", r#"jsx(Fragment, {"children": "x"})"#),
+        ] {
+            let out = parse_and_emit(source);
+            assert_eq!(out, format!("\"use strict\";\nimport {{ jsx, jsxs, Fragment }} from \"@js/react/jsx-runtime\";\n\nconst el = {expression};"), "{source}");
+        }
     }
 
     #[test]
@@ -1228,34 +1210,12 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
     }
 
     #[test]
-    fn emit_does_not_duplicate_jsx_helper_import_when_user_imports_it() {
-        // deka#744 F3: same hazard as `live` for every auto-injected jsx
-        // runtime name. Each must be respected individually — importing one
-        // explicitly must not bind it twice.
+    fn emit_jsx_runtime_names_cannot_capture_user_bindings() {
         for name in ["jsx", "jsxs", "Fragment"] {
-            let out = parse_and_emit(&format!(
-                "import {{ {name} }} from \"ui/jsx\";\n\
-                 export fn Page() {{\n\
-                   return <p>hi</p>;\n\
-                 }}\n\
-                 export fn Raw() {{\n\
-                   return {name}(\"span\", {{}}, \"x\");\n\
-                 }}",
-            ));
-            assert!(
-                out.contains(&format!("import {{ {name} }} from \"ui/jsx\"")),
-                "{name}: the user's own import must be emitted intact: {out}"
-            );
-            assert!(
-                !out.contains(&format!("import {{ jsx, jsxs, Fragment }} from \"ui/jsx\"")),
-                "{name}: the full helper import must not be injected over the user's binding: {out}"
-            );
-            assert!(
-                !out.contains(&format!("import {{ {name},"))
-                    && !out.contains(&format!(", {name} }} from \"ui/jsx\""))
-                    && !out.contains(&format!(", {name},")),
-                "{name}: the injected line must not re-bind the user's name: {out}"
-            );
+            let source = format!("const {name} = 1; const __deka_{name} = 2; const el = <><p>hi</p><p>x</p></>;");
+            let out = parse_and_emit(&source);
+            assert!(out.contains(&format!("{name} as __deka_{name}_")), "{out}");
+            assert!(out.contains(&format!("const {name} = 1;")), "{out}");
         }
     }
 
@@ -1264,7 +1224,7 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
         // Importing only `jsx` must suppress just `jsx`: emitted JSX still
         // references jsxs/Fragment, so those injections must remain.
         let out = parse_and_emit(
-            "import { jsx } from \"ui/jsx\";\n\
+            "import { jsx } from \"@js/react/jsx-runtime\";\n\
              export fn Page() {\n\
                return <p>hi</p>;\n\
              }\n\
@@ -1273,11 +1233,11 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
              }",
         );
         assert!(
-            out.contains("import { jsx } from \"ui/jsx\""),
+            out.contains("import { jsx } from \"@js/react/jsx-runtime\""),
             "the user's own import must be emitted intact: {out}"
         );
         assert!(
-            out.contains("import { jsxs, Fragment } from \"ui/jsx\""),
+            out.contains("import { jsx as __deka_jsx, jsxs, Fragment } from \"@js/react/jsx-runtime\""),
             "only the bound name may be skipped; jsxs and Fragment must still be injected: {out}"
         );
     }
@@ -1316,31 +1276,10 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
     }
 
     #[test]
-    fn css_scope_hash_is_stable_and_distinct() {
-        assert_eq!(css_scope_hash("greeting {}"), "e1c9193cd172");
-        assert_eq!(css_scope_hash("greeting {}"), css_scope_hash("greeting {}"));
-        assert_ne!(
-            css_scope_hash("greeting {}"),
-            css_scope_hash("greeting { }")
-        );
-        // 12 hex chars, the Astro cid shape.
-        assert!(css_scope_hash("x").chars().all(|c| c.is_ascii_hexdigit()));
-        assert_eq!(css_scope_hash("x").len(), 12);
-    }
-
-    #[test]
-    fn emit_jsx_stamps_cid_when_module_imports_css() {
-        let source = "import \"./card.css\";\nconst el = <div class=\"box\" />;";
-        let out = parse_and_emit(source);
-        let cid = css_scope_hash(source);
-        assert!(
-            out.contains(&format!("\"data-deka-cid-{cid}\": true")),
-            "component CSS must stamp host elements with the scope id: {out}"
-        );
-        assert!(
-            out.contains("\"data-deka-id\": \"module:_/i0\""),
-            "the hydration id must stay alongside the scope stamp: {out}"
-        );
+    fn emit_jsx_css_import_does_not_inject_retired_scope_prop() {
+        let out = parse_and_emit("import \"./card.css\"; const el = <div />;");
+        assert!(!out.contains("data-deka-cid"), "{out}");
+        assert!(out.contains("\"data-deka-id\": \"module:_/i0\""), "{out}");
     }
 
     #[test]
@@ -1899,7 +1838,6 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
             &super_decl_trees,
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
             &std::collections::HashSet::new(),
             "module.ds",
             None,
@@ -2029,7 +1967,6 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
             &typeck.number_math_calls,
             &typeck.static_type_calls,
             &typeck.super_trees,
-            &typeck.jsx_optional_props,
             &typeck.enum_case_patterns,
             &typeck.union_type_patterns,
             &std::collections::HashSet::new(),
@@ -2105,7 +2042,6 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
             &typeck.number_math_calls,
             &typeck.static_type_calls,
             &typeck.super_trees,
-            &typeck.jsx_optional_props,
             &typeck.enum_case_patterns,
             &typeck.union_type_patterns,
             &std::collections::HashSet::new(),

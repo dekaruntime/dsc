@@ -1,0 +1,149 @@
+--- a/callbacks-with-function-types.dsx
++++ b/callbacks-with-function-types.dsx
+@@ -6,7 +6,7 @@
+   onClick: OnClick;
+ }
+
+-fn Button(props: ButtonProps) Component {
++fn Button(props: ButtonProps) ReactNode {
+   return <button onClick={props.onClick}>{props.label}</button>
+ }
+
+@@ -14,6 +14,6 @@
+   echo("clicked")
+ }
+
+-export fn Page() Component {
++export fn Page() ReactNode {
+   return <Button label={"Click me"} onClick={handleClick} />
+ }
+--- a/islands.dsx
++++ b/islands.dsx
+@@ -4,7 +4,7 @@
+   start: number;
+ }
+
+-fn Counter(props: CounterProps) Component {
++fn Counter(props: CounterProps) ReactNode {
+   return <button>{props.start}</button>
+ }
+
+@@ -15,6 +15,6 @@
+   Err(e) => echo(e),
+ }
+
+-export fn Page() Component {
++export fn Page() ReactNode {
+   return <Counter client={"load"} start={5} />
+ }
+--- a/jsx-components.dsx
++++ b/jsx-components.dsx
+@@ -2,10 +2,10 @@
+   name: string;
+ }
+
+-fn Greeting(props: GreetingProps) Component {
++fn Greeting(props: GreetingProps) ReactNode {
+   return <h1>Hello{props.name}</h1>
+ }
+
+-export fn Page() Component {
++export fn Page() ReactNode {
+   return <Greeting name={"DekaScript"} />
+ }
+--- a/jsx.dsx
++++ b/jsx.dsx
+@@ -2,10 +2,10 @@
+   name: string;
+ }
+
+-fn Greeting(props: GreetingProps) Component {
++fn Greeting(props: GreetingProps) ReactNode {
+   return <h1>Hello{props.name}</h1>
+ }
+
+-export fn Page() Component {
++export fn Page() ReactNode {
+   return <Greeting name={"DekaScript"} />
+ }
+--- a/props-checked.dsx
++++ b/props-checked.dsx
+@@ -4,13 +4,13 @@
+ }
+
+ interface LayoutProps {
+-  children: Component;
++  children: ReactNode;
+ }
+
+ // Props are checked at the call site, not only where they are read. A missing
+ // required prop, a wrong type, or a name that is not a prop at all are all
+ // compile errors on the `<Card … />` line.
+-fn Card(props: CardProps) Component {
++fn Card(props: CardProps) ReactNode {
+   const sub = match (props.subtitle) {
+     Some(s) => <p>{s}</p>,
+     None => <></>,
+@@ -22,7 +22,7 @@
+ }
+
+ // `children` is filled by nesting rather than by an attribute.
+-fn Layout(props: LayoutProps) Component {
++fn Layout(props: LayoutProps) ReactNode {
+   return <main>{props.children}</main>
+ }
+
+@@ -37,6 +37,6 @@
+ //   <Card title="x" subtitel="y" />   interface `CardProps` has no prop `subtitel`
+ //   <Layout></Layout>                 missing required prop `children`
+
+-export fn Page() Component {
++export fn Page() ReactNode {
+   return <Layout><Card title={"Hello"} /></Layout>
+ }
+--- a/props.dsx
++++ b/props.dsx
+@@ -3,7 +3,7 @@
+   subtitle?: string;
+ }
+
+-fn Card(props: CardProps) Component {
++fn Card(props: CardProps) ReactNode {
+   // `subtitle?: string` is `Option<string>` here, so absence is a branch.
+   // Rendering it directly would put the Option itself into the DOM.
+   const sub = match (props.subtitle) {
+@@ -20,6 +20,6 @@
+ // The caller writes neither Some nor None: a JSX element is a construction
+ // site the compiler owns, so it wraps this bare value in Some, and fills an
+ // omitted `subtitle` with None.
+-export fn Page() Component {
++export fn Page() ReactNode {
+   return <Card title={"Hello"} subtitle={"DekaScript"} />
+ }
+--- a/suspense.dsx
++++ b/suspense.dsx
+@@ -1,7 +1,7 @@
+-fn Ready() Component {
++fn Ready() ReactNode {
+   return <p>loaded</p>
+ }
+
+-export fn Page() Component {
++export fn Page() ReactNode {
+   return <Ready />
+ }
+--- a/utility-classes.dsx
++++ b/utility-classes.dsx
+@@ -1,10 +1,10 @@
+-fn Card() Component {
++fn Card() ReactNode {
+   return <div class={"p-4 rounded-lg bg-card shadow"}>
+ <h1 class={"text-2xl font-bold text-foreground"}>Hello</h1>
+ <p class={"text-muted-foreground"}>Styled with utility classes</p>
+ </div>
+ }
+
+-export fn Page() Component {
++export fn Page() ReactNode {
+   return <Card />
+ }

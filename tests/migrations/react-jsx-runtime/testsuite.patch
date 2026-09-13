@@ -1,0 +1,108 @@
+--- a/corpus/components/interactive_component_without_client_directive/interactive_component_without_client_directive.fail.dsx
++++ b/corpus/components/interactive_component_without_client_directive/interactive_component_without_client_directive.fail.dsx
+@@ -1,6 +1,6 @@
+ fn clicked() {}
+
+-fn Counter() Component {
++fn Counter() ReactNode {
+   return <button onClick={clicked}>0</button>
+ }
+
+--- a/corpus/components/jsx_element_not_number_fail/jsx_element_not_number_fail.code
++++ b/corpus/components/jsx_element_not_number_fail/jsx_element_not_number_fail.code
+@@ -1,4 +1,4 @@
+-// deka#461: a JSX element is a `Component`, not `Infer`. Binding one to
++// deka#461: a JSX element is a `ReactNode`, not `Infer`. Binding one to
+ // `number` must be rejected -- it was accepted for as long as JSX was
+ // universally assignable.
+ const n: number = <p>hi</p>
+--- a/corpus/components/jsx_element_not_number_fail/jsx_element_not_number_fail.fail.dsx
++++ b/corpus/components/jsx_element_not_number_fail/jsx_element_not_number_fail.fail.dsx
+@@ -1,4 +1,4 @@
+-// deka#461: a JSX element is a `Component`, not `Infer`. Binding one to
++// deka#461: a JSX element is a `ReactNode`, not `Infer`. Binding one to
+ // `number` must be rejected -- it was accepted for as long as JSX was
+ // universally assignable.
+ const n: number = <p>hi</p>
+--- a/corpus/components/jsx_element_not_number_fail/jsx_element_not_number_fail.json
++++ b/corpus/components/jsx_element_not_number_fail/jsx_element_not_number_fail.json
+@@ -1,6 +1,6 @@
+ {
+   "title": "A JSX element is not assignable to number",
+   "stage": "parse",
+-  "expectedDiagnosticContains": "found type `Component`",
++  "expectedDiagnosticContains": "found type `ReactNode`",
+   "notes": "deka#461."
+ }
+--- a/corpus/components/jsx_prop_missing_required_fail/jsx_prop_missing_required_fail.code
++++ b/corpus/components/jsx_prop_missing_required_fail/jsx_prop_missing_required_fail.code
+@@ -2,7 +2,7 @@
+   title: string;
+ }
+
+-fn Card(props: CardProps) Component {
++fn Card(props: CardProps) ReactNode {
+   return <h2>{props.title}</h2>
+ }
+
+--- a/corpus/components/jsx_prop_missing_required_fail/jsx_prop_missing_required_fail.fail.dsx
++++ b/corpus/components/jsx_prop_missing_required_fail/jsx_prop_missing_required_fail.fail.dsx
+@@ -2,7 +2,7 @@
+   title: string;
+ }
+
+-fn Card(props: CardProps) Component {
++fn Card(props: CardProps) ReactNode {
+   return <h2>{props.title}</h2>
+ }
+
+--- a/corpus/components/jsx_prop_type_mismatch_fail/jsx_prop_type_mismatch_fail.code
++++ b/corpus/components/jsx_prop_type_mismatch_fail/jsx_prop_type_mismatch_fail.code
+@@ -2,7 +2,7 @@
+   title: string;
+ }
+
+-fn Card(props: CardProps) Component {
++fn Card(props: CardProps) ReactNode {
+   return <h2>{props.title}</h2>
+ }
+
+--- a/corpus/components/jsx_prop_type_mismatch_fail/jsx_prop_type_mismatch_fail.fail.dsx
++++ b/corpus/components/jsx_prop_type_mismatch_fail/jsx_prop_type_mismatch_fail.fail.dsx
+@@ -2,7 +2,7 @@
+   title: string;
+ }
+
+-fn Card(props: CardProps) Component {
++fn Card(props: CardProps) ReactNode {
+   return <h2>{props.title}</h2>
+ }
+
+--- a/corpus/components/jsx_prop_unknown_fail/jsx_prop_unknown_fail.code
++++ b/corpus/components/jsx_prop_unknown_fail/jsx_prop_unknown_fail.code
+@@ -2,7 +2,7 @@
+   title: string;
+ }
+
+-fn Card(props: CardProps) Component {
++fn Card(props: CardProps) ReactNode {
+   return <h2>{props.title}</h2>
+ }
+
+--- a/corpus/components/jsx_prop_unknown_fail/jsx_prop_unknown_fail.fail.dsx
++++ b/corpus/components/jsx_prop_unknown_fail/jsx_prop_unknown_fail.fail.dsx
+@@ -2,7 +2,7 @@
+   title: string;
+ }
+
+-fn Card(props: CardProps) Component {
++fn Card(props: CardProps) ReactNode {
+   return <h2>{props.title}</h2>
+ }
+
+--- a/corpus/hoisting/component_const_not_hoisted/component_const_not_hoisted.fail.dsx
++++ b/corpus/hoisting/component_const_not_hoisted/component_const_not_hoisted.fail.dsx
+@@ -1,2 +1,2 @@
+ const app = <Card />
+-const Card = fn() Component { return <div>hi</div> }
++const Card = fn() ReactNode { return <div>hi</div> }

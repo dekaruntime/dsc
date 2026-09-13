@@ -44,6 +44,10 @@ pub(super) fn with_union_narrowing_hint<'a>(
     expected: &Type<'a>,
     actual: &Type<'a>,
 ) -> String {
+    if matches!(expected, Type::Named { name: "Component" } | Type::Generic { base: "Component", .. }) {
+        return format!("{message}; Component is a props interface or struct → ReactNode function; use ReactNode for a JSX value or return type");
+    }
+
     if matches!(actual, Type::Union { .. }) && !matches!(expected, Type::Union { .. }) {
         format!("{message}; narrow it with a match before use")
     } else {
@@ -125,12 +129,6 @@ pub struct TypeckResult<'a> {
     /// Map from binary/unary operator expression pointer to how a newtype
     /// operation should be lowered.
     pub operator_rewrites: HashMap<*const ast::Expr<'a>, types::OperatorRewrite<'a>>,
-    /// How each JSX element's optional props must be materialised.
-    ///
-    /// A component's props interface is a construction site the compiler owns,
-    /// so `?:` props are filled and bare values wrapped there. Plain object
-    /// literals may omit Option fields: absent properties are erased None.
-    pub jsx_optional_props: HashMap<*const ast::JsxElement<'a>, JsxOptionalProps<'a>>,
     /// Identifier patterns that name a payload-free case of the scrutinee's
     /// enum rather than binding it (deka#450).
     pub enum_case_patterns: HashMap<*const ast::Pattern<'a>, &'a str>,
@@ -146,15 +144,6 @@ pub struct TypeckResult<'a> {
 pub struct DevBlock<'a> {
     pub body: &'a [ast::Stmt<'a>],
     pub descriptor: descriptor::DescriptorTree<'a>,
-}
-
-/// The `Option` materialisation for one JSX element.
-#[derive(Debug, Clone, Default)]
-pub struct JsxOptionalProps<'a> {
-    /// Optional props with no attribute: emit `Option.None`.
-    pub fill_none: Vec<&'a str>,
-    /// Attributes whose value must be wrapped in `Option.Some(...)`.
-    pub wrap_some: Vec<&'a str>,
 }
 
 pub fn check_program<'a>(program: &'a Program<'a>, _source: &str) -> TypeckResult<'a> {
@@ -273,8 +262,7 @@ impl<'a> Default for ModuleExports<'a> {
 
 /// Compute every local or imported component binding that requires hydration.
 ///
-/// A component is direct-interactive when its module imports `ui/reactive`,
-/// calls `signal()`, or binds an `on*={...}` JSX handler. The result then
+/// A component is direct-interactive when it binds an `on*={...}` JSX handler. The result then
 /// closes over ordinary (unhydrated) uppercase JSX references, which makes the
 /// property transitive through statically resolved components. A child below a
 /// `client:*` island is deliberately excluded: its island root hydrates the
@@ -283,10 +271,6 @@ pub fn collect_interactive_components<'a>(
     program: &'a Program<'a>,
     imports: &HashMap<&str, &ModuleExports<'a>>,
 ) -> HashSet<&'a str> {
-    let imports_reactive = program.statements.iter().any(|stmt| {
-        matches!(stmt, ast::Stmt::Import { source, .. } if normalize_ui_specifier(source) == "ui/reactive")
-    });
-
     let mut interactive = HashSet::new();
     for stmt in program.statements.iter() {
         match stmt {
@@ -328,7 +312,7 @@ pub fn collect_interactive_components<'a>(
         let Some((name, body)) = component_body(stmt) else {
             continue;
         };
-        let mut direct = imports_reactive;
+        let mut direct = false;
         let mut references = HashSet::new();
         summarize_statements(body, &mut direct, &mut references, false);
         if direct {
@@ -389,13 +373,6 @@ pub fn collect_exported_interactive_components<'a>(
         }
     }
     exported
-}
-
-fn normalize_ui_specifier(specifier: &str) -> &str {
-    specifier
-        .trim()
-        .strip_prefix("@deka/")
-        .unwrap_or(specifier.trim())
 }
 
 fn component_body<'a>(stmt: &'a ast::Stmt<'a>) -> Option<(&'a str, &'a [ast::Stmt<'a>])> {
@@ -559,9 +536,6 @@ fn summarize_expr<'a>(
 ) {
     match expr {
         ast::Expr::Call { callee, args, .. } => {
-            if matches!(**callee, ast::Expr::Identifier { name: "signal", .. }) {
-                *direct = true;
-            }
             summarize_expr(callee, direct, references, inside_island);
             for arg in args.iter() {
                 summarize_expr(arg, direct, references, inside_island);
@@ -775,7 +749,6 @@ pub fn check_program_with_imports<'a>(
         number_math_calls: checker.number_math_calls,
         unwrap_calls: checker.unwrap_calls,
         operator_rewrites: checker.operator_rewrites,
-        jsx_optional_props: checker.jsx_optional_props,
         enum_case_patterns: checker.enum_case_patterns,
         union_type_patterns: checker.union_type_patterns,
         dev_blocks: checker.dev_blocks,
@@ -1247,6 +1220,7 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
     ) -> Type<'a> {
         match ty {
             ast::Type::Named { name, .. } => match *name {
+                "ReactNode" => Type::react_node(),
                 "number" | "string" | "boolean" | "never" | "void" | "bytes" | "Component"
                 | "JsError" | "SyntaxError" | "TypeError" | "RangeError" | "Error" | "Type" => {
                     Type::Named { name }
@@ -1811,7 +1785,6 @@ struct Checker<'a> {
     /// Operator expression sites that need newtype-aware lowering.
     /// Cleared between passes by `reset_lowering_state`.
     operator_rewrites: HashMap<*const ast::Expr<'a>, types::OperatorRewrite<'a>>,
-    jsx_optional_props: HashMap<*const ast::JsxElement<'a>, JsxOptionalProps<'a>>,
     enum_case_patterns: HashMap<*const ast::Pattern<'a>, &'a str>,
     /// Union member type-pattern sites to lower, keyed by pattern pointer
     /// (rfd#42, deka#530).
@@ -1903,7 +1876,6 @@ impl<'a> Checker<'a> {
             number_math_calls: HashMap::new(),
             unwrap_calls: HashMap::new(),
             operator_rewrites: HashMap::new(),
-            jsx_optional_props: HashMap::new(),
             enum_case_patterns: HashMap::new(),
             union_type_patterns: HashMap::new(),
             dev_blocks: HashMap::new(),
@@ -2244,6 +2216,27 @@ impl<'a> Checker<'a> {
     fn is_assignable(&mut self, expected: &Type<'a>, actual: &Type<'a>) -> bool {
         if expected.is_error() || actual.is_error() {
             return true;
+        }
+        if matches!(expected, Type::Named { name: "Component" }) {
+            return match actual.function_contract() {
+                Type::Function { params, ret, .. } => params.len() == 1
+                    && matches!(params[0], Type::Interface { .. } | Type::Struct { .. })
+                    && self.is_assignable(&Type::react_node(), &ret),
+                Type::Named { name: "Component" } => true,
+                _ => false,
+            };
+        }
+        if matches!(expected, Type::Generic { base: "Component", .. }) || matches!(actual, Type::Generic { base: "Component", .. }) {
+            return self.is_assignable(&expected.function_contract(), &actual.function_contract());
+        }
+        if expected.is_react_node() {
+            if actual.is_react_node() { return true; }
+            return match actual {
+                Type::Named { name: "string" | "number" | "boolean" | "void" } | Type::None | Type::Never => true,
+                Type::Array { elem } => matches!(**elem, Type::Var) || self.is_assignable(expected, elem),
+                Type::Union { members } => members.iter().all(|m| self.is_assignable(expected, m)),
+                _ => false,
+            };
         }
         // `Var` is an unconstrained type variable: a construct that never named
         // this type, rather than one the checker failed to resolve. It carries
@@ -2711,6 +2704,55 @@ mod tests {
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         let program = result.program.expect("parse produced no program");
         check_program(&program, source).errors
+    }
+
+    #[test]
+    fn component_is_a_checked_props_to_react_node_function() {
+        for (declaration, props) in [
+            ("interface Props { title: string }", "{ title: \"ok\" }"),
+            ("struct Props { title: string }", "Props { title: \"ok\" }"),
+        ] {
+            let source = format!(
+                "{declaration} fn Card(props: Props) ReactNode {{ return <p>{{props.title}}</p>; }} const component: Component<Props> = Card; const inferred: Component = Card; const node: ReactNode = component({props});"
+            );
+            let errors = typeck(&source);
+            assert!(errors.is_empty(), "{source}: {errors:?}");
+        }
+        assert!(typeck("interface Props { title: string } fn Card(props: Props) string { return props.title; } const C: Component<Props> = Card; const node: ReactNode = <C title=\"ok\" />;").is_empty());
+    }
+
+    #[test]
+    fn component_wrong_shapes_teach_the_function_contract() {
+        for source in [
+            "const C: Component = <p />;",
+            "fn C() Component { return <p />; }",
+            "fn C(props: number) ReactNode { return <p />; } const c: Component = C;",
+            "interface Props { title: string } fn C(props: Props) Props { return props; } const c: Component = C;",
+            "const c: Component<number> = 1;",
+        ] {
+            let errors = typeck(source);
+            assert!(
+                errors.iter().any(|e| e.message.contains("Component")
+                    && (e.message.contains("ReactNode") || e.message.contains("props"))),
+                "{source}: {errors:?}"
+            );
+        }
+        for source in [
+            "struct Props { title: string } fn Card(props: Props) ReactNode { return <p />; } const x = <Card title={42} />;",
+            "interface Props { title: string } fn Card(props: Props) ReactNode { return <p />; } const x = <Card />;",
+            "fn Card(props: number) ReactNode { return <p />; } const x = <Card />;",
+            "interface Props { children: number } fn Card(props: Props) ReactNode { return <p />; } const x = <Card>text</Card>;",
+            "const node = <p>{{title: \"object\"}}</p>;",
+            "const node = <p />; const field = node.type;",
+        ] {
+            assert!(!typeck(source).is_empty(), "{source}");
+        }
+    }
+
+    #[test]
+    fn signal_name_alone_no_longer_requires_hydration() {
+        let source = "fn signal() number { return 1; } fn Card() ReactNode { const n = signal(); return <p>{n}</p>; } const node = <Card />;";
+        assert!(typeck(source).is_empty(), "{:?}", typeck(source));
     }
 
     #[test]
@@ -5397,7 +5439,7 @@ mod tests {
     #[test]
     fn interactive_component_without_client_directive_errors_at_its_tag() {
         let errors = typeck(
-            "fn Counter() Component {\n\
+            "fn Counter() ReactNode {\n\
                return <button onClick={clicked}>0</button>\n\
              }\n\
              fn clicked() {}\n\
@@ -5421,7 +5463,7 @@ mod tests {
     #[test]
     fn client_directive_allows_interactive_component() {
         let errors = typeck(
-            "fn Counter() Component {\n\
+            "fn Counter() ReactNode {\n\
                return <button onClick={clicked}>0</button>\n\
              }\n\
              fn clicked() {}\n\

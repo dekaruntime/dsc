@@ -843,29 +843,28 @@ impl<'a> Checker<'a> {
                         ),
                     );
                 }
-                self.check_jsx_attributes(element, *span);
                 if has_client_directive {
                     self.jsx_island_depth += 1;
                 }
+                let mut child_types = Vec::new();
                 for child in element.children.iter() {
                     let child_type = self.check_expr(child);
                     self.reject_unrendered_option(&child_type, child.span());
+                    child_types.push(child_type);
                 }
                 if has_client_directive {
                     self.jsx_island_depth -= 1;
                 }
-                // A JSX element is a `Component` (deka#461). It used to be
-                // `Infer`, which is universally assignable, so every JSX value
-                // silently stopped being checked -- `let n: number = <p/>` was
-                // accepted.
-                Type::Named { name: "Component" }
+                self.check_jsx_attributes(element, *span, &child_types);
+                // JSX produces an opaque React node, not a component function.
+                Type::react_node()
             }
             ast::Expr::JsxFragment { children, .. } => {
                 for child in children.iter() {
                     let child_type = self.check_expr(child);
                     self.reject_unrendered_option(&child_type, child.span());
                 }
-                Type::Named { name: "Component" }
+                Type::react_node()
             }
             ast::Expr::JsxText { .. } => Type::Named { name: "string" },
             ast::Expr::Unsafe {
@@ -1588,7 +1587,12 @@ impl<'a> Checker<'a> {
         let name = match ty {
             Type::Option { .. } => "Option",
             Type::Generic { base: "Result", .. } => "Result",
-            _ => return,
+            _ => {
+                if !self.is_assignable(&Type::react_node(), ty) {
+                    self.error_span(span, format!("JSX children are ReactNode values; `{ty}` is not renderable"));
+                }
+                return;
+            },
         };
         self.error_span(
             span,
@@ -1599,26 +1603,58 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// The props interface of an uppercase JSX tag, if it has one.
-    ///
-    /// `<Card … />` resolves `Card` to its function type and takes the first
-    /// parameter. A component whose props are a struct, an inline object type
-    /// or unannotated yields `None` and is not prop-checked -- this is the
-    /// interface case, which is what components are written with.
-    fn jsx_props_interface(&mut self, tag: &'a str) -> Option<&'a str> {
+    /// Resolve props in the declaring namespace, including private interfaces
+    /// carried by an imported component's signature (dsc#184).
+    fn jsx_props_fields(&mut self, tag: &'a str) -> Option<(&'a str, Vec<(&'a str, Type<'a>, bool)>)> {
         if !tag.chars().next().is_some_and(|c| c.is_uppercase()) {
             return None;
         }
-        let Some(Type::Function { params, .. }) = self.lookup_var(tag) else {
+        let Type::Function { params, .. } = self.lookup_var(tag)?.function_contract() else {
             return None;
         };
-        let Some(Type::Interface { name, .. }) = params.first().cloned() else {
-            return None;
-        };
-        if self.interfaces.contains_key(name) {
-            Some(name)
-        } else {
-            None
+        match params.first()? {
+            Type::Interface { name, identity } => {
+                let info = self.interface_info(name, *identity)?.clone();
+                let mut fields = Vec::new();
+                for member in info.members {
+                    if let ast::InterfaceMember::Field {
+                        name: field,
+                        ty,
+                        optional,
+                        ..
+                    } = member
+                    {
+                        let cached = self
+                            .interface_members
+                            .get(identity)
+                            .and_then(|definition| definition.members.iter().find(|(n, _)| n == field))
+                            .map(|(_, ty)| ty.clone());
+                        let expected = match cached {
+                            Some(Type::Option { inner }) if *optional => *inner,
+                            Some(ty) => ty,
+                            None => self.resolve_ast_type(ty),
+                        };
+                        fields.push((*field, expected, *optional));
+                    }
+                }
+                Some((*name, fields))
+            }
+            Type::Struct { name } => {
+                let info = self.structs.get(name)?.clone();
+                let fields = info
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        (
+                            field.name,
+                            self.resolve_ast_type(&field.ty),
+                            field.optional || matches!(field.ty, ast::Type::Option { .. }),
+                        )
+                    })
+                    .collect();
+                Some((*name, fields))
+            }
+            _ => None,
         }
     }
 
@@ -1632,8 +1668,28 @@ impl<'a> Checker<'a> {
     /// JSX spread (`{...expr}`) is rejected by the parser, so every attribute
     /// here is a named one and the supplied set is known exactly. That is what
     /// makes the missing-prop check sound.
-    fn check_jsx_attributes(&mut self, element: &ast::JsxElement<'a>, span: ast::Span) {
-        let Some(interface_name) = self.jsx_props_interface(element.tag) else {
+    fn check_jsx_attributes(
+        &mut self,
+        element: &ast::JsxElement<'a>,
+        span: ast::Span,
+        child_types: &[Type<'a>],
+    ) {
+        if element.tag.chars().next().is_some_and(|c| c.is_uppercase()) {
+            let valid = match self.lookup_var(element.tag).map(|t| t.function_contract()) {
+                Some(Type::Function { params, ret, .. }) => {
+                    params.len() <= 1
+                        && params
+                            .first()
+                            .is_none_or(|p| matches!(p, Type::Interface { .. } | Type::Struct { .. }))
+                        && self.is_assignable(&Type::react_node(), &ret)
+                }
+                _ => false,
+            };
+            if !valid {
+                self.error_span(span, format!("component `{}` is a function from a props interface or struct to ReactNode; JSX values have type ReactNode", element.tag));
+            }
+        }
+        let Some((interface_name, fields)) = self.jsx_props_fields(element.tag) else {
             // Not a component with an interface props type: still typecheck the
             // attribute expressions themselves.
             for attr in element.attributes.iter() {
@@ -1644,29 +1700,18 @@ impl<'a> Checker<'a> {
             return;
         };
 
-        let fields: Vec<(&'a str, &'a ast::Type<'a>, bool)> = {
-            let info = match self.interfaces.get(interface_name) {
-                Some(info) => info,
-                None => return,
-            };
-            info.members
-                .iter()
-                .filter_map(|member| match member {
-                    ast::InterfaceMember::Field {
-                        name, ty, optional, ..
-                    } => Some((*name, ty, *optional)),
-                    ast::InterfaceMember::Method { .. } => None,
-                })
-                .collect()
-        };
-
         let mut supplied: Vec<&'a str> = Vec::new();
 
         for attr in element.attributes.iter() {
+            if attr.name == "key" || attr.name == "client" || attr.name.starts_with("client:") {
+                if let Some(value) = &attr.value {
+                    self.check_expr(value);
+                }
+                continue;
+            }
             supplied.push(attr.name);
 
-            let Some((_, field_ty, _)) = fields.iter().find(|(name, _, _)| *name == attr.name)
-            else {
+            let Some((_, field_ty, _)) = fields.iter().find(|(name, _, _)| *name == attr.name) else {
                 if let Some(value) = &attr.value {
                     self.check_expr(value);
                 }
@@ -1677,7 +1722,7 @@ impl<'a> Checker<'a> {
                 continue;
             };
 
-            let expected = self.resolve_ast_type(field_ty);
+            let expected = field_ty.clone();
 
             // `<Card flag />` is boolean shorthand.
             let Some(value) = &attr.value else {
@@ -1712,31 +1757,28 @@ impl<'a> Checker<'a> {
             }
         }
 
-        // The plan the emitter applies: every `?:` prop becomes an `Option`
-        // here, because this is a construction site the compiler owns
-        // (deka#416).
-        let mut plan = crate::typeck::JsxOptionalProps::default();
-        for (name, _, optional) in fields.iter() {
-            if !*optional {
-                continue;
-            }
-            if supplied.contains(name) {
-                plan.wrap_some.push(name);
-            } else if *name != "children" {
-                plan.fill_none.push(name);
-            }
-        }
-        if !plan.fill_none.is_empty() || !plan.wrap_some.is_empty() {
-            self.jsx_optional_props
-                .insert(element as *const ast::JsxElement<'a>, plan);
-        }
-
-        for (name, _, optional) in fields.iter() {
+        for (name, field_ty, optional) in fields.iter() {
             // `children` is supplied by nesting, not by an attribute:
-            // `<Layout><Page /></Layout>` fills `children: Component`. Every
+            // `<Layout><Page /></Layout>` fills `children: ReactNode`. Every
             // layout in the framework is written that way, so treating it as
             // missing would reject the generated entry for any app.
-            if *name == "children" && !element.children.is_empty() {
+            if *name == "children" && !child_types.is_empty() {
+                let actual = if child_types.len() == 1 {
+                    child_types[0].clone()
+                } else {
+                    Type::Array {
+                        elem: Box::new(Type::Union {
+                            members: child_types.to_vec(),
+                        }),
+                    }
+                };
+                let expected = field_ty.clone();
+                if !self.is_assignable(&expected, &actual) {
+                    self.error_span(
+                        span,
+                        format!("prop `children` expects type `{expected}`, found type `{actual}`"),
+                    );
+                }
                 continue;
             }
             if !*optional && !supplied.contains(name) {
@@ -3162,7 +3204,7 @@ impl<'a> Checker<'a> {
                         args,
                         span,
                     } => {
-                        let callee_type = self.check_expr(callee);
+                        let callee_type = self.check_expr(callee).function_contract();
                         if let Type::Function {
                             params,
                             ret,
@@ -4580,7 +4622,7 @@ impl<'a> Checker<'a> {
             }
         }
 
-        let callee_type = self.check_expr(callee);
+        let callee_type = self.check_expr(callee).function_contract();
 
         match callee_type {
             Type::Function {

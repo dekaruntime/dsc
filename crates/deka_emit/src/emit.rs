@@ -351,7 +351,6 @@ pub fn emit_js(program: &Program, _source: &str) -> Result<String, String> {
         &HashMap::new(),
         &HashMap::new(),
         &HashMap::new(),
-        &HashMap::new(),
         &HashSet::new(),
         "module.ds",
         None,
@@ -384,7 +383,6 @@ pub fn emit_js_with_imports<'a>(
         operator_rewrites,
         method_calls,
         &HashSet::new(),
-        &HashMap::new(),
         &HashMap::new(),
         &HashMap::new(),
         &HashMap::new(),
@@ -443,10 +441,6 @@ pub fn emit_js_with_options<'a>(
     // frozen const per declaration referenced (directly or through a
     // recursive group) by `static_type_calls`.
     super_decl_trees: &std::collections::HashMap<&'a str, deka_syntax::typeck::DescriptorTree<'a>>,
-    jsx_optional_props: &HashMap<
-        *const deka_syntax::JsxElement<'a>,
-        deka_syntax::typeck::JsxOptionalProps<'a>,
-    >,
     enum_case_patterns: &HashMap<*const deka_syntax::Pattern<'a>, &'a str>,
     // Union member type-patterns (`string(s)`) and the runtime predicate
     // each one compiles to (rfd#42, deka#530).
@@ -476,7 +470,6 @@ pub fn emit_js_with_options<'a>(
         number_math_calls,
         static_type_calls,
         super_decl_trees,
-        jsx_optional_props,
         enum_case_patterns,
         union_type_patterns,
         &HashMap::new(),
@@ -485,6 +478,7 @@ pub fn emit_js_with_options<'a>(
         None,
         live_names,
         false,
+        None,
     )?
     .js)
 }
@@ -521,10 +515,6 @@ pub fn emit_js_module_with_options<'a>(
     number_math_calls: &HashMap<*const Expr<'a>, deka_syntax::typeck::NumberMath>,
     static_type_calls: &HashMap<*const Expr<'a>, deka_syntax::typeck::StaticTypeCall<'a>>,
     super_decl_trees: &std::collections::HashMap<&'a str, deka_syntax::typeck::DescriptorTree<'a>>,
-    jsx_optional_props: &HashMap<
-        *const deka_syntax::JsxElement<'a>,
-        deka_syntax::typeck::JsxOptionalProps<'a>,
-    >,
     enum_case_patterns: &HashMap<*const deka_syntax::Pattern<'a>, &'a str>,
     union_type_patterns: &HashMap<
         *const deka_syntax::Pattern<'a>,
@@ -541,8 +531,10 @@ pub fn emit_js_module_with_options<'a>(
     module_root: Option<PathBuf>,
     live_names: Option<&HashSet<String>>,
     detached: bool,
+    jsx_runtime: Option<String>,
 ) -> Result<ModuleEmit, String> {
     let mut emitter = Emitter::new(program);
+    emitter.configure_jsx_names(source);
     emitter.module_base = module_base;
     emitter.source_path = file_path.to_string();
     emitter.file_stem = file_stem_from_path(file_path);
@@ -559,7 +551,6 @@ pub fn emit_js_module_with_options<'a>(
     emitter.number_math_calls = number_math_calls.clone();
     emitter.static_type_calls = static_type_calls.clone();
     emitter.super_decl_trees = super_decl_trees.clone();
-    emitter.jsx_optional_props = jsx_optional_props.clone();
     emitter.enum_case_patterns = enum_case_patterns.clone();
     emitter.union_type_patterns = union_type_patterns.clone();
     emitter.build_blocks = build_blocks.clone();
@@ -569,13 +560,7 @@ pub fn emit_js_module_with_options<'a>(
     emitter.build_closure_names = build_closure_names.clone();
     emitter.live_names = live_names.cloned();
     emitter.detached = detached;
-    if module_imports_side_effect_css(program) {
-        // Component CSS is scoped by stamping every host element in this
-        // module with `data-deka-cid-<hash>` and rewriting the module's own
-        // CSS selectors to require it (RFD 24 §10.6). Modules without
-        // component CSS stay unmarked.
-        emitter.css_scope = Some(css_scope_hash(source));
-    }
+    if let Some(runtime) = jsx_runtime { emitter.jsx_runtime = runtime; }
     let js = emitter.emit()?;
     Ok(ModuleEmit {
         js,
@@ -596,8 +581,11 @@ pub fn emit_dev_entry<'a>(
     slot: &str,
     file_path: &str,
     module_root: Option<PathBuf>,
+    jsx_runtime: Option<String>,
 ) -> Result<String, String> {
     let mut emitter = Emitter::new(program);
+    if let Some(runtime) = jsx_runtime { emitter.jsx_runtime = runtime; }
+    emitter.configure_jsx_names(source);
     emitter.module_base = module_base;
     emitter.source_path = file_path.to_string();
     emitter.file_stem = file_stem_from_path(file_path);
@@ -614,12 +602,8 @@ pub fn emit_dev_entry<'a>(
     emitter.number_math_calls = typeck.number_math_calls.clone();
     emitter.static_type_calls = typeck.static_type_calls.clone();
     emitter.super_decl_trees = typeck.super_trees.clone();
-    emitter.jsx_optional_props = typeck.jsx_optional_props.clone();
     emitter.enum_case_patterns = typeck.enum_case_patterns.clone();
     emitter.union_type_patterns = typeck.union_type_patterns.clone();
-    if module_imports_side_effect_css(program) {
-        emitter.css_scope = Some(css_scope_hash(source));
-    }
     emitter.emit_dev_entry(slot, body)
 }
 
@@ -630,32 +614,6 @@ fn file_stem_from_path(path: &str) -> String {
         .filter(|s| !s.is_empty())
         .unwrap_or("module")
         .to_string()
-}
-
-/// FNV-1a 64-bit over the module source, truncated to 12 hex chars. This is
-/// the component style-scope id (`data-deka-cid-<hash>`) from RFD 24 §10.6:
-/// stable across builds for unchanged source, distinct per component module.
-///
-/// Must stay in sync with `runtime_core::framework::css_scope_hash` — the
-/// per-route CSS writer rewrites selectors with this id, so both sides must
-/// produce the same digest. Both crates pin the same test vector.
-pub fn css_scope_hash(source: &str) -> String {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in source.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    format!("{:012x}", hash & 0xffff_ffff_ffff)
-}
-
-fn module_imports_side_effect_css(program: &deka_syntax::Program) -> bool {
-    program.statements.iter().any(|stmt| {
-        matches!(
-            stmt,
-            deka_syntax::Stmt::Import { specifiers, source, .. }
-                if specifiers.is_empty() && source_is_css(source)
-        )
-    })
 }
 
 /// The display name of a descriptor tree node: the name scalars, structs,
@@ -1292,8 +1250,6 @@ struct Emitter<'a> {
     /// Primitive conversion calls lowered by the typechecker.
     exception_forms: deka_syntax::typeck::ExceptionLowering<'a>,
     unwrap_calls: HashMap<*const Expr<'a>, deka_syntax::typeck::UnwrapKind>,
-    jsx_optional_props:
-        HashMap<*const deka_syntax::JsxElement<'a>, deka_syntax::typeck::JsxOptionalProps<'a>>,
     enum_case_patterns: HashMap<*const deka_syntax::Pattern<'a>, &'a str>,
     /// Union member type-patterns and their runtime predicates, lowered by
     /// the typechecker (rfd#42, deka#530).
@@ -1358,14 +1314,10 @@ struct Emitter<'a> {
     jsx_path: Vec<usize>,
     jsx_siblings: Vec<usize>,
     jsx_roots: usize,
-    /// Style-scope id for this module (`data-deka-cid-<hash>`), present only
-    /// when the module authors component CSS (side-effect `.css` import).
-    /// None for style-free modules so their markup carries no dead weight
-    /// (RFD 24 §10.6).
-    css_scope: Option<String>,
     /// When set, only these top-level names are emitted (graph shaking).
     live_names: Option<HashSet<String>>,
-    needs_live: bool,
+    jsx_runtime: String,
+    jsx_helpers: [String; 3],
     /// When true (module-graph emission), the shared runtime prelude is NOT
     /// inlined into this module's output. The module graph synthesizes it
     /// once per program from the union of per-module [`Self::demand`]
@@ -1398,7 +1350,6 @@ impl<'a> Emitter<'a> {
             module_base: None,
             exception_forms: Default::default(),
             unwrap_calls: HashMap::new(),
-            jsx_optional_props: HashMap::new(),
             enum_case_patterns: HashMap::new(),
             union_type_patterns: HashMap::new(),
             build_blocks: HashMap::new(),
@@ -1426,14 +1377,13 @@ impl<'a> Emitter<'a> {
             jsx_path: Vec::new(),
             jsx_siblings: Vec::new(),
             jsx_roots: 0,
-            css_scope: None,
             live_names: None,
-            needs_live: false,
+            jsx_runtime: "@js/react/jsx-runtime".to_string(),
+            jsx_helpers: ["jsx".into(), "jsxs".into(), "Fragment".into()],
             detached: false,
             demand: crate::prelude::PreludeDemand::default(),
         };
         emitter.prepass();
-        emitter.needs_live = emitter.scan_needs_live();
         emitter
     }
 
@@ -1505,41 +1455,16 @@ impl<'a> Emitter<'a> {
             self.out.push_str(&self.resolve_module_source(source));
             self.out.push_str("\";");
         }
-        // Names the module's own (emitted) imports already bind. Injecting
-        // `live`, `jsx`, `jsxs`, or `Fragment` over one of these is a second
-        // top-level binding for the same identifier — a SyntaxError at module
-        // load (`Identifier 'live' has already been declared`), not a warning
-        // (deka#744 F3). The predicate mirrors the hoisted import emission
-        // above and `emit_stmt`'s Import arm exactly, so a name counts as
-        // bound only when its import actually survives into the output.
-        let bound = self.user_import_bound_names();
         if self.needs_jsx_helper() {
-            let helpers: Vec<&str> = ["jsx", "jsxs", "Fragment"]
-                .into_iter()
-                .filter(|name| !bound.contains(*name))
-                .collect();
-            if !helpers.is_empty() {
-                if !first {
-                    self.out.push('\n');
-                }
-                first = false;
-                let spec = self.resolve_module_source("ui/jsx");
-                self.out.push_str("import { ");
-                self.out.push_str(&helpers.join(", "));
-                self.out.push_str(" } from \"");
-                self.out.push_str(&spec);
-                self.out.push_str("\";");
-            }
-        }
-        if self.needs_live && !bound.contains("live") {
-            if !first {
-                self.out.push('\n');
-            }
+            if !first { self.out.push('\n'); }
             first = false;
-            let spec = self.resolve_module_source("ui/reactive");
-            self.out.push_str("import { live } from \"");
-            self.out.push_str(&spec);
-            self.out.push_str("\";");
+            let helpers: Vec<String> = ["jsx", "jsxs", "Fragment"].iter().zip(&self.jsx_helpers)
+                .map(|(name, local)| if *name == local { local.clone() } else { format!("{name} as {local}") }).collect();
+            self.out.push_str("import { ");
+            self.out.push_str(&helpers.join(", "));
+            self.out.push_str(" } from ");
+            self.out.push_str(&json_string(&self.jsx_runtime));
+            self.out.push(';');
         }
 
         // Imports end without a trailing newline; separate them from the
@@ -2533,52 +2458,18 @@ impl<'a> Emitter<'a> {
         })
     }
 
-    /// Local names the module's own imports bind in the emitted JS. Only
-    /// imports that survive hoisting (`should_emit_runtime_import`) and whose
-    /// specifier survives `emit_stmt`'s liveness filter count — an import
-    /// that shaking dropped binds nothing, so injecting the name is still
-    /// required (and legal).
-    fn user_import_bound_names(&self) -> HashSet<&'a str> {
+    fn configure_jsx_names(&mut self, source: &str) {
         let mut names = HashSet::new();
-        for stmt in self.program.statements.iter() {
-            let Stmt::Import { specifiers, .. } = stmt else {
-                continue;
-            };
-            if specifiers.is_empty() {
-                continue;
-            }
-            if !self.should_emit_stmt(stmt) || !self.should_emit_runtime_import(stmt) {
-                continue;
-            }
-            for spec in specifiers.iter() {
-                if !self.is_erased_binding(spec.local)
-                    && (self.is_live(spec.local) || self.is_build_factory_import(spec))
-                {
-                    names.insert(spec.local);
+        collect_js_identifier_tokens(source, &mut names);
+        for name in &mut self.jsx_helpers {
+            if names.contains(name) {
+                *name = format!("__deka_{name}");
+                while names.contains(name) {
+                    name.push('_');
                 }
             }
+            names.insert(name.clone());
         }
-        names
-    }
-
-    fn scan_needs_live(&self) -> bool {
-        self.program.statements.iter().any(|stmt| {
-            let mut found = false;
-            visit_stmt_exprs(stmt, &mut |expr| match expr {
-                Expr::JsxElement { element, .. } => {
-                    if element.children.iter().any(jsx_child_needs_live) {
-                        found = true;
-                    }
-                }
-                Expr::JsxFragment { children, .. } => {
-                    if children.iter().any(jsx_child_needs_live) {
-                        found = true;
-                    }
-                }
-                _ => {}
-            });
-            found
-        })
     }
 
     // ------------------------------------------------------------------
@@ -4927,7 +4818,6 @@ impl<'a> Emitter<'a> {
                     module_root: self.module_root.clone(),
                     exception_forms: Default::default(),
                     unwrap_calls: HashMap::new(),
-                    jsx_optional_props: HashMap::new(),
                     enum_case_patterns: HashMap::new(),
                     union_type_patterns: HashMap::new(),
                     build_blocks: HashMap::new(),
@@ -4954,9 +4844,9 @@ impl<'a> Emitter<'a> {
                     jsx_path: Vec::new(),
                     jsx_siblings: Vec::new(),
                     jsx_roots: 0,
-                    css_scope: self.css_scope.clone(),
                     live_names: None,
-                    needs_live: false,
+                    jsx_runtime: self.jsx_runtime.clone(),
+                    jsx_helpers: self.jsx_helpers.clone(),
                     detached: false,
                     demand: crate::prelude::PreludeDemand::default(),
                 };
@@ -5205,43 +5095,17 @@ impl<'a> Emitter<'a> {
             format!("\"{}\"", escape_string(element.tag))
         };
 
-        // Cloned rather than borrowed: emitting an attribute value needs
-        // `&mut self`, and the plan is two small Vecs of names.
-        let plan = self
-            .jsx_optional_props
-            .get(&(element as *const deka_syntax::JsxElement<'a>))
-            .cloned();
-        let plan = plan.as_ref();
-
         let mut props = Vec::new();
-        // A spread attribute can carry a `children` key of its own. When the
-        // element also has explicit children, keep emitting the legacy
-        // children-in-props form so the runtime strips the merged key --
-        // emitting a third argument too would leave the spread's `children`
-        // inside props where renderers would see it as an attribute.
-        let mut has_spread = false;
+        let mut key = None;
         if !is_component {
             props.push(format!(
                 "\"data-deka-id\": {}",
                 json_string(&self.current_deka_id())
             ));
-            if let Some(cid) = &self.css_scope {
-                // Bare attribute (value `true` renders valueless, Astro's
-                // `data-astro-cid-*` shape). Component tags are not stamped:
-                // the stamp belongs to the host elements a component renders.
-                props.push(format!("\"data-deka-cid-{cid}\": true"));
-            }
         }
         for attr in element.attributes.iter() {
             if attr.name.is_empty() {
-                if let Some(value) = &attr.value {
-                    has_spread = true;
-                    let mut buf = String::new();
-                    std::mem::swap(&mut self.out, &mut buf);
-                    self.emit_expr(value)?;
-                    std::mem::swap(&mut self.out, &mut buf);
-                    props.push(format!("...{}", buf));
-                }
+                return Err("JSX spread attributes are not supported".into());
             } else {
                 let value = match &attr.value {
                     Some(v) => {
@@ -5254,14 +5118,9 @@ impl<'a> Emitter<'a> {
                     None => "true".to_string(),
                 };
                 // Optional props erase to the caller's value, just like Some(v).
-                props.push(format!("\"{}\": {}", escape_string(attr.name), value));
-            }
-        }
-
-        // Keep omitted props explicit in canonical output: None is undefined.
-        if let Some(plan) = plan {
-            for name in plan.fill_none.iter() {
-                props.push(format!("\"{}\": undefined", escape_string(name)));
+                if attr.name == "key" { key = Some(value); } else {
+                    props.push(format!("\"{}\": {}", escape_string(attr.name), value));
+                }
             }
         }
 
@@ -5270,39 +5129,21 @@ impl<'a> Emitter<'a> {
             child_values.push(self.emit_jsx_child(child)?);
         }
 
-        // Children go in a separate argument, not inside props: the factory
-        // then skips the per-element rest-object copy and children-array
-        // normalization in the common case (deka#580). The legacy
-        // children-in-props form still works when userland passes it, and is
-        // kept here when a spread attribute is present (see has_spread above).
-        let legacy_children_in_props = has_spread && !child_values.is_empty();
-        if legacy_children_in_props {
-            if child_values.len() == 1 {
-                props.push(format!("\"children\": {}", child_values[0]));
-            } else {
-                props.push(format!("\"children\": [{}]", child_values.join(", ")));
-            }
+        if child_values.len() == 1 {
+            props.push(format!("\"children\": {}", child_values[0]));
+        } else if !child_values.is_empty() {
+            props.push(format!("\"children\": [{}]", child_values.join(", ")));
         }
-        let fn_name = if child_values.len() > 1 {
-            "jsxs"
-        } else {
-            "jsx"
-        };
-        self.out.push_str(fn_name);
+        let helper = usize::from(child_values.len() > 1);
+        self.out.push_str(&self.jsx_helpers[helper]);
         self.out.push('(');
         self.out.push_str(&tag_expr);
         self.out.push_str(", {");
         self.out.push_str(&props.join(", "));
         self.out.push('}');
-        if !legacy_children_in_props {
-            if child_values.len() == 1 {
-                self.out.push_str(", ");
-                self.out.push_str(&child_values[0]);
-            } else if !child_values.is_empty() {
-                self.out.push_str(", [");
-                self.out.push_str(&child_values.join(", "));
-                self.out.push(']');
-            }
+        if let Some(key) = key {
+            self.out.push_str(", ");
+            self.out.push_str(&key);
         }
         self.out.push(')');
         self.exit_jsx_node();
@@ -5312,13 +5153,7 @@ impl<'a> Emitter<'a> {
     fn emit_jsx_child(&mut self, child: &Expr<'a>) -> Result<String, String> {
         let mut buf = String::new();
         std::mem::swap(&mut self.out, &mut buf);
-        if jsx_child_needs_live(child) {
-            self.out.push_str("live(function() { return ");
-            self.emit_expr(child)?;
-            self.out.push_str("; })");
-        } else {
-            self.emit_expr(child)?;
-        }
+        self.emit_expr(child)?;
         std::mem::swap(&mut self.out, &mut buf);
         Ok(buf)
     }
@@ -5330,24 +5165,20 @@ impl<'a> Emitter<'a> {
             child_values.push(self.emit_jsx_child(child)?);
         }
 
-        let fn_name = if child_values.len() > 1 {
-            "jsxs"
-        } else {
-            "jsx"
-        };
-        self.out.push_str(fn_name);
+        let helper = usize::from(child_values.len() > 1);
+        self.out.push_str(&self.jsx_helpers[helper]);
         self.out.push('(');
-        self.out.push_str("Fragment, {");
-        self.out.push('}');
+        self.out.push_str(&self.jsx_helpers[2]);
+        self.out.push_str(", {");
         if child_values.len() == 1 {
-            self.out.push_str(", ");
+            self.out.push_str("\"children\": ");
             self.out.push_str(&child_values[0]);
         } else if !child_values.is_empty() {
-            self.out.push_str(", [");
+            self.out.push_str("\"children\": [");
             self.out.push_str(&child_values.join(", "));
             self.out.push(']');
         }
-        self.out.push(')');
+        self.out.push_str("})");
         self.exit_jsx_node();
         Ok(())
     }
@@ -6001,31 +5832,6 @@ fn source_is_math(source: &str) -> bool {
     let trimmed = source.trim().trim_matches('"').trim_matches('\'');
     let bare = trimmed.strip_prefix("@deka/").unwrap_or(trimmed);
     bare == "math"
-}
-
-fn expr_contains_jsx(expr: &Expr) -> bool {
-    let mut found = false;
-    visit_expr(expr, &mut |e| {
-        if matches!(e, Expr::JsxElement { .. } | Expr::JsxFragment { .. }) {
-            found = true;
-        }
-    });
-    found
-}
-
-fn jsx_child_needs_live(expr: &Expr) -> bool {
-    match expr {
-        Expr::String { .. }
-        | Expr::Number { .. }
-        | Expr::Boolean { .. }
-        | Expr::JsxText { .. }
-        | Expr::JsxElement { .. }
-        | Expr::JsxFragment { .. }
-        | Expr::None { .. } => false,
-        Expr::Safe { expr, .. } | Expr::Paren { expr, .. } => jsx_child_needs_live(expr),
-        _ if expr_contains_jsx(expr) => false,
-        _ => true,
-    }
 }
 
 fn visit_stmt_exprs(stmt: &Stmt, visitor: &mut dyn FnMut(&Expr)) {

@@ -392,7 +392,7 @@ fn client_bundle_rejects_ui_server_import() {
 }
 
 #[test]
-fn client_bundle_allows_ui_jsx() {
+fn client_bundle_rejects_retired_ui_jsx() {
     let tmp = make_tmp_dir("client_ui_jsx");
     let entry = tmp.join("island.js");
     let source = "import { jsx } from \"ui/jsx\";\nexport const node = jsx(\"div\", { children: \"ok\" });\n";
@@ -412,15 +412,8 @@ fn client_bundle_allows_ui_jsx() {
         },
         provider,
     )
-    .expect("client bundle may import ui/jsx");
-    assert!(
-        result.contains("jsx") || result.contains("div"),
-        "{result}"
-    );
-    assert!(
-        !result.contains("renderToString"),
-        "ui/server leaked into client bundle: {result}"
-    );
+    .expect_err("ui/jsx has been retired");
+    assert!(result.contains("ui/jsx"), "{result}");
 }
 
 #[test]

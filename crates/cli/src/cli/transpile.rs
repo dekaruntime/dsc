@@ -461,3 +461,38 @@ fn require_ds(path: &Path) -> Result<(), String> {
         ))
     }
 }
+
+#[cfg(test)]
+mod react_tests {
+    use super::*;
+
+    #[test]
+    fn bundle_preserves_react_children_and_project_runtime() {
+        let tmp = tempfile::tempdir().unwrap();
+        let entry = tmp.path().join("page.dsx");
+        fs::write(tmp.path().join("deka.json"), r#"{"jsxRuntime":"./runtime.mjs"}"#).unwrap();
+        fs::write(tmp.path().join("runtime.mjs"), r#"
+export const Fragment = "fragment";
+export function jsx(type, props, key) {
+  void 0 !== key && (key = "" + key);
+  if (Object.hasOwn(props, "key")) throw Error("key leaked into props");
+  return {type, props, key};
+}
+export const jsxs = jsx;
+"#).unwrap();
+        fs::write(&entry, r#"
+interface Props { message: string }
+export fn Greeting(props: Props) ReactNode {
+  return <><section key="g"><span>Hello</span><span>{props.message}</span></section></>;
+}
+"#).unwrap();
+        for treeshake in [false, true] {
+            let js = build_bundle(&entry, tmp.path(), treeshake, false).unwrap();
+            assert!(!js.contains("ui/jsx") && !js.contains("ui/reactive"), "{js}");
+            let output = tmp.path().join("bundle.mjs");
+            fs::write(&output, format!("{js}\nconst node = Greeting({{message: 'survives'}});\nif (node.props.children.props.children[1].props.children !== 'survives') throw Error('children dropped');\nif (node.props.children.key !== 'g') throw Error('key dropped');\n")).unwrap();
+            let run = std::process::Command::new("node").arg(output).output().unwrap();
+            assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        }
+    }
+}

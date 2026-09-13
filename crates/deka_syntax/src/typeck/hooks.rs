@@ -799,10 +799,14 @@ impl<'a> Checker<'a> {
         let bodies = named_function_bodies(self.program);
         let exported = exported_names(self.program);
         let children_slots = self.children_slot_providers(&bodies);
+        let referenced = jsx_component_tags(self.program);
         let mut reached: HashSet<&str> = HashSet::new();
         let mut diagnosed: HashSet<(u32, usize)> = HashSet::new();
         let empty = HashSet::new();
 
+        // Module-level render roots. Providers thread down through inlined
+        // same-module components; a callee reached only under a Provider
+        // inherits that proof.
         for stmt in self.program.statements {
             match stmt {
                 ast::Stmt::Function { .. }
@@ -820,31 +824,59 @@ impl<'a> Checker<'a> {
                         &children_slots,
                         &mut reached,
                         &mut diagnosed,
-                        &mut HashSet::new(),
+                        &mut Vec::new(),
                     );
                 }
             }
         }
 
-        // Walk every function body so intra-module wrappers are visible
-        // even without a module-level render root. Own-body consumption is
-        // only diagnosed for exports (library entries); JSX sites diagnose
-        // the callee against the providers in force at that site.
+        // Exported components are library entries: the export itself is an
+        // unproven render path, even when every intra-module site is wrapped.
         let names: Vec<&'a str> = bodies.keys().copied().collect();
-        for name in names {
+        for name in &names {
+            if !exported.contains(name) {
+                continue;
+            }
             let body = bodies.get(name).copied().unwrap_or(&[]);
             self.enter_function_with_providers(
                 name,
                 body,
                 &empty,
                 None,
-                exported.contains(name),
+                true,
                 &consumes,
                 &bodies,
                 &children_slots,
                 &mut reached,
                 &mut diagnosed,
-                &mut HashSet::new(),
+                &mut Vec::new(),
+            );
+        }
+
+        // Unexported functions with no JSX incoming edges, and not already
+        // reached from a module-level root, still seed a render tree so an
+        // unexported App without `const root = <App />` remains visible.
+        // Their own consumption is not diagnosed (they are not library
+        // entries). JSX-referenced components are never re-walked from an
+        // empty provided set: they inherit the intersection of incoming
+        // proofs, and one unprovided path diagnoses that path by name.
+        for name in names {
+            if exported.contains(name) || referenced.contains(name) || reached.contains(name) {
+                continue;
+            }
+            let body = bodies.get(name).copied().unwrap_or(&[]);
+            self.enter_function_with_providers(
+                name,
+                body,
+                &empty,
+                None,
+                false,
+                &consumes,
+                &bodies,
+                &children_slots,
+                &mut reached,
+                &mut diagnosed,
+                &mut Vec::new(),
             );
         }
     }
@@ -1038,7 +1070,7 @@ impl<'a> Checker<'a> {
         children_slots: &HashMap<&'a str, HashSet<usize>>,
         reached: &mut HashSet<&'a str>,
         diagnosed: &mut HashSet<(u32, usize)>,
-        inlining: &mut HashSet<&'a str>,
+        path: &mut Vec<&'a str>,
     ) {
         match stmt {
             ast::Stmt::Const { value, .. }
@@ -1054,7 +1086,7 @@ impl<'a> Checker<'a> {
                 children_slots,
                 reached,
                 diagnosed,
-                inlining,
+                path,
             ),
             ast::Stmt::If {
                 condition,
@@ -1070,7 +1102,7 @@ impl<'a> Checker<'a> {
                     children_slots,
                     reached,
                     diagnosed,
-                    inlining,
+                    path,
                 );
                 for s in then_body.iter().chain(else_body.iter()) {
                     self.walk_stmt_for_providers(
@@ -1081,7 +1113,7 @@ impl<'a> Checker<'a> {
                         children_slots,
                         reached,
                         diagnosed,
-                        inlining,
+                        path,
                     );
                 }
             }
@@ -1095,7 +1127,7 @@ impl<'a> Checker<'a> {
                         children_slots,
                         reached,
                         diagnosed,
-                        inlining,
+                        path,
                     );
                 }
             }
@@ -1110,7 +1142,7 @@ impl<'a> Checker<'a> {
                 children_slots,
                 reached,
                 diagnosed,
-                inlining,
+                path,
             ),
             ast::Stmt::TupleBinding { value, .. } => self.walk_expr_for_providers(
                 value,
@@ -1120,7 +1152,7 @@ impl<'a> Checker<'a> {
                 children_slots,
                 reached,
                 diagnosed,
-                inlining,
+                path,
             ),
             _ => {}
         }
@@ -1136,7 +1168,7 @@ impl<'a> Checker<'a> {
         children_slots: &HashMap<&'a str, HashSet<usize>>,
         reached: &mut HashSet<&'a str>,
         diagnosed: &mut HashSet<(u32, usize)>,
-        inlining: &mut HashSet<&'a str>,
+        path: &mut Vec<&'a str>,
     ) {
         match expr {
             ast::Expr::JsxElement { element, .. } => {
@@ -1164,7 +1196,7 @@ impl<'a> Checker<'a> {
                         children_slots,
                         reached,
                         diagnosed,
-                        inlining,
+                        path,
                     );
                     if let Some(extra) = children_slots.get(element.tag) {
                         child_provided.extend(extra.iter().copied());
@@ -1180,7 +1212,7 @@ impl<'a> Checker<'a> {
                             children_slots,
                             reached,
                             diagnosed,
-                            inlining,
+                            path,
                         );
                     }
                 }
@@ -1193,7 +1225,7 @@ impl<'a> Checker<'a> {
                         children_slots,
                         reached,
                         diagnosed,
-                        inlining,
+                        path,
                     );
                 }
             }
@@ -1207,7 +1239,7 @@ impl<'a> Checker<'a> {
                         children_slots,
                         reached,
                         diagnosed,
-                        inlining,
+                        path,
                     );
                 }
             }
@@ -1225,7 +1257,7 @@ impl<'a> Checker<'a> {
                     children_slots,
                     reached,
                     diagnosed,
-                    inlining,
+                    path,
                 );
                 self.walk_expr_for_providers(
                     then_branch,
@@ -1235,7 +1267,7 @@ impl<'a> Checker<'a> {
                     children_slots,
                     reached,
                     diagnosed,
-                    inlining,
+                    path,
                 );
                 self.walk_expr_for_providers(
                     else_branch,
@@ -1245,7 +1277,7 @@ impl<'a> Checker<'a> {
                     children_slots,
                     reached,
                     diagnosed,
-                    inlining,
+                    path,
                 );
             }
             ast::Expr::Paren { expr, .. }
@@ -1260,7 +1292,7 @@ impl<'a> Checker<'a> {
                 children_slots,
                 reached,
                 diagnosed,
-                inlining,
+                path,
             ),
             ast::Expr::Call { callee, args, .. } => {
                 self.walk_expr_for_providers(
@@ -1271,7 +1303,7 @@ impl<'a> Checker<'a> {
                     children_slots,
                     reached,
                     diagnosed,
-                    inlining,
+                    path,
                 );
                 for arg in *args {
                     self.walk_expr_for_providers(
@@ -1282,7 +1314,7 @@ impl<'a> Checker<'a> {
                         children_slots,
                         reached,
                         diagnosed,
-                        inlining,
+                        path,
                     );
                 }
             }
@@ -1296,7 +1328,7 @@ impl<'a> Checker<'a> {
                         children_slots,
                         reached,
                         diagnosed,
-                        inlining,
+                        path,
                     );
                 }
             }
@@ -1310,7 +1342,7 @@ impl<'a> Checker<'a> {
                         children_slots,
                         reached,
                         diagnosed,
-                        inlining,
+                        path,
                     );
                 }
             }
@@ -1323,7 +1355,7 @@ impl<'a> Checker<'a> {
                     children_slots,
                     reached,
                     diagnosed,
-                    inlining,
+                    path,
                 );
                 self.walk_expr_for_providers(
                     right,
@@ -1333,7 +1365,7 @@ impl<'a> Checker<'a> {
                     children_slots,
                     reached,
                     diagnosed,
-                    inlining,
+                    path,
                 );
             }
             ast::Expr::Unary { operand, .. } => self.walk_expr_for_providers(
@@ -1344,7 +1376,7 @@ impl<'a> Checker<'a> {
                 children_slots,
                 reached,
                 diagnosed,
-                inlining,
+                path,
             ),
             ast::Expr::IndexAccess { object, index, .. } => {
                 self.walk_expr_for_providers(
@@ -1355,7 +1387,7 @@ impl<'a> Checker<'a> {
                     children_slots,
                     reached,
                     diagnosed,
-                    inlining,
+                    path,
                 );
                 self.walk_expr_for_providers(
                     index,
@@ -1365,7 +1397,7 @@ impl<'a> Checker<'a> {
                     children_slots,
                     reached,
                     diagnosed,
-                    inlining,
+                    path,
                 );
             }
             ast::Expr::Object { fields, .. } => {
@@ -1378,7 +1410,7 @@ impl<'a> Checker<'a> {
                         children_slots,
                         reached,
                         diagnosed,
-                        inlining,
+                        path,
                     );
                 }
             }
@@ -1392,7 +1424,7 @@ impl<'a> Checker<'a> {
                         children_slots,
                         reached,
                         diagnosed,
-                        inlining,
+                        path,
                     );
                 }
             }
@@ -1407,7 +1439,7 @@ impl<'a> Checker<'a> {
                     children_slots,
                     reached,
                     diagnosed,
-                    inlining,
+                    path,
                 );
                 for arm in *arms {
                     self.walk_expr_for_providers(
@@ -1418,7 +1450,7 @@ impl<'a> Checker<'a> {
                         children_slots,
                         reached,
                         diagnosed,
-                        inlining,
+                        path,
                     );
                 }
             }
@@ -1439,9 +1471,13 @@ impl<'a> Checker<'a> {
         children_slots: &HashMap<&'a str, HashSet<usize>>,
         reached: &mut HashSet<&'a str>,
         diagnosed: &mut HashSet<(u32, usize)>,
-        inlining: &mut HashSet<&'a str>,
+        path: &mut Vec<&'a str>,
     ) {
         reached.insert(name);
+        let cyclic = path.iter().any(|n| *n == name);
+        if !cyclic {
+            path.push(name);
+        }
         if check_self {
             if let Some(uses) = consumes.get(name) {
                 for (id, use_span) in uses {
@@ -1450,11 +1486,11 @@ impl<'a> Checker<'a> {
                         continue;
                     }
                     let span = site.unwrap_or(*use_span);
-                    self.diagnose_missing_provider(name, *id, span, diagnosed);
+                    self.diagnose_missing_provider(name, *id, span, diagnosed, path);
                 }
             }
         }
-        if !inlining.insert(name) {
+        if cyclic {
             return;
         }
         for stmt in body {
@@ -1466,10 +1502,10 @@ impl<'a> Checker<'a> {
                 children_slots,
                 reached,
                 diagnosed,
-                inlining,
+                path,
             );
         }
-        inlining.remove(name);
+        path.pop();
     }
 
     fn diagnose_missing_provider(
@@ -1478,6 +1514,7 @@ impl<'a> Checker<'a> {
         id: usize,
         span: ast::Span,
         diagnosed: &mut HashSet<(u32, usize)>,
+        path: &[&'a str],
     ) {
         let Some(info) = self.contexts.get(&id).cloned() else {
             return;
@@ -1488,10 +1525,20 @@ impl<'a> Checker<'a> {
         if !diagnosed.insert((span.byte_start as u32, id)) {
             return;
         }
+        let via = if path.len() > 1 {
+            let hops = path
+                .iter()
+                .map(|n| format!("`{n}`"))
+                .collect::<Vec<_>>()
+                .join(" → ");
+            format!(" (via {hops})")
+        } else {
+            String::new()
+        };
         self.error_span(
             span,
             format!(
-                "`{consumer}` reads `{name}` but this render is not wrapped in `<{name}.Provider>`; {CONTEXT_DEFAULT}",
+                "`{consumer}` reads `{name}` but this render is not wrapped in `<{name}.Provider>`{via}; {CONTEXT_DEFAULT}",
                 name = info.name
             ),
         );
@@ -1585,6 +1632,32 @@ fn named_function_bodies<'a>(
         }
     }
     bodies
+}
+
+/// Uppercase JSX tags that name a component in this module. Used to find
+/// functions that have an incoming render edge so they are not re-walked
+/// from an empty provided set.
+fn jsx_component_tags(program: &ast::Program<'_>) -> HashSet<String> {
+    let mut tags = HashSet::new();
+    for stmt in program.statements {
+        crate::visit::walk_stmt(stmt, &mut |expr| {
+            let ast::Expr::JsxElement { element, .. } = expr else {
+                return;
+            };
+            if element.context_provider().is_some() {
+                return;
+            }
+            if element
+                .tag
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_uppercase())
+            {
+                tags.insert(element.tag.to_string());
+            }
+        });
+    }
+    tags
 }
 
 fn exported_names<'a>(program: &'a ast::Program<'a>) -> HashSet<&'a str> {

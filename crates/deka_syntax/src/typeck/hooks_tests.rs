@@ -659,6 +659,94 @@ fn no_default_children_slot_under_provider() {
 }
 
 #[test]
+fn no_default_two_hop_wrapper_ok() {
+    // Provider → Middle → Inner. Inner is never re-walked from an empty
+    // provided set; it inherits the proof from the only live render path.
+    assert_ok(
+        "const ShopContext = createContext<string>()\n\
+         fn Inner() ReactNode {\n\
+           const shop = useContext(ShopContext)\n\
+           return <span>{shop}</span>\n\
+         }\n\
+         fn Middle() ReactNode {\n\
+           return <Inner />\n\
+         }\n\
+         fn App() ReactNode {\n\
+           return <ShopContext.Provider value={\"acme\"}><Middle /></ShopContext.Provider>\n\
+         }\n\
+         const root = <App />",
+    );
+}
+
+#[test]
+fn no_default_three_hop_wrapper_ok() {
+    assert_ok(
+        "const ShopContext = createContext<string>()\n\
+         fn Inner() ReactNode {\n\
+           const shop = useContext(ShopContext)\n\
+           return <span>{shop}</span>\n\
+         }\n\
+         fn Mid2() ReactNode {\n\
+           return <Inner />\n\
+         }\n\
+         fn Mid1() ReactNode {\n\
+           return <Mid2 />\n\
+         }\n\
+         fn App() ReactNode {\n\
+           return <ShopContext.Provider value={\"acme\"}><Mid1 /></ShopContext.Provider>\n\
+         }\n\
+         const root = <App />",
+    );
+}
+
+#[test]
+fn no_default_diamond_names_unprovided_path() {
+    let src = "const ShopContext = createContext<string>()\n\
+         fn Inner() ReactNode {\n\
+           const shop = useContext(ShopContext)\n\
+           return <span>{shop}</span>\n\
+         }\n\
+         fn Left() ReactNode {\n\
+           return <ShopContext.Provider value={\"acme\"}><Inner /></ShopContext.Provider>\n\
+         }\n\
+         fn Right() ReactNode {\n\
+           return <Inner />\n\
+         }\n\
+         fn App() ReactNode {\n\
+           return <><Left /><Right /></>\n\
+         }\n\
+         const root = <App />";
+    let got = errors(src);
+    assert!(
+        got.iter()
+            .any(|m| m.contains("not wrapped in `<ShopContext.Provider>`")
+                && m.contains("`App` → `Right` → `Inner`")),
+        "{src}\nexpected the unprovided path named in the diagnostic\ngot: {got:?}"
+    );
+    assert!(
+        got.iter().all(|m| !m.contains("`Left`")),
+        "{src}\nunprovided-path diagnostic should not name the provided arm\ngot: {got:?}"
+    );
+}
+
+#[test]
+fn no_default_unreachable_consumer_is_skipped() {
+    // Dead is never rendered and not exported. Provider analysis does not
+    // diagnose it; unreachable render code is a different story.
+    assert_ok(
+        "const ShopContext = createContext<string>()\n\
+         fn Dead() ReactNode {\n\
+           const shop = useContext(ShopContext)\n\
+           return <p>{shop}</p>\n\
+         }\n\
+         fn App() ReactNode {\n\
+           return <p>ok</p>\n\
+         }\n\
+         const root = <App />",
+    );
+}
+
+#[test]
 fn alias_usecontext_is_still_a_hook() {
     assert_ok(
         "const LocaleContext = createContext<string>(\"en\")\n\

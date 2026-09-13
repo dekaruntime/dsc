@@ -75,7 +75,9 @@ emits inline. A proven subscript still emits the authored bare subscript.
 that canonical counting form is recognized too. Comparison pairs require known
 integerness (integer literals/bindings, counting-loop variables, or `has()`).
 Facts currently identify local array bindings and index bindings/integer literals.
-Rebind computed receivers or indexes to locals before guarding them.
+Rebind computed receivers or indexes to locals before guarding them. The
+unproven-index diagnostic on a field-access or nested-index receiver teaches
+that hoist; bare-identifier receivers keep the `has()` recipe.
 
 Calls other than the builtin predicate, writes, suspension, and unsafe JS kill
 facts conservatively, including possible alias mutation. Shadowing kills facts

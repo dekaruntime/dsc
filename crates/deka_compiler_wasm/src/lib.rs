@@ -288,6 +288,7 @@ fn compile_request(source: &str, filename: &str, options_json: &str) -> String {
         // Build closures are emitted by the module graph; single-file
         // playground compilation has no cross-module builds.
         build_closure_names: std::collections::HashSet::new(),
+        inject_deka_id: None,
     };
 
     match deka_compile::compile_to_js_with_options(source, filename, compile_options) {

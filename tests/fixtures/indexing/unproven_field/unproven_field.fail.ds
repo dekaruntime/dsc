@@ -1,0 +1,4 @@
+struct Cart { items: Array<number> }
+const cart = Cart { items: [1] };
+const i = 0;
+const x = cart.items[i];

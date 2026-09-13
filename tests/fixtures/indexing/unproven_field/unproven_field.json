@@ -1,0 +1,6 @@
+{
+  "title": "Indexing unproven field access",
+  "stage": "typecheck",
+  "notes": "rfd#65 / dsc#173: proofs track local names; field-access receivers teach the hoist.",
+  "expectedDiagnosticContains": "index not proven in bounds — proofs track local names; hoist it first: const items = cart.items, then items.has(i) ? ..."
+}

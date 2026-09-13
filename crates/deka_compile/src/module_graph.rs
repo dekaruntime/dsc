@@ -928,6 +928,23 @@ pub fn compile_module_graph_with_options(
         }
     }
 
+    // Hydration markers are consumed by `ui/client` walk-and-attach when
+    // matching SSR host elements to an island VNode tree. Inject them only
+    // when this graph hydrates: any `client:*` directive, or interactive-
+    // component analysis firing, in any module we emit. An island's render
+    // tree may live in a different file from the `client:*` usage site.
+    let inject_deka_id = order.iter().any(|path| {
+        if !plan.keep.contains(path) && !dev_keep.contains(path) {
+            return false;
+        }
+        let Some(program) = programs.get(path) else {
+            return false;
+        };
+        let empty = HashMap::new();
+        let combined = imports.get(path).unwrap_or(&empty);
+        deka_syntax::program_needs_hydration_ids(program, combined)
+    });
+
     // ------------------------------------------------------------------
     // Emit each kept module.  We compile in dependency order so imported
     // structs, enums, and receiver methods are known to the typechecker.
@@ -989,6 +1006,7 @@ pub fn compile_module_graph_with_options(
             } else {
                 HashSet::new()
             },
+            inject_deka_id: Some(inject_deka_id),
             ..Default::default()
         };
         match compile_to_js_with_imports_and_options(
@@ -2987,6 +3005,69 @@ mod tests {
         assert!(
             result.modules[&page].contains("\"client:load\": true"),
             "client directive must reach emitted island code:\n{}",
+            result.modules[&page]
+        );
+        assert!(
+            result.modules[&child].contains("\"data-deka-id\""),
+            "island host elements need the hydration marker even when the client:* site is in another module:\n{}",
+            result.modules[&child]
+        );
+    }
+
+    #[test]
+    fn graph_plain_components_do_not_inject_data_deka_id() {
+        let card = PathBuf::from("/project/card.dsx");
+        let page = PathBuf::from("/project/page.dsx");
+        let mut files = HashMap::new();
+        files.insert(
+            card.clone(),
+            "export fn Card() ReactNode {\n  return <p>hi</p>\n}\n".to_string(),
+        );
+        files.insert(
+            page.clone(),
+            "import { Card } from \"./card.dsx\"\nconst page = <Card />\n".to_string(),
+        );
+        let aliases = HashMap::from([((page.clone(), "./card.dsx".to_string()), card.clone())]);
+
+        let result = compile_module_graph(&page, &InMemoryLoader { files, aliases })
+            .expect("plain components compile without islands");
+        assert!(
+            !result.modules[&card].contains("data-deka-id"),
+            "plain host elements must match hand-written React:\n{}",
+            result.modules[&card]
+        );
+        assert!(
+            !result.modules[&page].contains("data-deka-id"),
+            "the page module must not inject a marker either:\n{}",
+            result.modules[&page]
+        );
+    }
+
+    #[test]
+    fn graph_client_directive_injects_data_deka_id_on_imported_plain_host_elements() {
+        let card = PathBuf::from("/project/card.dsx");
+        let page = PathBuf::from("/project/page.dsx");
+        let mut files = HashMap::new();
+        files.insert(
+            card.clone(),
+            "export fn Card() ReactNode {\n  return <p>hi</p>\n}\n".to_string(),
+        );
+        files.insert(
+            page.clone(),
+            "import { Card } from \"./card.dsx\"\nconst page = <Card client:load />\n".to_string(),
+        );
+        let aliases = HashMap::from([((page.clone(), "./card.dsx".to_string()), card.clone())]);
+
+        let result = compile_module_graph(&page, &InMemoryLoader { files, aliases })
+            .expect("client:load hydrates the imported component's host tree");
+        assert!(
+            result.modules[&card].contains("\"data-deka-id\""),
+            "hydration walk matches Card's host elements by data-deka-id:\n{}",
+            result.modules[&card]
+        );
+        assert!(
+            result.modules[&page].contains("\"client:load\": true"),
+            "{}",
             result.modules[&page]
         );
     }

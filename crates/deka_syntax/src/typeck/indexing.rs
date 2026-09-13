@@ -55,6 +55,47 @@ fn array(e: &Expr<'_>) -> Option<String> {
         _ => None,
     }
 }
+fn pretty_index_expr(e: &Expr<'_>) -> Option<String> {
+    match plain(e) {
+        Expr::Identifier { name, .. } => Some((*name).into()),
+        Expr::Number { value, .. } if value.is_finite() && value.fract() == 0.0 => {
+            Some(value.to_string())
+        }
+        Expr::FieldAccess { object, field, .. } => {
+            Some(format!("{}.{}", pretty_index_expr(object)?, field))
+        }
+        Expr::IndexAccess { object, index, .. } => Some(format!(
+            "{}[{}]",
+            pretty_index_expr(object)?,
+            pretty_index_expr(index)?
+        )),
+        _ => None,
+    }
+}
+/// Non-bare receivers cannot carry bounds facts. Teach the hoist-to-local
+/// pattern instead of the `has()` recipe, which would still not prove.
+fn hoist_receiver(object: &Expr<'_>) -> Option<(String, String)> {
+    match plain(object) {
+        Expr::Identifier { .. } => None,
+        Expr::FieldAccess { object, field, .. } => {
+            let rhs = pretty_index_expr(object)
+                .map(|base| format!("{base}.{field}"))
+                .unwrap_or_else(|| format!("cart.{field}"));
+            Some(((*field).into(), rhs))
+        }
+        Expr::IndexAccess { object, index, .. } => {
+            let rhs = match (pretty_index_expr(object), pretty_index_expr(index)) {
+                (Some(base), Some(index)) => format!("{base}[{index}]"),
+                _ => "cart.items".into(),
+            };
+            Some(("items".into(), rhs))
+        }
+        _ => Some((
+            "items".into(),
+            pretty_index_expr(object).unwrap_or_else(|| "cart.items".into()),
+        )),
+    }
+}
 fn length(e: &Expr<'_>) -> Option<String> {
     match plain(e) {
         Expr::FieldAccess {
@@ -96,19 +137,23 @@ impl<'a> Checker<'a> {
     }
 
     pub(super) fn require_index_proof(&mut self, object: &Expr<'a>, index: &Expr<'a>, span: Span) {
-        let a = array(object);
-        let i = key(index);
         if self.index_flow.proves(object, index) {
             return;
         }
-        let a = a.as_deref().unwrap_or("items");
+        let i = key(index);
         let i = i.as_deref().unwrap_or("i");
-        self.error_span(
-            span,
-            format!(
-                "index not proven in bounds — test it first: `{a}.has({i}) ? {a}[{i}] : fallback`"
+        let message = match hoist_receiver(object) {
+            Some((local, rhs)) => format!(
+                "index not proven in bounds — proofs track local names; hoist it first: const {local} = {rhs}, then {local}.has({i}) ? ..."
             ),
-        );
+            None => {
+                let a = array(object).unwrap_or_else(|| "items".into());
+                format!(
+                    "index not proven in bounds — test it first: `{a}.has({i}) ? {a}[{i}] : fallback`"
+                )
+            }
+        };
+        self.error_span(span, message);
     }
     pub(super) fn assume_index_condition(&mut self, e: &Expr<'a>) {
         let mut conditions = Vec::new();
@@ -361,6 +406,28 @@ mod tests {
         assert_eq!(
             errors[0].message,
             "index not proven in bounds — test it first: `scores.has(round) ? scores[round] : fallback`"
+        );
+    }
+
+    #[test]
+    fn indexing_diagnostic_teaches_hoist_for_field_access() {
+        let errors = typeck(
+            "struct Cart { items: Array<number> } const cart = Cart { items: [1] }; const i = 0; const x = cart.items[i];",
+        );
+        assert_eq!(
+            errors[0].message,
+            "index not proven in bounds — proofs track local names; hoist it first: const items = cart.items, then items.has(i) ? ..."
+        );
+    }
+
+    #[test]
+    fn indexing_diagnostic_teaches_hoist_for_nested_index() {
+        let errors = typeck(
+            "const matrix = [[1]]; const i = 0; const j = 0; const x = matrix.has(i) ? matrix[i][j] : 0;",
+        );
+        assert_eq!(
+            errors[0].message,
+            "index not proven in bounds — proofs track local names; hoist it first: const items = matrix[i], then items.has(j) ? ..."
         );
     }
 }

@@ -479,6 +479,7 @@ pub fn emit_js_with_options<'a>(
         live_names,
         false,
         None,
+        deka_syntax::program_needs_hydration_ids(program, imports),
     )?
     .js)
 }
@@ -532,6 +533,7 @@ pub fn emit_js_module_with_options<'a>(
     live_names: Option<&HashSet<String>>,
     detached: bool,
     jsx_runtime: Option<String>,
+    inject_deka_id: bool,
 ) -> Result<ModuleEmit, String> {
     let mut emitter = Emitter::new(program);
     emitter.configure_jsx_names(source);
@@ -539,6 +541,7 @@ pub fn emit_js_module_with_options<'a>(
     emitter.source_path = file_path.to_string();
     emitter.file_stem = file_stem_from_path(file_path);
     emitter.module_root = module_root;
+    emitter.inject_deka_id = inject_deka_id;
     emitter.seed_imports(imports);
     emitter.exception_forms = exception_forms.clone();
     emitter.unwrap_calls = unwrap_calls.clone();
@@ -1324,6 +1327,9 @@ struct Emitter<'a> {
     /// (deka#595); module bodies then reference the helpers as free
     /// identifiers resolved by the single program prelude.
     detached: bool,
+    /// Inject `data-deka-id` on host JSX elements. Set when the compile graph
+    /// hydrates islands (`client:*` or interactive-component analysis).
+    inject_deka_id: bool,
     /// This module's demand for shared runtime helpers, computed during
     /// `emit_prelude` from the same scans that gate emission.
     demand: crate::prelude::PreludeDemand,
@@ -1381,6 +1387,7 @@ impl<'a> Emitter<'a> {
             jsx_runtime: "@js/react/jsx-runtime".to_string(),
             jsx_helpers: ["jsx".into(), "jsxs".into(), "Fragment".into()],
             detached: false,
+            inject_deka_id: false,
             demand: crate::prelude::PreludeDemand::default(),
         };
         emitter.prepass();
@@ -4848,6 +4855,7 @@ impl<'a> Emitter<'a> {
                     jsx_runtime: self.jsx_runtime.clone(),
                     jsx_helpers: self.jsx_helpers.clone(),
                     detached: false,
+                    inject_deka_id: false,
                     demand: crate::prelude::PreludeDemand::default(),
                 };
                 tmp.emit_expr(expr).expect("literal emission");
@@ -5097,7 +5105,7 @@ impl<'a> Emitter<'a> {
 
         let mut props = Vec::new();
         let mut key = None;
-        if !is_component {
+        if self.inject_deka_id && !is_component {
             props.push(format!(
                 "\"data-deka-id\": {}",
                 json_string(&self.current_deka_id())

@@ -2095,6 +2095,19 @@ mod tests {
     }
 
     #[test]
+    fn preserves_jsx_layout_whitespace() {
+        for jsx in [
+            "<div>\n    <i />\n    <b />\n</div>",
+            "<>\n    <i /> <b />\n</>",
+            "<p>  hello  world \n    next  line\n  </p>",
+        ] {
+            let source = format!("const el = {jsx};");
+            let output = format_ds(&source).unwrap();
+            assert!(output.contains(jsx), "JSX text must stay verbatim: {output}");
+        }
+    }
+
+    #[test]
     fn formats_pipe_expression() {
         let input = "fn inc(x: int) int { return x + 1; }\nconst y = 5 |> inc;";
         let output = format_ds(input).unwrap();

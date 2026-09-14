@@ -1321,6 +1321,65 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
     }
 
     #[test]
+    fn emit_jsx_whitespace_child_count_selects_runtime_helper() {
+        for (source, expression) in [
+            ("const el = <p>\n  \t\n</p>;", r#"jsx("p", {})"#),
+            ("const el = <>\n  \t\n</>;", "jsx(Fragment, {})"),
+            ("const el = <p>\n <i />\n</p>;", r#"jsx("p", {"children": jsx("i", {})})"#),
+            ("const el = <>\n <i />\n</>;", r#"jsx(Fragment, {"children": jsx("i", {})})"#),
+            ("const el = <p> </p>;", r#"jsx("p", {"children": " "})"#),
+            ("const el = <p>\n hello  world\n next\n</p>;", r#"jsx("p", {"children": "hello  world next"})"#),
+        ] {
+            assert_eq!(
+                parse_and_emit(source),
+                format!("\"use strict\";\nimport {{ jsx, jsxs, Fragment }} from \"@js/react/jsx-runtime\";\n\nconst el = {expression};"),
+                "{source}",
+            );
+        }
+    }
+
+    #[test]
+    fn emit_jsx_whitespace_children_node() {
+        let cases = [
+            ("\n    <i />\n    <b />\n", r#"[{tag: "i"}, {tag: "b"}]"#),
+            ("<i /> <b />", r#"[{tag: "i"}, " ", {tag: "b"}]"#),
+            ("  hello  world \n    next  line\n  \n    end  ", r#"["  hello  world next  line end  "]"#),
+            ("\n \t \n", "[]"),
+            ("\n <i />\n", r#"[{tag: "i"}]"#),
+            ("<i />  \t <b />", r#"[{tag: "i"}, "    ", {tag: "b"}]"#),
+            ("\r\n  hello\t world \r\n next \r end\r\n", r#"["hello  world next end"]"#),
+            ("\n  \u{a0}  \n", r#"["\u00a0"]"#),
+            (r#"<i />{"\n    "}<b />"#, r#"[{tag: "i"}, "\n    ", {tag: "b"}]"#),
+        ];
+        let mut runner = String::from(
+            "import assert from 'node:assert/strict';\n\
+             const children = el => el.props.children === undefined ? [] : \
+               (Array.isArray(el.props.children) ? el.props.children : [el.props.children])\
+               .map(child => typeof child === 'string' ? child : {tag: child.type});\n",
+        );
+        for (body, expected) in cases {
+            for (open, close) in [("<div>", "</div>"), ("<>", "</>")] {
+                let source = format!("const el = {open}{body}{close};");
+                let out = parse_and_emit(&source);
+                let (import, module) = out.split_once(";\n\n").unwrap();
+                if runner.starts_with("import assert") {
+                    runner.insert_str(0, &format!("{};\n", import.replace("@js/react/", "react/")));
+                }
+                runner.push_str(&format!("{{\n{module}\nassert.deepEqual(children(el), {expected});\n}}\n"));
+            }
+        }
+        let cache = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.cache/react-jsx-whitespace");
+        ensure_react_ssr_harness(&cache).expect("React JSX test harness unavailable");
+        let result = std::process::Command::new("node")
+            .args(["--input-type=module", "-e", &runner])
+            .current_dir(&cache)
+            .output()
+            .expect("node must be installed");
+        assert!(result.status.success(), "{}\n{runner}", String::from_utf8_lossy(&result.stderr));
+    }
+
+    #[test]
     fn emit_jsx_plain_component_props_are_only_user_props() {
         let out = parse_and_emit(
             "interface Props { title: string } fn Card(props: Props) ReactNode { return <p>{props.title}</p>; }",

@@ -5384,7 +5384,9 @@ impl<'a> Emitter<'a> {
 
         let mut child_values = Vec::new();
         for child in element.children.iter() {
-            child_values.push(self.emit_jsx_child(child)?);
+            if let Some(value) = self.emit_jsx_child(child)? {
+                child_values.push(value);
+            }
         }
 
         if child_values.len() == 1 {
@@ -5419,19 +5421,25 @@ impl<'a> Emitter<'a> {
         ));
     }
 
-    fn emit_jsx_child(&mut self, child: &Expr<'a>) -> Result<String, String> {
+    fn emit_jsx_child(&mut self, child: &Expr<'a>) -> Result<Option<String>, String> {
+        if let Expr::JsxText { value, .. } = child {
+            let text = clean_jsx_text(value);
+            return Ok((!text.is_empty()).then(|| json_string(&text)));
+        }
         let mut buf = String::new();
         std::mem::swap(&mut self.out, &mut buf);
         self.emit_expr(child)?;
         std::mem::swap(&mut self.out, &mut buf);
-        Ok(buf)
+        Ok(Some(buf))
     }
 
     fn emit_jsx_fragment(&mut self, children: &[Expr<'a>], span: deka_syntax::Span) -> Result<(), String> {
         self.enter_jsx_node();
         let mut child_values = Vec::new();
         for child in children.iter() {
-            child_values.push(self.emit_jsx_child(child)?);
+            if let Some(value) = self.emit_jsx_child(child)? {
+                child_values.push(value);
+            }
         }
 
         let helper = usize::from(child_values.len() > 1);
@@ -5455,6 +5463,36 @@ impl<'a> Emitter<'a> {
         self.exit_jsx_node();
         Ok(())
     }
+}
+
+/// Apply Babel's cleanJSXElementLiteralChild convention during lowering.
+/// The lexer/AST retain verbatim text for formatter round-tripping. Only ASCII
+/// spaces and tabs are layout whitespace; e.g. a non-breaking space is content.
+fn clean_jsx_text(value: &str) -> String {
+    let normalized = value.replace("\r\n", "\n").replace('\r', "\n");
+    let lines: Vec<_> = normalized.split('\n').collect();
+    let last_content = lines
+        .iter()
+        .rposition(|line| line.chars().any(|c| c != ' ' && c != '\t'))
+        .unwrap_or(0);
+    let mut text = String::new();
+    for (index, line) in lines.iter().enumerate() {
+        let line = line.replace('\t', " ");
+        let mut segment = line.as_str();
+        if index != 0 {
+            segment = segment.trim_start_matches(' ');
+        }
+        if index != lines.len() - 1 {
+            segment = segment.trim_end_matches(' ');
+        }
+        if !segment.is_empty() {
+            text.push_str(segment);
+            if index != last_content {
+                text.push(' ');
+            }
+        }
+    }
+    text
 }
 
 fn is_optional_type(ty: &Type) -> bool {

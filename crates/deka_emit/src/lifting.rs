@@ -583,10 +583,11 @@ fn payload_only_arms(arms: &[deka_syntax::MatchArm<'_>]) -> bool {
 }
 
 /// The checker enumerates enum / Option / Result / Exception / union
-/// constructors. It does **not** enumerate literals or tuples
+/// constructors. It does **not** enumerate top-level literals or tuples
 /// (`collect_missing` leaves those alone), so a runtime fallback is still
-/// load-bearing there. Nested payload literals (`Ok(1)`) do not count: the
-/// constructor itself is what the checker proved.
+/// load-bearing there. Nested payload literals (`Ok(1)`, `Circle(1)`) are
+/// refutable too: recurse into the constructor payload so the throw is
+/// kept until the checker proves the inner pattern (dsc#225).
 fn match_needs_runtime_exhaustiveness_guard(arms: &[deka_syntax::MatchArm<'_>]) -> bool {
     arms.iter()
         .any(|arm| pattern_needs_runtime_exhaustiveness_guard(&arm.pattern))
@@ -595,6 +596,9 @@ fn match_needs_runtime_exhaustiveness_guard(arms: &[deka_syntax::MatchArm<'_>]) 
 fn pattern_needs_runtime_exhaustiveness_guard(pattern: &Pattern<'_>) -> bool {
     match pattern {
         Pattern::Literal { .. } | Pattern::Tuple { .. } => true,
+        Pattern::Constructor { payload, .. } => {
+            payload.is_some_and(pattern_needs_runtime_exhaustiveness_guard)
+        }
         Pattern::Or { alternatives, .. } => alternatives
             .iter()
             .any(pattern_needs_runtime_exhaustiveness_guard),

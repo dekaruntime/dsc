@@ -34,13 +34,20 @@ mod tests {
     /// Union type-patterns are lowered by the typechecker, so emission of
     /// them needs the checker results — unlike the erase-only `parse_and_emit`.
     fn parse_check_and_emit(source: &str) -> String {
+        let (js, errors) = parse_check_and_emit_allowing_errors(source);
+        assert!(errors.is_empty(), "{:?}", errors);
+        js
+    }
+
+    fn parse_check_and_emit_allowing_errors(
+        source: &str,
+    ) -> (String, Vec<deka_syntax::Diagnostic>) {
         let arena = Bump::new();
         let result = parse(source, &arena);
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         let program = result.program.expect("parse produced no program");
         let typeck = deka_syntax::typeck::check_program(&program, source);
-        assert!(typeck.errors.is_empty(), "{:?}", typeck.errors);
-        emit_js_module_with_options(
+        let js = emit_js_module_with_options(
             &program,
             source,
             &std::collections::HashMap::new(),
@@ -71,7 +78,8 @@ mod tests {
             false,
         )
         .expect("emit failed")
-        .js
+        .js;
+        (js, typeck.errors)
     }
 
     #[test]
@@ -1066,6 +1074,66 @@ assert.equal(stmt(Shape.Empty), 0);
             literal_match.contains("throw new Error(\"non-exhaustive match\")"),
             "literal match is not enumerated by the checker, so the throw stays: {literal_match}"
         );
+    }
+
+    /// dsc#225: a nested literal in a constructor payload (`Ok(1)`,
+    /// `Circle(1)`) is not proven exhaustive. The checker rejects it; if
+    /// emit still runs, the throw stays so an uncovered value cannot
+    /// silently return `undefined`.
+    #[test]
+    fn emit_nested_refutable_constructor_match_never_returns_undefined() {
+        let cases = [
+            (
+                "fn f(r: Result<number, string>) number { return match r { Ok(1) => 100, Err(e) => 0 }; }",
+                r#"
+import assert from 'node:assert/strict';
+assert.equal(f({ ok: true, value: 1 }), 100);
+let uncovered;
+let threw = false;
+try { uncovered = f({ ok: true, value: 2 }); } catch (e) {
+  threw = true;
+  assert.equal(e.message, 'non-exhaustive match');
+}
+assert.equal(threw, true, `expected throw, got ${uncovered}`);
+"#,
+            ),
+            (
+                "enum Shape { Circle(number), Empty }\n\
+                 fn f(s: Shape) number { return match s { Circle(1) => 100, Empty => 0 }; }",
+                r#"
+import assert from 'node:assert/strict';
+assert.equal(f(Shape.Circle(1)), 100);
+let uncovered;
+let threw = false;
+try { uncovered = f(Shape.Circle(2)); } catch (e) {
+  threw = true;
+  assert.equal(e.message, 'non-exhaustive match');
+}
+assert.equal(threw, true, `expected throw, got ${uncovered}`);
+"#,
+            ),
+        ];
+        for (source, probe) in cases {
+            let (out, errors) = parse_check_and_emit_allowing_errors(source);
+            let rejected = errors
+                .iter()
+                .any(|e| e.message.contains("non-exhaustive"));
+            let keeps_throw = out.contains("throw new Error(\"non-exhaustive match\")");
+            assert!(
+                rejected || keeps_throw,
+                "nested-refutable match must fail compilation or retain the throw: errors={errors:?}\n{out}"
+            );
+            let js = format!("{out}\n{probe}");
+            let result = std::process::Command::new("node")
+                .args(["--input-type=module", "-e", &js])
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}\n{out}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
     }
 
     #[test]

@@ -13,7 +13,7 @@ mime_guess = "2.0"
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha1 = "0.11"
-sha2 = "0.10"
+sha2 = "0.11"
 swc_bundler = "39.0.0"
 swc_common = "18.0.1"
 swc_ecma_ast = "19.0.0"

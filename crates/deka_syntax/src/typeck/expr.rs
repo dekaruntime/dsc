@@ -1806,8 +1806,8 @@ impl<'a> Checker<'a> {
             let actual = self.check_expr(value);
             if let Some(expected) = &value_ty {
                 if !self.is_assignable(expected, &actual)
-                    && !matches!(actual, Type::Infer | Type::Error)
-                    && !matches!(expected, Type::Infer | Type::Error)
+                    && !matches!(actual, Type::Error)
+                    && !matches!(expected, Type::Error)
                 {
                     self.error_span(
                         attr.span,
@@ -1918,8 +1918,8 @@ impl<'a> Checker<'a> {
 
             let actual = self.check_jsx_attr_value(value);
             if !self.is_assignable(&expected, &actual)
-                && !matches!(actual, Type::Infer | Type::Error)
-                && !matches!(expected, Type::Infer | Type::Error)
+                && !matches!(actual, Type::Error)
+                && !matches!(expected, Type::Error)
             {
                 self.error_span(
                     attr.span,
@@ -3395,8 +3395,6 @@ impl<'a> Checker<'a> {
                             }
                             if !params.is_empty()
                                 && !self.is_assignable(&params[0], &left_type)
-                                && !matches!(left_type, Type::Infer)
-                                && !matches!(params[0], Type::Infer)
                             {
                                 self.error_span(
                                     *span,
@@ -3477,8 +3475,6 @@ impl<'a> Checker<'a> {
                                         "pipe right-hand call takes no arguments",
                                     );
                                 } else if !self.is_assignable(&substituted_params[0], &left_type)
-                                    && !matches!(left_type, Type::Infer)
-                                    && !matches!(substituted_params[0], Type::Infer)
                                 {
                                     self.error_span(
                                         left.span(),

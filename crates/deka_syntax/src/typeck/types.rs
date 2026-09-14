@@ -10,8 +10,11 @@ use std::fmt;
 pub enum Type<'a> {
     /// Sentinel used for error recovery.
     Error,
-    /// Placeholder used while a function's return type is being inferred, and
-    /// the marker for "the checker could not work this out".
+    /// Marker for "the checker could not work this out".
+    ///
+    /// Not universally assignable (dsc#115): an `Infer` source is a diagnostic
+    /// at the use site. Distinct from [`Type::Var`], which is genuinely
+    /// unconstrained and unifies freely.
     Infer,
     /// An unconstrained type variable.
     ///

@@ -101,6 +101,11 @@ impl<'a> Checker<'a> {
         // diagnostics. This resolves forward references within a module (e.g.
         // `sha256` calling `digest` in @deka/crypto).
         self.infer_function_return_types();
+        // Function bodies are checked before module-level initializers run in
+        // source order (deka#600). Refine Infer seeds from those initializers
+        // now that signatures are known, so a later `fn f() number { return n }`
+        // sees `n`'s real type rather than Infer (dsc#115).
+        self.refine_module_value_seeds();
 
         // Check function and receiver-method bodies first so that inferred
         // return types are available to later top-level statements.
@@ -1176,6 +1181,69 @@ impl<'a> Checker<'a> {
         self.reset_lowering_state();
     }
 
+    /// Replace Infer seeds on unannotated module bindings with the initializer
+    /// type, now that function signatures are known. Does not emit diagnostics;
+    /// `check_binding` still owns those.
+    fn refine_module_value_seeds(&mut self) {
+        let prev_infer_only = self.infer_only;
+        self.infer_only = true;
+        for stmt in self.program.statements {
+            match stmt {
+                ast::Stmt::TupleBinding {
+                    names,
+                    ty,
+                    value,
+                    ..
+                } if ty.is_none() => {
+                    let actual = self.check_exception_use(
+                        value,
+                        super::exceptions::Use::Value,
+                        None,
+                    );
+                    if let Type::Tuple { elements } = actual {
+                        for (i, name) in names.iter().enumerate() {
+                            if matches!(self.scopes[0].get(name), Some(Type::Infer)) {
+                                if let Some(elem) = elements.get(i) {
+                                    self.scopes[0].insert(name, elem.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                ast::Stmt::Const {
+                    name, ty, value, ..
+                }
+                | ast::Stmt::Let {
+                    name, ty, value, ..
+                } if ty.is_none() => {
+                    self.refine_unannotated_seed(name, value);
+                }
+                ast::Stmt::Export {
+                    decl:
+                        ast::ExportDecl::Const {
+                            name, ty, value, ..
+                        },
+                    ..
+                } if ty.is_none() => {
+                    self.refine_unannotated_seed(name, value);
+                }
+                _ => {}
+            }
+        }
+        self.infer_only = prev_infer_only;
+        self.reset_lowering_state();
+    }
+
+    fn refine_unannotated_seed(&mut self, name: &'a str, value: &ast::Expr<'a>) {
+        if !matches!(self.scopes[0].get(name), Some(Type::Infer)) {
+            return;
+        }
+        let actual = self.check_exception_use(value, super::exceptions::Use::Value, None);
+        if !matches!(actual, Type::Infer | Type::Error) {
+            self.scopes[0].insert(name, actual);
+        }
+    }
+
     pub(super) fn check_statement(&mut self, stmt: &ast::Stmt<'a>) {
         match stmt {
             ast::Stmt::Try {
@@ -1200,7 +1268,14 @@ impl<'a> Checker<'a> {
                 );
                 if let Some(expected) = &expected {
                     if !self.is_assignable(expected, &actual) {
-                        self.error_span(*span, format!("expected `{expected}`, found `{actual}`"));
+                        self.error_span(
+                            *span,
+                            super::with_union_narrowing_hint(
+                                format!("expected `{expected}`, found `{actual}`"),
+                                expected,
+                                &actual,
+                            ),
+                        );
                     }
                 }
                 let binding_type = expected.unwrap_or(actual);
@@ -1583,11 +1658,15 @@ impl<'a> Checker<'a> {
 
         let declared = ty.map(|ty| self.resolve_ast_type(ty));
         if let Some(declared) = &declared {
-            if !self.is_assignable(declared, &bound) && !matches!(bound, Type::Infer | Type::Error)
+            if !self.is_assignable(declared, &bound) && !matches!(bound, Type::Error)
             {
                 self.error_span(
                     span,
-                    format!("binding declared as `{declared}`, but `unwrap` yields `{bound}`"),
+                    super::with_union_narrowing_hint(
+                        format!("binding declared as `{declared}`, but `unwrap` yields `{bound}`"),
+                        declared,
+                        &bound,
+                    ),
                 );
             }
         }
@@ -1659,12 +1738,16 @@ impl<'a> Checker<'a> {
             self.pop_value_scope();
 
             if !self.is_assignable(bound, &arm_type)
-                && !matches!(arm_type, Type::Infer | Type::Error | Type::Never)
-                && !matches!(bound, Type::Infer | Type::Error)
+                && !matches!(arm_type, Type::Error | Type::Never)
+                && !matches!(bound, Type::Error)
             {
                 self.error_span(
                     arm.span,
-                    format!("arm has type `{arm_type}`, but the binding is `{bound}`"),
+                    super::with_union_narrowing_hint(
+                        format!("arm has type `{arm_type}`, but the binding is `{bound}`"),
+                        bound,
+                        &arm_type,
+                    ),
                 );
             }
 
@@ -1702,7 +1785,10 @@ impl<'a> Checker<'a> {
                             "`{name}` is declared Option<{inner}> but the initializer is {value_type}"
                         ),
                     };
-                    self.error_at_expr(value, message);
+                    self.error_at_expr(
+                        value,
+                        super::with_union_narrowing_hint(message, &expected, &value_type),
+                    );
                 }
             } else if !self.is_assignable(&expected, &value_type) {
                 self.error_at_expr(
@@ -1922,13 +2008,25 @@ impl<'a> Checker<'a> {
         // path (no collected signature — e.g. a nested function, which
         // collect_function_signatures does not visit) resolves it here, its
         // only resolution.
-        let explicit_ret = match (return_type, collected_ret) {
-            (Some(_), Some(ret)) => Some(ret),
+        let explicit_ret = match (return_type, collected_ret.as_ref()) {
+            (Some(_), Some(ret)) => Some(ret.clone()),
             (Some(t), None) => Some(self.resolve_ast_type(t)),
             (None, _) => None,
         };
         let (body_expected_ret, final_ret) =
             self.function_return_context(is_async, explicit_ret.clone(), _span);
+        // After the silent infer pass, an unannotated function already has a
+        // concrete return type in `globals`. Reuse it so recursive calls and
+        // return checks see that type instead of `Infer` (dsc#115). Do not
+        // treat it as an authored annotation: missing-return still applies
+        // only to an explicit return type.
+        let (body_expected_ret, final_ret) = self.reuse_inferred_return(
+            explicit_ret.as_ref(),
+            collected_ret.as_ref(),
+            is_async,
+            body_expected_ret,
+            final_ret,
+        );
 
         self.push_value_scope();
         self.mutables.push(HashSet::new());
@@ -2107,6 +2205,38 @@ impl<'a> Checker<'a> {
                     }],
                 },
             ),
+        }
+    }
+
+    /// After the silent infer pass, reuse a concrete collected return type so
+    /// the real check does not see `Infer` as the function's own result.
+    fn reuse_inferred_return(
+        &self,
+        explicit_ret: Option<&Type<'a>>,
+        collected_ret: Option<&Type<'a>>,
+        is_async: bool,
+        body_expected_ret: Option<Type<'a>>,
+        final_ret: Type<'a>,
+    ) -> (Option<Type<'a>>, Type<'a>) {
+        if explicit_ret.is_some() {
+            return (body_expected_ret, final_ret);
+        }
+        let Some(ret) = collected_ret else {
+            return (body_expected_ret, final_ret);
+        };
+        if matches!(ret, Type::Infer | Type::Error) {
+            return (body_expected_ret, final_ret);
+        }
+        if is_async {
+            match ret {
+                Type::Generic {
+                    base: "Promise",
+                    args,
+                } if args.len() == 1 => (Some(args[0].clone()), ret.clone()),
+                _ => (body_expected_ret, final_ret),
+            }
+        } else {
+            (Some(ret.clone()), ret.clone())
         }
     }
 

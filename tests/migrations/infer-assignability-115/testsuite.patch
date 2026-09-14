@@ -1,0 +1,76 @@
+--- a/corpus/async/async_return_promise_unwraps/async_return_promise_unwraps.pass.ds
++++ b/corpus/async/async_return_promise_unwraps/async_return_promise_unwraps.pass.ds
+@@ -8,11 +8,11 @@
+ }
+ 
+ async fn indirect() Promise<number> {
+-  let resolved = unsafe { Promise.resolve(2) }
+-  let pending = unwrap(resolved) or {
+-    0
++  let resolved = unsafe<Promise<number>> { Promise.resolve(2) }
++  return match (resolved) {
++    Ok(pending) => await pending,
++    Err(_) => 0,
+   }
+-  return await pending
+ }
+ 
+ async fn main() {
+--- a/corpus/error_globals/deka_unsafe_catch/deka_unsafe_catch.pass.ds
++++ b/corpus/error_globals/deka_unsafe_catch/deka_unsafe_catch.pass.ds
+@@ -1,6 +1,6 @@
+ import { echo } from "io"
+-const x = unsafe { throw new Error("inner") }
+-echo(match (x) {
++const x = unsafe<number> { throw new Error("inner") }
++echo(string(match (x) {
+   Ok(v) => v,
+   Err(_) => 99,
+-})
++}))
+--- a/corpus/error_globals/json_parse/json_parse.pass.ds
++++ b/corpus/error_globals/json_parse/json_parse.pass.ds
+@@ -1,6 +1,7 @@
+ import { echo } from "io"
+-const parsed = unsafe { JSON.parse("{\"x\":1}") }
+-echo(match (parsed) {
++struct Parsed { x: number }
++const parsed = unsafe<Parsed> { JSON.parse("{\"x\":1}") }
++echo(string(match (parsed) {
+   Ok(v) => v.x,
+   Err(_) => 0,
+-})
++}))
+--- a/corpus/error_globals/object_values/object_values.pass.ds
++++ b/corpus/error_globals/object_values/object_values.pass.ds
+@@ -4,7 +4,7 @@
+ // not reach host globals). It is still reachable through `unsafe`, which is
+ // the point of that block -- and the result is a `Result`, so the failure has
+ // to be handled rather than assumed.
+-let values = unsafe { Object.values({a: 1, b: 2}).join(",") }
++let values = unsafe<string> { Object.values({a: 1, b: 2}).join(",") }
+ let joined = unwrap(values) or {
+   "none"
+ }
+--- a/corpus/unsafe/json_stringify_object/json_stringify_object.pass.ds
++++ b/corpus/unsafe/json_stringify_object/json_stringify_object.pass.ds
+@@ -1,6 +1,6 @@
+ import { echo } from "io"
+-const r = unsafe { JSON.stringify({ value: 7 }) }
++const r = unsafe<string> { JSON.stringify({ value: 7 }) }
+ echo(match (r) {
+   Ok(v) => v,
+-  Err(e) => `err: ${e}`,
++  Err(e) => `err: ${e.message}`,
+ })
+--- a/corpus/unsafe/unsafe_struct_literal_ok/unsafe_struct_literal_ok.pass.ds
++++ b/corpus/unsafe/unsafe_struct_literal_ok/unsafe_struct_literal_ok.pass.ds
+@@ -7,7 +7,7 @@
+   Ok(v) => v.name,
+   Err(e) => "err",
+ })
+-const arrow = unsafe { () => User { name: "Bob" } }
++const arrow = unsafe<fn() User> { () => User { name: "Bob" } }
+ const called = match (arrow) {
+   Ok(v) => v(),
+   Err(e) => User { name: "err" },

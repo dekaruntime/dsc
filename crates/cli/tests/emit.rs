@@ -488,6 +488,9 @@ fn run_node(dir: &Path, script: &str) -> std::process::Output {
     Command::new("node")
         .arg(script)
         .current_dir(dir)
+        .env("NO_COLOR", "1")
+        .env("FORCE_COLOR", "0")
+        .env("CLICOLOR_FORCE", "0")
         .output()
         .expect("node is required to execute emitted JavaScript")
 }
@@ -544,6 +547,8 @@ fn plan_entry_referencing_unsafe_only_helper_executes() {
     // dsc#59: a helper reachable only from inside an `unsafe` arrow body was
     // omitted from the build plan's entry, so build-entry execution failed
     // with an unknown-identifier error even though the source typechecks.
+    // dsc#115: the build entry must return `Result<T, string>`, and the
+    // arrow's success type has to be named — Infer is no longer assignable.
     // This executes the emitted entry with Node — the assertion that fails
     // on the old emitter is the ReferenceError, not a text mismatch.
     let temp = tempfile::tempdir().expect("tempdir");
@@ -553,10 +558,10 @@ fn plan_entry_referencing_unsafe_only_helper_executes() {
         r#"fn greet() string { return "hello from helper" }
 
 const greeting: string = build {
-  const run = unsafe { () => greet() }
+  const run = unsafe<fn() string> { () => greet() }
   return match (run) {
-    Ok(f) => f(),
-    Err(_) => "err",
+    Ok(f) => Ok(f()),
+    Err(_) => Ok("err"),
   }
 }
 "#,
@@ -574,7 +579,7 @@ const greeting: string = build {
     write(&root.join("entry.mjs"), entry);
     write(
         &root.join("runner.mjs"),
-        "import entry from './entry.mjs';\nentry().then(v => console.log('RESULT:' + v));\n",
+        "import entry from './entry.mjs';\nentry().then(v => console.log('RESULT:' + (v && v.ok === true ? v.value : v)));\n",
     );
 
     let run = run_node(root, "runner.mjs");
@@ -616,7 +621,10 @@ const shape = (p) =>
   : "other:" + typeof p;
 for (const k of ["r", "s", "o", "a"]) console.log(k + "=" + shape(eval(k).error));
 "#;
-    write(&root.join("probe.cjs"), format!("{emitted}\n{probe}").as_str());
+    write(
+        &root.join("probe.cjs"),
+        format!("{emitted}\n{probe}").as_str(),
+    );
 
     let run = run_node(root, "probe.cjs");
     assert!(run.status.success(), "{}", combined(&run));
@@ -626,14 +634,8 @@ for (const k of ["r", "s", "o", "a"]) console.log(k + "=" + shape(eval(k).error)
         .filter_map(|line| line.split_once('='))
         .collect();
     assert_eq!(lines.get("r").copied(), Some("string:boom"));
-    assert_eq!(
-        lines.get("s").copied(),
-        Some("string:plain string")
-    );
-    assert_eq!(
-        lines.get("o").copied(),
-        Some("string:[object Object]")
-    );
+    assert_eq!(lines.get("s").copied(), Some("string:plain string"));
+    assert_eq!(lines.get("o").copied(), Some("string:[object Object]"));
     assert_eq!(lines.get("a").copied(), Some("error:typed"));
 }
 

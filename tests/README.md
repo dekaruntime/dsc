@@ -199,3 +199,15 @@ tests and formatter roundtrips protect generated output. See
 [migrations/summon-no-colon-188/README.md](migrations/summon-no-colon-188/README.md)
 for the eight package patches, exact files/lines, pinned corpus patch, tour syntax
 unblock, and full validation summaries. Ava coordinates the external releases.
+
+## Infer is not universally assignable (dsc#115)
+
+`Type::Infer` is no longer a silent pass. Using a value the checker could not
+type as a concrete type is a diagnostic; `Type::Var` still unifies. Bare
+`unsafe { }` remains legal. The one-line fix is `unsafe<T> { ... }`.
+
+Four tour lessons and six Hats fixtures were latent uses of an Infer Ok
+payload as `string`/`number`. The owner patches, pin bases, and validation
+summaries live in
+[migrations/infer-assignability-115/README.md](migrations/infer-assignability-115/README.md).
+Do not merge this gate against the old pins.

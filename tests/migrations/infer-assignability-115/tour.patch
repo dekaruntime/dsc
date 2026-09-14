@@ -1,0 +1,50 @@
+--- a/json-parse-and-result.ds
++++ b/json-parse-and-result.ds
+@@ -1,6 +1,7 @@
+ import { echo } from "io"
+-const parsed = unsafe { JSON.parse("{\"answer\":42}") }
++struct Parsed { answer: number }
++const parsed = unsafe<Parsed> { JSON.parse("{\"answer\":42}") }
+ echo(match (parsed) {
+-  Ok(v) => v.answer,
++  Ok(v) => string(v.answer),
+   Err(_) => "parse failed",
+ })
+--- a/unsafe-blocks.ds
++++ b/unsafe-blocks.ds
+@@ -1,6 +1,6 @@
+ import { echo } from "io"
+-const result = unsafe { 21 + 21 }
++const result = unsafe<number> { 21 + 21 }
+ echo(match (result) {
+-  Ok(v) => v,
+-  Err(_) => 0,
++  Ok(v) => string(v),
++  Err(_) => "0",
+ })
+--- a/deka-globals.ds
++++ b/deka-globals.ds
+@@ -1,5 +1,5 @@
+ import { echo } from "io"
+-const safe: Result<number, string> = unsafe { 42 }
++const safe: Result<number, JsError> = unsafe<number> { 42 }
+ match (safe) {
+   Ok(v) => echo(string(v)),
+   Err(e) => echo("failed"),
+--- a/islands.dsx
++++ b/islands.dsx
+@@ -8,11 +8,12 @@
+   return <button>{props.start}</button>
+ }
+ 
++struct Rendered { html: string }
+ const element = <Counter client={"load"} start={5} />
+-const result = unsafe { deka.ui.renderToString(element) }
++const result = unsafe<Rendered> { deka.ui.renderToString(element) }
+ match (result) {
+   Ok(r) => echo(r.html),
+-  Err(e) => echo(e),
++  Err(e) => echo(e.message),
+ }
+ 
+ export fn Page() ReactNode {

@@ -63,6 +63,14 @@ pub(super) fn with_union_narrowing_hint<'a>(
 
     if matches!(actual, Type::Union { .. }) && !matches!(expected, Type::Union { .. }) {
         format!("{message}; narrow it with a match before use")
+    } else if matches!(actual, Type::Infer) {
+        format!(
+            "{message}; the checker could not determine this value's type. Annotate the source (`unsafe<T> {{ ... }}` for a JS block, or an explicit type on the binding) before using it here"
+        )
+    } else if matches!(expected, Type::Infer) {
+        format!(
+            "{message}; the checker could not determine the expected type. Add an explicit type annotation"
+        )
     } else {
         message
     }
@@ -2372,9 +2380,18 @@ impl<'a> Checker<'a> {
 
     /// Match and conditional arms share the first returning arm's type.
     /// A diverging arm contributes no type, regardless of its position.
+    ///
+    /// `Infer` is a gap, not a type: unifying it with a known arm keeps the
+    /// gap rather than pretending the known arm covers the unknown one, and
+    /// rather than rejecting a mixed known/unknown match. Using the result
+    /// as a concrete type is the diagnostic (dsc#115).
     fn unify_arm_types(&mut self, first: &Type<'a>, next: &Type<'a>) -> Option<Type<'a>> {
         if matches!(first, Type::Never) {
             Some(next.clone())
+        } else if matches!(next, Type::Never) {
+            Some(first.clone())
+        } else if matches!(first, Type::Infer) || matches!(next, Type::Infer) {
+            Some(Type::Infer)
         } else if self.is_assignable(first, next) {
             Some(first.clone())
         } else {
@@ -2442,15 +2459,20 @@ impl<'a> Checker<'a> {
         }
         // `Var` is an unconstrained type variable: a construct that never named
         // this type, rather than one the checker failed to resolve. It carries
-        // no claim, so unifying it with anything is sound and must stay true
-        // even after `Infer` is tightened (deka#468).
+        // no claim, so unifying it with anything is sound (deka#468).
         if matches!(expected, Type::Var) || matches!(actual, Type::Var) {
             return true;
         }
-        // `Infer` is the unknown/externally-provided type. It is compatible with
-        // any type until a concrete type is available. This is the deka#252
-        // hole and is expected to be removed; `Var` above is not.
-        if matches!(expected, Type::Infer) || matches!(actual, Type::Infer) {
+        // `Infer` is "the checker could not work this out" (dsc#115). An Infer
+        // *source* is not a value of any concrete type — using it is a
+        // diagnostic. An Infer *target* still accepts a concrete source so
+        // return-type inference can proceed; the result stays Infer until a
+        // later use against a known type. Infer-to-Infer holds so a gap does
+        // not cascade into a spurious mismatch with itself.
+        if matches!(actual, Type::Infer) {
+            return matches!(expected, Type::Infer);
+        }
+        if matches!(expected, Type::Infer) {
             return true;
         }
         // rfd#56 phase 1: one unbounded type parameter is assignable to
@@ -3727,6 +3749,51 @@ mod tests {
     #[test]
     fn recursive_function_passes() {
         assert!(typeck("fn forever(n: number) number { return forever(n); }").is_empty());
+    }
+
+    #[test]
+    fn unannotated_recursive_function_reuses_inferred_return() {
+        // dsc#115: after Infer stops being universally assignable, recursion
+        // must see the inferred return type rather than Infer, or `n + fact(n)`
+        // would be an unknown source.
+        assert!(typeck(
+            "fn fact(n: number) {\n\
+             \x20 if (n <= 1) { return 1 }\n\
+             \x20 return n * fact(n - 1)\n\
+             }\n\
+             const x: number = fact(5);"
+        )
+        .is_empty());
+        assert!(typeck(
+            "fn sum(n: number) {\n\
+             \x20 if (n <= 0) { return 0 }\n\
+             \x20 return n + sum(n - 1)\n\
+             }\n\
+             const x: number = sum(3);"
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn unannotated_module_const_is_visible_to_function_bodies() {
+        // deka#600 checks function bodies before module initializers. The
+        // seed for an unannotated const used to stay Infer, which dsc#115
+        // would reject at `return n`. The initializer is knowable — refine
+        // the seed after signature inference.
+        assert!(typeck(
+            "fn pair() [number, string] { return [7, \"seven\"] }\n\
+             const [n, label] = pair();\n\
+             fn captured() number { return n }\n\
+             const x: number = captured();\n\
+             const s: string = label;"
+        )
+        .is_empty());
+        assert!(typeck(
+            "const n = 7;\n\
+             fn captured() number { return n }\n\
+             const x: number = captured();"
+        )
+        .is_empty());
     }
 
     #[test]
@@ -5400,9 +5467,87 @@ mod tests {
     #[test]
     fn unsafe_block_match_result_passes() {
         // Intentional unsafe fixture (RFD 21): bare unsafe Result typing.
+        // The match itself is still allowed — the gap stays Infer. Using that
+        // value as a concrete type is the diagnostic (dsc#115).
         let errors =
             typeck("const r = match (unsafe { console.log(1) }) { Ok(v) => v, Err(e) => e };");
         assert!(errors.is_empty(), "{:?}", errors);
+    }
+
+    #[test]
+    fn infer_source_is_not_assignable_to_a_concrete_type() {
+        // dsc#115: a value the checker could not type is not silently a
+        // `string` (or any other concrete type).
+        let errors = typeck(
+            "const x: string = match (unsafe { 1 }) { Ok(v) => v, Err(e) => \"e\" };",
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("<infer>"),
+            "{}",
+            errors[0].message
+        );
+        assert!(
+            errors[0].message.contains("could not determine this value's type"),
+            "{}",
+            errors[0].message
+        );
+        assert!(
+            errors[0].message.contains("unsafe<T>"),
+            "{}",
+            errors[0].message
+        );
+
+        let errors = typeck(
+            "fn takes(s: string) {}\n\
+             takes(match (unsafe { 1 }) { Ok(v) => v, Err(e) => \"e\" });",
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("could not determine this value's type"),
+            "{}",
+            errors[0].message
+        );
+
+        let errors = typeck(
+            "fn f() string { return match (unsafe { 1 }) { Ok(v) => v, Err(e) => \"e\" }; }",
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("could not determine this value's type"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn annotated_unsafe_narrows_and_is_assignable() {
+        // The one-line fix the Infer diagnostic teaches: name the success type.
+        assert!(typeck(
+            "const x: number = match (unsafe<number> { 1 }) { Ok(v) => v, Err(e) => 0 };"
+        )
+        .is_empty());
+        assert!(typeck(
+            "fn f() number { return match (unsafe<number> { 1 }) { Ok(v) => v, Err(e) => 0 }; }"
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn var_still_unifies_with_a_concrete_type() {
+        // dsc#115 / deka#468: unconstrained slots are `Var`, not `Infer`.
+        // `Ok("y")` is `Result<string, Var>`; the unused error side must not
+        // reject a `string` success type. `None` and `[]` are the same rule.
+        assert!(typeck(
+            "const x: Result<string, string> = Ok(\"y\");"
+        )
+        .is_empty());
+        assert!(typeck("const o: Option<string> = None;").is_empty());
+        assert!(typeck(
+            "const xs = [];\n\
+             if (xs.has(0)) { const s: string = xs[0]; }"
+        )
+        .is_empty());
     }
 
     #[test]

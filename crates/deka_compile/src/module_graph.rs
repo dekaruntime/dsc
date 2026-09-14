@@ -2528,7 +2528,9 @@ mod tests {
         // dsc#59: a helper reachable only from inside an `unsafe` arrow body
         // in a build body was dropped from the dev plan entry, so executing
         // the entry failed with an unknown-identifier error even though the
-        // source typechecks. The dev-entry liveness scans raw `unsafe` text
+        // source typechecks.
+        // dsc#115: name the arrow's success type and return `Ok(...)` from
+        // the build body — Infer is no longer assignable to Result<T, string>. The dev-entry liveness scans raw `unsafe` text
         // for identifier tokens, matching what the runtime shaker has done
         // since deka#437. The unrelated helper pins the over-approximation
         // at the import-retention sites: it must stay out of the entry.
@@ -2541,8 +2543,8 @@ mod tests {
              fn local_helper() string { return \"local\" }\n\
              fn unrelated_helper() string { return \"unrelated\" }\n\
              const greeting: string = build {\n\
-             \x20 const run = unsafe { () => greet() + \" \" + local_helper() }\n\
-             \x20 return match (run) { Ok(f) => f(), Err(_) => \"err\" }\n\
+             \x20 const run = unsafe<fn() string> { () => greet() + \" \" + local_helper() }\n\
+             \x20 return match (run) { Ok(f) => Ok(f()), Err(_) => Ok(\"err\") }\n\
              }"
                 .to_string(),
         );

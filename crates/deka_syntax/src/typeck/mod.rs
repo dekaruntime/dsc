@@ -4036,6 +4036,43 @@ mod tests {
         assert!(typeck("enum Color { Red, Green, Blue } const c: Color = Color.Red; const x: number = match c { Red => 1, Green => 2, Blue => 3 };").is_empty());
     }
 
+    /// dsc#225: a constructor case is not exhaustive when its payload is a
+    /// nested literal. `Ok(1)` does not cover `Ok(2)`; `Circle(1)` does not
+    /// cover `Circle(2)`. A catch-all payload on the same constructor does.
+    #[test]
+    fn nested_literal_constructor_payload_is_non_exhaustive() {
+        let errors = typeck(
+            "fn f(r: Result<number, string>) number { return match r { Ok(1) => 100, Err(e) => 0 }; }",
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("non-exhaustive") && errors[0].message.contains("Ok"),
+            "{}",
+            errors[0].message
+        );
+
+        let errors = typeck(
+            "enum Shape { Circle(number), Empty }\n\
+             fn f(s: Shape) number { return match s { Circle(1) => 100, Empty => 0 }; }",
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("non-exhaustive") && errors[0].message.contains("Circle"),
+            "{}",
+            errors[0].message
+        );
+
+        assert!(typeck(
+            "fn f(r: Result<number, string>) number { return match r { Ok(1) => 100, Ok(v) => v, Err(e) => 0 }; }"
+        )
+        .is_empty());
+        assert!(typeck(
+            "enum Shape { Circle(number), Empty }\n\
+             fn f(s: Shape) number { return match s { Circle(1) => 100, Circle(n) => n, Empty => 0 }; }"
+        )
+        .is_empty());
+    }
+
     #[test]
     fn receiver_method_passes() {
         assert!(typeck(

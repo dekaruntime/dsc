@@ -684,14 +684,17 @@ impl DscSimplify {
             return None;
         }
         let fallback = dsc_assign_rhs(&err_block.stmts[0], &result_name)?;
-        // } else { throw new Error("non-exhaustive match"); }
-        let else_stmt = err_if.alt.as_deref()?;
-        let else_stmt = match else_stmt {
-            Stmt::Block(block) if block.stmts.len() == 1 => &block.stmts[0],
-            other => other,
-        };
-        if !dsc_non_exhaustive_throw(else_stmt) {
-            return None;
+        // } else { throw new Error("non-exhaustive match"); } — optional.
+        // Exhaustiveness is a typecheck property (dsc#121); newer emit omits
+        // the unreachable throw when the checker already proved the cases.
+        if let Some(else_stmt) = err_if.alt.as_deref() {
+            let else_stmt = match else_stmt {
+                Stmt::Block(block) if block.stmts.len() == 1 => &block.stmts[0],
+                other => other,
+            };
+            if !dsc_non_exhaustive_throw(else_stmt) {
+                return None;
+            }
         }
         // The fallback must not observe the scrutinee or the Ok binding.
         let observed = [scrut_name.clone(), ok_binding.clone()];
@@ -730,7 +733,9 @@ impl DscSimplify {
             return None;
         }
         let BlockStmtOrExpr::BlockStmt(body) = &*arrow.body else { return None };
-        if body.stmts.len() != 3 {
+        // Three statements when the unreachable exhaustiveness throw is
+        // present; two when newer emit omitted it (dsc#121).
+        if body.stmts.len() != 2 && body.stmts.len() != 3 {
             return None;
         }
         // if (scrut.__case === "Ok") { const b = scrut.value; return b; }
@@ -764,8 +769,8 @@ impl DscSimplify {
         }
         let Stmt::Return(err_ret) = &err_block.stmts[0] else { return None };
         let fallback = err_ret.arg.as_deref()?;
-        // throw new Error("non-exhaustive match");
-        if !dsc_non_exhaustive_throw(&body.stmts[2]) {
+        // throw new Error("non-exhaustive match"); — optional, see above.
+        if body.stmts.len() == 3 && !dsc_non_exhaustive_throw(&body.stmts[2]) {
             return None;
         }
         let extracted = dsc_unsafe_scrutinee(&call.args[0].expr)?;
@@ -938,6 +943,50 @@ return __deka_match_result_10;
             out.contains("let ") && out.contains("try"),
             "rewrite must declare the result binding (strict-mode chunks):\n{out}"
         );
+    }
+
+    #[test]
+    fn rewrites_match_state_machine_without_exhaustiveness_throw() {
+        // dsc#121 omits the unreachable throw when the checker proved the
+        // cases. The rewrite must still fire on that shape.
+        let source = r##"
+function someValue(children) {
+let __deka_match_result_10;
+const __deka_match_scrutinee_10 = ((function() { try { return ((value) => ({ __enum: "Result", __case: "Ok", name: "Ok", value }))((function() { return (
+children != null && children.__case === "Some" ? children.value : children
+); })()); } catch (err) { return ((error) => ({ __enum: "Result", __case: "Err", name: "Err", error }))(err instanceof Error ? err : new Error(String(err))); } })());
+if (__deka_match_scrutinee_10.__case === "Ok") {
+ const v = __deka_match_scrutinee_10.value;
+ __deka_match_result_10 = v;
+}
+else if (__deka_match_scrutinee_10.__case === "Err") {
+ __deka_match_result_10 = someValue(children);
+}
+return __deka_match_result_10;
+}
+"##;
+        let out = optimize(source);
+        let erased = source
+            .replace(
+                "__enum: \"Result\", __case: \"Ok\", name: \"Ok\", value",
+                "ok: true, value",
+            )
+            .replace(
+                "__enum: \"Result\", __case: \"Err\", name: \"Err\", error",
+                "ok: false, error",
+            )
+            .replace(".__case === \"Ok\"", ".ok === true")
+            .replace(".__case === \"Err\"", ".ok === false");
+        assert_eq!(
+            optimize(&erased),
+            out,
+            "boolean Result discriminants must retain the bundled optimization"
+        );
+        assert!(
+            !out.contains("__deka_match_scrutinee"),
+            "match state machine must go:\n{out}"
+        );
+        assert!(out.contains("try"), "rewrite must produce try/catch:\n{out}");
     }
 
     #[test]

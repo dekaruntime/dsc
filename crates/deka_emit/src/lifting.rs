@@ -441,8 +441,10 @@ impl<'a> Emitter<'a> {
             self.emit_handling_arm(arm, result, None)?;
             self.out.push_str("}\n");
         }
-        self.out
-            .push_str("else { throw new Error(\"non-exhaustive match\"); }\n");
+        if match_needs_runtime_exhaustiveness_guard(arms) {
+            self.out
+                .push_str("else { throw new Error(\"non-exhaustive match\"); }\n");
+        }
         Ok(true)
     }
 }
@@ -578,6 +580,45 @@ fn payload_only_arms(arms: &[deka_syntax::MatchArm<'_>]) -> bool {
             } | Pattern::Wildcard { .. }
         )
     })
+}
+
+/// The checker enumerates enum / Option / Result / Exception / union
+/// constructors. It does **not** enumerate top-level literals or tuples
+/// (`collect_missing` leaves those alone), so a runtime fallback is still
+/// load-bearing there. Nested payload literals (`Ok(1)`, `Circle(1)`) are
+/// refutable too: recurse into the constructor payload so the throw is
+/// kept until the checker proves the inner pattern (dsc#225).
+fn match_needs_runtime_exhaustiveness_guard(arms: &[deka_syntax::MatchArm<'_>]) -> bool {
+    arms.iter()
+        .any(|arm| pattern_needs_runtime_exhaustiveness_guard(&arm.pattern))
+}
+
+fn pattern_needs_runtime_exhaustiveness_guard(pattern: &Pattern<'_>) -> bool {
+    match pattern {
+        Pattern::Literal { .. } | Pattern::Tuple { .. } => true,
+        Pattern::Constructor { payload, .. } => {
+            payload.is_some_and(pattern_needs_runtime_exhaustiveness_guard)
+        }
+        Pattern::Or { alternatives, .. } => alternatives
+            .iter()
+            .any(pattern_needs_runtime_exhaustiveness_guard),
+        Pattern::Struct { fields, .. } => fields.iter().any(|field| {
+            !pattern_is_irrefutable_for_emit(&field.pattern)
+                || pattern_needs_runtime_exhaustiveness_guard(&field.pattern)
+        }),
+        _ => false,
+    }
+}
+
+fn pattern_is_irrefutable_for_emit(pattern: &Pattern<'_>) -> bool {
+    match pattern {
+        Pattern::Wildcard { .. } | Pattern::Identifier { .. } => true,
+        Pattern::Struct { fields, .. } => fields
+            .iter()
+            .all(|field| pattern_is_irrefutable_for_emit(&field.pattern)),
+        Pattern::Or { alternatives, .. } => alternatives.iter().any(pattern_is_irrefutable_for_emit),
+        _ => false,
+    }
 }
 
 fn unsafe_error_payload(bare: bool) -> &'static str {

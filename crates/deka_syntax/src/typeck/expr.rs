@@ -2518,7 +2518,9 @@ impl<'a> Checker<'a> {
 
     /// Walk type and coverage together. A constructor pattern covers its case
     /// only as far as its payload pattern covers the payload type, so
-    /// `Ok(Some(v))` leaves `Ok(None)` uncovered.
+    /// `Ok(Some(v))` leaves `Ok(None)` uncovered. A nested literal (or a
+    /// tuple/struct containing one) is the same gap one level down:
+    /// `Ok(1)` does not cover `Ok(2)` (dsc#225).
     fn collect_missing(
         &mut self,
         ty: &Type<'a>,
@@ -2553,8 +2555,14 @@ impl<'a> Checker<'a> {
             return;
         }
         let Some((label, cases)) = self.enum_shape(ty) else {
-            // Not an enum: nothing to enumerate. A refutable pattern here (a
-            // literal) is left alone rather than guessed at.
+            // Not an enum. Top-level literal/tuple scrutinees stay
+            // unenumerated — the runtime throw is still load-bearing there.
+            // Nested under a constructor, Coverage::Cases means the payload
+            // pattern is refutable (a literal, or a tuple/struct containing
+            // one) and the match is not exhaustive (dsc#225).
+            if !path.is_empty() && !ty.is_error() {
+                out.push(format!("{path}({ty})"));
+            }
             return;
         };
         for (case_name, payload_ty) in cases {

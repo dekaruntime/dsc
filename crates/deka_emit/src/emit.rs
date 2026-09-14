@@ -1,7 +1,9 @@
 //! Stateful JavaScript emitter for DekaScript compiler v2.
 //!
-//! Emits real runtime factories for structs (`__deka_struct`) and frozen case
-//! objects for enums.  Receiver methods are registered on the struct factory
+//! Emits real runtime factories for structs (`__deka_struct`) and enum
+//! namespaces. Payload-bearing cases return plain objects (the checker
+//! already rejects mutation — dsc#121). Payload-free cases stay interned
+//! and frozen, like `.getType()` descriptors. Receiver methods are registered on the struct factory
 //! prototype so `p.greet()` works, including methods promoted from embedded
 //! structs via the `__deka_struct` helper's embed map.
 
@@ -2973,7 +2975,7 @@ impl<'a> Emitter<'a> {
                             self.emit_handling_arm(arm, Some(name), Some(&temp))?;
                             self.out.push_str("}\n");
                         }
-                        if !arms.is_empty() {
+                        if !arms.is_empty() && match_needs_runtime_exhaustiveness_guard(arms) {
                             self.out
                                 .push_str("else { throw new Error(\"non-exhaustive match\"); }\n");
                         }
@@ -3380,16 +3382,20 @@ impl<'a> Emitter<'a> {
             write_indent(&mut self.out, 2);
             self.out.push_str(&case.name);
             if let Some(payload_ty) = &case.payload {
-                self.out.push_str("(value) { return Object.freeze({ ");
+                // Ephemeral: created, matched, discarded. The checker rejects
+                // mutation, so freezing here is the 2.14× tax in dsc#121.
+                self.out.push_str("(value) { return { ");
                 self.out.push_str("__enum: ");
                 self.out.push_str(&json_string(name));
                 self.out.push_str(", __case: ");
                 self.out.push_str(&json_string(&case.name));
                 self.out.push_str(", name: ");
                 self.out.push_str(&json_string(&case.name));
-                self.out.push_str(", value }); }");
+                self.out.push_str(", value }; }");
                 let _ = payload_ty; // type-only, no runtime effect
             } else {
+                // Interned: one object per case, shared for the life of the
+                // module. Freeze stays, matching interned descriptors.
                 self.out.push_str(": Object.freeze({ ");
                 self.out.push_str("__enum: ");
                 self.out.push_str(&json_string(name));
@@ -4934,6 +4940,7 @@ impl<'a> Emitter<'a> {
             .last()
             .map(|arm| self.match_condition(&arm.pattern, &scrutinee_var) != "true")
             .unwrap_or(true)
+            && match_needs_runtime_exhaustiveness_guard(arms)
         {
             write_indent(&mut self.out, 0);
             self.out
@@ -4994,8 +5001,10 @@ impl<'a> Emitter<'a> {
             self.emit_match_arm(arm, scrutinee_var, is_last)?;
         }
 
-        self.out
-            .push_str("  throw new Error(\"non-exhaustive match\");\n");
+        if match_needs_runtime_exhaustiveness_guard(arms) {
+            self.out
+                .push_str("  throw new Error(\"non-exhaustive match\");\n");
+        }
         self.out.push_str("})(");
         self.emit_expr(scrutinee)?;
         self.out.push_str(")");

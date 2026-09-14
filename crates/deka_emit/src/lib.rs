@@ -1,9 +1,10 @@
 //! DekaScript JavaScript emitter (Compiler v2).
 //!
 //! Emits reasonably formatted JavaScript from the v2 AST, erasing type
-//! annotations. Structs become `deka.Struct` factories, enums become frozen
-//! case objects, and receiver methods are registered on the factory prototype
-//! so instance method calls work without a separate lowering pass.
+//! annotations. Structs become `deka.Struct` factories, enum namespaces stay
+//! frozen, payload-bearing cases return unfrozen objects (dsc#121), and
+//! receiver methods are registered on the factory prototype so instance
+//! method calls work without a separate lowering pass.
 
 mod emit;
 pub mod prelude;
@@ -932,6 +933,139 @@ try { wildcard(); throw new Error("lost wildcard"); } catch (e) { assert(e === "
     fn emit_user_defined_enum_payload_constructor() {
         let out = parse_and_emit("enum Shape { Circle(number) } const s = Shape.Circle(5);");
         assert!(out.contains("Shape.Circle(5)"), "got: {}", out);
+    }
+
+    /// dsc#121: payload-bearing cases are ephemeral and compile-time-protected,
+    /// so they must not be frozen. Payload-free cases are interned (one object
+    /// per case, shared) and stay frozen, as do the namespace tables.
+    #[test]
+    fn emit_user_enum_payload_values_are_not_frozen() {
+        let out = parse_check_and_emit(
+            "enum Shape { Circle(number), Empty }\n\
+             const s = Shape.Circle(5);\n\
+             const e = Shape.Empty;\n\
+             const label = s.name;\n\
+             fn area(shape: Shape) number {\n\
+               return match shape { Circle(n) => n, Empty => 0 };\n\
+             }",
+        );
+        assert!(
+            out.contains(
+                "Circle(value) { return { __enum: \"Shape\", __case: \"Circle\", name: \"Circle\", value }; }"
+            ),
+            "payload cases must return a plain object: {out}"
+        );
+        assert!(
+            !out.contains("return Object.freeze({ __enum: \"Shape\""),
+            "payload cases must not be frozen: {out}"
+        );
+        assert!(
+            out.contains(
+                "Empty: Object.freeze({ __enum: \"Shape\", __case: \"Empty\", name: \"Empty\" })"
+            ),
+            "interned payload-free cases stay frozen: {out}"
+        );
+        assert!(
+            out.contains("const Shape = Object.freeze({"),
+            "enum namespace stays frozen: {out}"
+        );
+        let js = format!(
+            "{out}\n{}",
+            r#"
+import assert from 'node:assert/strict';
+assert.equal(Object.isFrozen(Shape), true);
+assert.equal(Object.isFrozen(Shape.Empty), true);
+assert.equal(Object.isFrozen(s), false);
+assert.equal(s.__enum, 'Shape');
+assert.equal(s.__case, 'Circle');
+assert.equal(s.name, 'Circle');
+assert.equal(s.value, 5);
+assert.equal(label, 'Circle');
+assert.equal(area(s), 5);
+assert.equal(area(Shape.Empty), 0);
+"#
+        );
+        let result = std::process::Command::new("node")
+            .args(["--input-type=module", "-e", &js])
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}\n{out}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+
+    /// dsc#121: statement, nested-expression, and call-argument matches all
+    /// lower to statements. The IIFE form is the leftover expression fallback.
+    #[test]
+    fn emit_nested_and_expression_position_match_without_iife() {
+        let out = parse_check_and_emit(
+            "fn add(a: number, b: number) number { return a + b; }\n\
+             enum Shape { Circle(number), Empty }\n\
+             fn nested(s: Shape) number { return 1 + (match s { Circle(n) => n, Empty => 0 }); }\n\
+             fn arg(s: Shape) number { return add(match s { Circle(n) => n, Empty => 0 }, 1); }\n\
+             fn stmt(s: Shape) number { const x = match s { Circle(n) => n, Empty => 0 }; return x; }",
+        );
+        assert!(
+            !out.contains("((__deka_scrutinee) =>"),
+            "expression-position match still has an IIFE: {out}"
+        );
+        assert!(
+            out.contains("const __deka_match_scrutinee_"),
+            "expected statement-form match: {out}"
+        );
+        assert!(
+            !out.contains("throw new Error(\"non-exhaustive match\")"),
+            "checker-proven enum match must not throw: {out}"
+        );
+        let js = format!(
+            "{out}\n{}",
+            r#"
+import assert from 'node:assert/strict';
+assert.equal(nested(Shape.Circle(4)), 5);
+assert.equal(arg(Shape.Circle(4)), 5);
+assert.equal(stmt(Shape.Empty), 0);
+"#
+        );
+        let result = std::process::Command::new("node")
+            .args(["--input-type=module", "-e", &js])
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}\n{out}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+
+    /// dsc#121: Result/enum exhaustiveness is a typecheck property. The
+    /// runtime throw stays only where the checker does not enumerate the
+    /// scrutinee (literals, tuples).
+    #[test]
+    fn emit_proven_match_omits_exhaustiveness_throw() {
+        let enum_match = parse_check_and_emit(
+            "enum Color { Red, Green, Blue }\n\
+             fn f(c: Color) number { return match c { Red => 1, Green => 2, Blue => 3 }; }",
+        );
+        assert!(
+            !enum_match.contains("throw new Error(\"non-exhaustive match\")"),
+            "proven enum match must not throw: {enum_match}"
+        );
+        let result_match = parse_check_and_emit(
+            "fn f(r: Result<number, string>) number { return match r { Ok(v) => v, Err(e) => 0 }; }",
+        );
+        assert!(
+            !result_match.contains("throw new Error(\"non-exhaustive match\")"),
+            "proven Result match must not throw: {result_match}"
+        );
+        let literal_match = parse_check_and_emit(
+            "fn f(b: boolean) number { return match b { true => 1, false => 0 }; }",
+        );
+        assert!(
+            literal_match.contains("throw new Error(\"non-exhaustive match\")"),
+            "literal match is not enumerated by the checker, so the throw stays: {literal_match}"
+        );
     }
 
     #[test]

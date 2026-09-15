@@ -2943,4 +2943,48 @@ mod tests {
         }
     }
 
+    // dsc#244: a newline before the closing `)` of a parenthesized
+    // expression must not be a parse error. `parse_expression` already
+    // skips *leading* newlines (see `parse_expr`'s own `skip_newlines`
+    // call), but the `TokenKind::LParen` prefix arm in `parse_prefix`
+    // (crates/deka_syntax/src/parse/expr.rs) went straight from the
+    // inner expression to `expect(RParen)` with no trailing
+    // `skip_newlines()` — unlike call-argument lists and array literals,
+    // which both skip newlines before their closing delimiter. That
+    // asymmetry is exactly why multi-line parameter lists parsed fine
+    // while multi-line parenthesized expressions did not.
+    #[test]
+    fn multiline_paren_expression_parses() {
+        for source in [
+            // Literal.
+            "return (\n  42\n)",
+            // Arithmetic.
+            "const x = (\n  1 + 2\n)",
+            // JSX (the shape reported in the issue).
+            "export fn Layout(props: LayoutProps) ReactNode {\n  return (\n    <div>\n      <main> {props.children} </main>\n    </div>\n  )\n}",
+        ] {
+            let arena = Bump::new();
+            let result = parse(source, &arena);
+            assert!(result.errors.is_empty(), "{source}: {:?}", result.errors);
+            assert!(result.program.is_some(), "{source}");
+        }
+    }
+
+    #[test]
+    fn nested_multiline_paren_expressions_parse() {
+        for source in [
+            // A parenthesized expression nested inside another.
+            "const x = (\n  (\n    1 + 2\n  )\n)",
+            // A multi-line paren expression as a call argument.
+            "const x = f(\n  (\n    1 + 2\n  )\n)",
+            // Multi-line paren mixed with a trailing call.
+            "const x = (\n  a + b\n).toString()",
+        ] {
+            let arena = Bump::new();
+            let result = parse(source, &arena);
+            assert!(result.errors.is_empty(), "{source}: {:?}", result.errors);
+            assert!(result.program.is_some(), "{source}");
+        }
+    }
+
 }

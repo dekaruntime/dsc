@@ -359,7 +359,13 @@ impl<'a> Parser<'a> {
             }
             TokenKind::LParen => {
                 self.advance();
+                // Newlines are insignificant inside a parenthesized expression:
+                // a multi-line `(\n ... \n)` must parse the same as the
+                // single-line form. Mirrors the call-args and array-literal
+                // handling above.
+                self.skip_newlines();
                 let expr = self.parse_expression()?;
+                self.skip_newlines();
                 self.expect(TokenKind::RParen)?;
                 Some(Expr::Paren {
                     expr: alloc(self.arena, expr),

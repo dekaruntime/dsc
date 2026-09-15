@@ -10,7 +10,7 @@ use swc_atoms::Atom;
 use swc_common::{DUMMY_SP, SyntaxContext};
 use swc_ecma_ast::op;
 use swc_ecma_ast::{
-    AssignExpr, AssignTarget, BindingIdent, BlockStmt, BlockStmtOrExpr, Callee, CallExpr,
+    AssignExpr, AssignTarget, ArrowFunctionBody, BindingIdent, BlockStmt, Callee, CallExpr,
     CatchClause, Decl, EsVersion, Expr, ExprStmt, Ident, Lit, MemberProp, Module, ModuleItem, Pat, Pass,
     Program, Prop, PropName, PropOrSpread, SimpleAssignTarget, Stmt, TryStmt, VarDecl, VarDeclKind,
     VarDeclarator,
@@ -292,7 +292,7 @@ fn strip_parens(mut expr: &Expr) -> &Expr {
 
 fn dsc_result_ctor(expr: &Expr, case: DscResultCase) -> bool {
     let Expr::Arrow(arrow) = strip_parens(expr) else { return false };
-    let BlockStmtOrExpr::Expr(body) = &*arrow.body else { return false };
+    let ArrowFunctionBody::Expr(body) = &*arrow.body else { return false };
     let Expr::Object(obj) = strip_parens(body) else { return false };
     let mut saw_enum = false;
     let mut saw_case = false;
@@ -732,7 +732,7 @@ impl DscSimplify {
         if !scrut_name.starts_with("__deka_scrutinee") {
             return None;
         }
-        let BlockStmtOrExpr::BlockStmt(body) = &*arrow.body else { return None };
+        let ArrowFunctionBody::FunctionBody(body) = &*arrow.body else { return None };
         // Three statements when the unreachable exhaustiveness throw is
         // present; two when newer emit omitted it (dsc#121).
         if body.stmts.len() != 2 && body.stmts.len() != 3 {

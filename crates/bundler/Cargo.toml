@@ -14,17 +14,17 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sha1 = "0.11"
 sha2 = "0.10"
-swc_bundler = "39.0.0"
-swc_common = "18.0.1"
-swc_ecma_ast = "19.0.0"
-swc_ecma_codegen = "21.0.0"
-swc_ecma_loader = "18.0.0"
-swc_ecma_parser = { version = "31.0.0", features = ["typescript"] }
-swc_ecma_transforms_base = "34.0.0"
-swc_ecma_transforms_typescript = "37.0.0"
-swc_ecma_minifier = "42.0.0"
-swc_atoms = "9.0.0"
-swc_ecma_visit = "19.0.0"
+swc_bundler = "56.0.1"
+swc_common = "26.0.0"
+swc_ecma_ast = "29.0.1"
+swc_ecma_codegen = "32.0.1"
+swc_ecma_loader = "27.0.0"
+swc_ecma_parser = { version = "45.1.3", features = ["typescript"] }
+swc_ecma_transforms_base = "49.0.1"
+swc_ecma_transforms_typescript = "55.0.3"
+swc_ecma_minifier = "61.0.7"
+swc_atoms = "10.0.0"
+swc_ecma_visit = "29.0.0"
 stdio = { path = "../stdio" }
 deka_project = { path = "../deka_project" }
 deka_ui = { path = "../deka_ui" }

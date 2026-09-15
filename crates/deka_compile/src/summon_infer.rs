@@ -362,8 +362,8 @@ fn infer_return(callable: Callable<'_>, params: &[ParamShape]) -> InferredType {
             }
         }
         Callable::Arrow(a) => match &*a.body {
-            js::BlockStmtOrExpr::BlockStmt(body) => body.visit_with(&mut scan),
-            js::BlockStmtOrExpr::Expr(expr) => {
+            js::ArrowFunctionBody::FunctionBody(body) => body.visit_with(&mut scan),
+            js::ArrowFunctionBody::Expr(expr) => {
                 scan.values.push(infer_expr(expr, params));
                 scan.saw_return = true;
             }
@@ -564,8 +564,8 @@ fn walk_callable(callable: Callable<'_>, scan: &mut ThrowScan) {
                 param.visit_with(scan);
             }
             match &*a.body {
-                js::BlockStmtOrExpr::BlockStmt(body) => body.visit_with(scan),
-                js::BlockStmtOrExpr::Expr(expr) => expr.visit_with(scan),
+                js::ArrowFunctionBody::FunctionBody(body) => body.visit_with(scan),
+                js::ArrowFunctionBody::Expr(expr) => expr.visit_with(scan),
             }
         }
     }
@@ -622,8 +622,8 @@ impl Visit for ThrowScan {
                     }
                 }
                 js::Expr::Arrow(a) => match &*a.body {
-                    js::BlockStmtOrExpr::BlockStmt(body) => body.visit_with(self),
-                    js::BlockStmtOrExpr::Expr(expr) => expr.visit_with(self),
+                    js::ArrowFunctionBody::FunctionBody(body) => body.visit_with(self),
+                    js::ArrowFunctionBody::Expr(expr) => expr.visit_with(self),
                 },
                 _ => self.unseen = true,
             },

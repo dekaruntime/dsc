@@ -428,13 +428,15 @@ fn useeffect_theme_unsafe_member_call_is_classified() {
            if (theme == \"dark\") {\n\
              label = \"Light\"\n\
            }\n\
-           return <button type=\"button\" id=\"theme-toggle\" class=\"theme-toggle\" data-theme={theme} onClick={fn() void {\n\
-               if (theme == \"dark\") {\n\
-                 setTheme(\"light\")\n\
-               } else {\n\
-                 setTheme(\"dark\")\n\
-               }\n\
-             }}>{label}</button>\n\
+           return (\n\
+             <button type=\"button\" id=\"theme-toggle\" class=\"theme-toggle\" data-theme={theme} onClick={fn() void {\n\
+                 if (theme == \"dark\") {\n\
+                   setTheme(\"light\")\n\
+                 } else {\n\
+                   setTheme(\"dark\")\n\
+                 }\n\
+               }}>{label}</button>\n\
+           )\n\
          }",
     );
 }
@@ -712,10 +714,12 @@ fn no_default_provider_does_not_cover_sibling() {
            return <p>{shop}</p>\n\
          }\n\
          fn App() ReactNode {\n\
-           return <>\n\
-             <ShopContext.Provider value={\"tana\"}><p /></ShopContext.Provider>\n\
-             <Page />\n\
-           </>\n\
+           return (\n\
+             <>\n\
+               <ShopContext.Provider value={\"tana\"}><p /></ShopContext.Provider>\n\
+               <Page />\n\
+             </>\n\
+           )\n\
          }",
         "not wrapped in `<ShopContext.Provider>`",
     );

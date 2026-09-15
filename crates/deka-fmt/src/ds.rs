@@ -606,7 +606,7 @@ impl<'src> Formatter<'src> {
                 value: Some(value), ..
             } => {
                 self.write("return ");
-                self.fmt_expr(value);
+                self.fmt_return_value(value);
             }
             Stmt::If {
                 condition,
@@ -1003,6 +1003,33 @@ impl<'src> Formatter<'src> {
             self.fmt_block(body, span.end.line);
         } else {
             self.write(&self.expr_to_string(expr));
+        }
+    }
+
+    /// dsc#245: a `return` of a multi-line bare JSX expression must be
+    /// wrapped in parentheses — `deka fmt` produces that form, it does not
+    /// merely tolerate it. This also normalizes an already-parenthesized
+    /// multi-line return: without this, `Expr::Paren`'s ordinary
+    /// stringification (`format!("({})", inner)`) opens the paren on the same
+    /// line as the JSX and closes it on the JSX's own last line, collapsing
+    /// the `return (\n  <jsx>\n)` shape the rule asks for down to
+    /// `return (<jsx>\n...\n</jsx>)`.
+    ///
+    /// This does not re-indent the JSX's interior — `deka fmt` has no
+    /// width-aware JSX pretty-printer; the original source's own whitespace
+    /// inside the JSX (baked into `JsxText` tokens, dsc#67/#68) is preserved
+    /// verbatim, same as everywhere else JSX is formatted today. Only the
+    /// parens and the two newlines around the JSX are normalized.
+    fn fmt_return_value(&mut self, value: &Expr<'_>) {
+        if let Some(jsx) = jsx_payload_if_multiline(value) {
+            self.emit_inline_comments_before(value.span());
+            self.write("(");
+            self.newline();
+            self.indented(|this| this.write(&this.expr_to_string(jsx)));
+            self.newline();
+            self.write(")");
+        } else {
+            self.fmt_expr(value);
         }
     }
 
@@ -1761,6 +1788,24 @@ fn escape_string(value: &str) -> String {
         .replace('\n', "\\n")
         .replace('\r', "\\r")
         .replace('\t', "\\t")
+}
+
+/// dsc#245 helper: if `expr` is a bare JSX element/fragment, or one wrapped
+/// in a single `Paren`, and its own span crosses more than one line, return
+/// the inner JSX expression (never the `Paren` wrapper) to reformat. `None`
+/// means the return value is untouched by the multi-line-JSX-return rule —
+/// either it isn't JSX, or it's JSX that fits on one line and needs no parens.
+fn jsx_payload_if_multiline<'e>(expr: &'e Expr<'e>) -> Option<&'e Expr<'e>> {
+    let jsx = match expr {
+        Expr::JsxElement { .. } | Expr::JsxFragment { .. } => expr,
+        Expr::Paren { expr: inner, .. } => match inner {
+            Expr::JsxElement { .. } | Expr::JsxFragment { .. } => *inner,
+            _ => return None,
+        },
+        _ => return None,
+    };
+    let span = jsx.span();
+    (span.start.line != span.end.line).then_some(jsx)
 }
 
 fn stmt_span(stmt: &Stmt<'_>) -> Span {
@@ -2640,3 +2685,5 @@ console.log(r)"#;
         );
     }
 }
+
+

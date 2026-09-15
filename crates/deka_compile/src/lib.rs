@@ -2294,11 +2294,13 @@ const arrow = unsafe { () => User { name: "Bob" } }
         // every character the code lexer rejects (`' $ £ # @ ~ \``) — must
         // survive byte-for-byte into the emitted JS string literal.
         let source = r#"export fn P() {
-  return <section>
+  return (
+    <section>
     <h1>Café Yirgacheffe — 18,50 €</h1>
     <p>Ethiopian የቡና ☕ — don't miss it: $18.50 / £15, #1 seller @ 100% arabica</p>
     <p>日本語 · Ελληνικά · Русский · العربية</p>
   </section>
+  )
 }
 "#;
         let result = compile_to_js(source, "page.dsx").expect("compile should succeed");

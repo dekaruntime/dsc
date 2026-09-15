@@ -223,8 +223,11 @@ impl<'a> Parser<'a> {
         Some(Some(expr))
     }
 
-    /// JSX tags are a single identifier, plus the one RFD 8 exception
-    /// `<Ctx.Provider>` that context (rfd#64 lane C) requires.
+    /// JSX tags are a single identifier, plus two RFD 8 exceptions:
+    /// `<Ctx.Provider>` that context (rfd#64 lane C) requires, and
+    /// `<React.Fragment>` (dsc#246) so a fragment can carry a `key` — the
+    /// bare `<>...</>` shorthand cannot take attributes. Every other member
+    /// expression stays rejected with the RFD 8 diagnostic.
     fn parse_jsx_tag(&mut self) -> Option<&'a str> {
         let base = self.expect_identifier()?;
         if !self.at(TokenKind::Dot) {
@@ -232,13 +235,16 @@ impl<'a> Parser<'a> {
         }
         self.advance();
         let member = self.expect_identifier()?;
-        if member != "Provider" {
-            self.error(
-                "JSX member expressions are not allowed; use a single identifier for the tag (RFD 8)",
-            );
-            return None;
+        if member == "Provider" {
+            return Some(self.bump_str(&format!("{base}.Provider")));
         }
-        Some(self.bump_str(&format!("{base}.Provider")))
+        if base == "React" && member == "Fragment" {
+            return Some(self.bump_str("React.Fragment"));
+        }
+        self.error(
+            "JSX member expressions are not allowed; use a single identifier for the tag (RFD 8)",
+        );
+        None
     }
 
     fn expect_jsx_closing_tag(&mut self, expected: &'a str) -> Option<()> {

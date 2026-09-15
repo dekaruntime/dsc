@@ -836,6 +836,15 @@ impl<'a> Checker<'a> {
                             );
                         }
                     }
+                } else if element.tag == "React.Fragment" {
+                    // dsc#246: the other RFD 8 member-tag exception. `React`
+                    // is not a real scope binding here — DekaScript has no
+                    // `import React from "react"` (the runtime auto-imports
+                    // `jsx`/`jsxs`/`Fragment` from the jsx-runtime instead),
+                    // so there is no user symbol to scope-check. Unlike
+                    // `<Ctx.Provider>`, which resolves a real `createContext`
+                    // variable, `React.Fragment` is a fixed, compiler-known
+                    // tag: skip the uninitialized-variable check entirely.
                 } else if let Some(first) = element.tag.chars().next() {
                     if first.is_uppercase() && self.lookup_var(element.tag).is_none() {
                         self.error_span(
@@ -1851,7 +1860,13 @@ impl<'a> Checker<'a> {
             self.check_jsx_provider_attributes(element, ctx, span, child_types);
             return;
         }
-        if element.tag.chars().next().is_some_and(|c| c.is_uppercase()) {
+        // dsc#246: `<React.Fragment>` is a fixed, compiler-known tag, not a
+        // user-declared component function -- `React` has no scope binding
+        // to look up (see the identical carve-out in the uninitialized-var
+        // check above). It also has no props interface, so it falls straight
+        // through to the untyped-attributes path below, same as any other
+        // component the checker cannot resolve a props shape for.
+        if element.tag != "React.Fragment" && element.tag.chars().next().is_some_and(|c| c.is_uppercase()) {
             let valid = match self.lookup_var(element.tag).map(|t| t.function_contract()) {
                 Some(Type::Function { params, ret, .. }) => {
                     params.len() <= 1

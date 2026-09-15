@@ -305,6 +305,14 @@ impl<'a> Parser<'a> {
             .push(Diagnostic::error(pos.line, pos.column, message));
     }
 
+    /// Like `error`, but reports at an explicit position instead of the
+    /// current token — used when the offending span has already been
+    /// consumed (e.g. dsc#245's unparenthesized multi-line JSX return).
+    fn error_at(&mut self, pos: crate::ast::Pos, message: impl Into<String>) {
+        self.errors
+            .push(Diagnostic::error(pos.line, pos.column, message));
+    }
+
     /// Diagnose the colon at its position, then consume it so the rest of the
     /// signature can still be parsed without cascading errors (#171, #188).
     /// Keep this validation permanent, including summoned signatures.
@@ -2232,6 +2240,114 @@ mod tests {
             },
             _ => panic!("expected const declaration"),
         }
+    }
+
+    #[test]
+    fn parse_jsx_react_fragment_member() {
+        // dsc#246: `<React.Fragment>` is the other RFD 8 exception, so a
+        // keyed fragment (a list of grouped children) has an expression --
+        // the bare `<>...</>` shorthand cannot take a `key`.
+        let arena = Bump::new();
+        let result = parse(
+            "const el = <React.Fragment key={id}>x</React.Fragment>;",
+            &arena,
+        );
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[0] {
+            Stmt::Const { value, .. } => match value {
+                Expr::JsxElement { element, .. } => {
+                    assert_eq!(element.tag, "React.Fragment");
+                    assert_eq!(element.attributes[0].name, "key");
+                }
+                other => panic!("expected jsx element, got {other:?}"),
+            },
+            _ => panic!("expected const declaration"),
+        }
+    }
+
+    #[test]
+    fn parse_jsx_other_member_expressions_still_rejected() {
+        // The narrow exceptions are `.Provider` and `React.Fragment` only --
+        // every other member tag, including `Foo.Fragment`, stays rejected
+        // under the existing RFD 8 diagnostic.
+        let arena = Bump::new();
+        for source in [
+            "const el = <Foo.Bar />;",
+            "const el = <Foo.Fragment />;",
+            "const el = <React.Other />;",
+        ] {
+            let result = parse(source, &arena);
+            assert!(result.program.is_none(), "{source} should fail to parse");
+            assert!(
+                result
+                    .errors
+                    .iter()
+                    .any(|e| e.message.contains("member expressions")),
+                "{source}: expected member expression error, got: {:?}",
+                result.errors
+            );
+        }
+    }
+
+    #[test]
+    fn parse_return_single_line_jsx_needs_no_parens() {
+        let arena = Bump::new();
+        let result = parse("export fn P() ReactNode { return <div>x</div> }", &arena);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+    }
+
+    #[test]
+    fn parse_return_parenthesized_multiline_jsx_ok() {
+        let arena = Bump::new();
+        let result = parse(
+            "export fn P() ReactNode {\n  return (\n    <div>\n      <span>x</span>\n    </div>\n  )\n}",
+            &arena,
+        );
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+    }
+
+    #[test]
+    fn parse_return_bare_multiline_jsx_rejected_with_named_diagnostic() {
+        // dsc#245: the error must name the rule ("a multi-line JSX return
+        // must be wrapped in parentheses"), not a symptom-level message like
+        // "expected expression" (see dsc#243 for why that costs a developer
+        // their first hour).
+        let arena = Bump::new();
+        let result = parse(
+            "export fn P() ReactNode {\n  return <div>\n    <span>x</span>\n  </div>\n}",
+            &arena,
+        );
+        assert!(
+            result.program.is_none() || !result.errors.is_empty(),
+            "bare multi-line JSX return must be rejected"
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.message == "a multi-line JSX return must be wrapped in parentheses"),
+            "expected the named-rule diagnostic, got: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn parse_return_bare_multiline_jsx_fragment_also_rejected() {
+        // The rule covers `Expr::JsxFragment`, not only `Expr::JsxElement`.
+        let arena = Bump::new();
+        let result = parse(
+            "export fn P() ReactNode {\n  return <>\n    <span>x</span>\n  </>\n}",
+            &arena,
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.message == "a multi-line JSX return must be wrapped in parentheses"),
+            "expected the named-rule diagnostic, got: {:?}",
+            result.errors
+        );
     }
 
     #[test]

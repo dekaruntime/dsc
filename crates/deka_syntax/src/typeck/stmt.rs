@@ -2419,30 +2419,39 @@ impl<'a> Checker<'a> {
                 super::exceptions::Use::Return,
                 self.return_type.clone(),
             ),
-            None => bare_return_type(),
+            None => Type::Generic {
+                base: "Option",
+                args: vec![Type::Never],
+            },
         };
         self.check_return_value_type(value_type, span);
     }
 
-    /// The body of `(…) => expr` (dsc#252). The value checks as a `return`
-    /// of `expr`, with one allowance: a `void` expression in a function whose
-    /// return type accepts a bare `return` is treated as that bare `return`,
-    /// so `xs.forEach((x) => echo(x))` and `useEffect(() => setN(1))` are not
-    /// return-type mismatches. A `void` expression where a value is required
-    /// still fails with the ordinary return diagnostic.
+    /// The body of `(…) => expr` (dsc#252). The value checks as `return expr`
+    /// would, with one allowance: a `void` expression in a slot that needs
+    /// no value is a statement, and the body returns nothing — exactly as
+    /// `(…) => { expr }` does — so `xs.forEach((x) => echo(x))` and
+    /// `useEffect(() => setN(1))` are not return-type mismatches. The slots
+    /// that need no value are `void` (and `Promise<void>`) and `Option<T>`,
+    /// whose `None` is what a void call evaluates to under erasure. Any
+    /// other value must fit the expected return type: `(x) => tick()` in a
+    /// `fn(number) number` slot and `(x) => total = total + x` in a
+    /// `fn(number) void` slot are the ordinary return diagnostics, and the
+    /// block spelling is how to say the value is not the result.
     pub(super) fn check_arrow_expression_body(&mut self, value: &'a ast::Expr<'a>, span: ast::Span) {
         let value_type = self.check_exception_use(
             value,
             super::exceptions::Use::Return,
             self.return_type.clone(),
         );
-        let is_void = matches!(value_type, Type::Named { name: "void" });
-        let value_type = match self.return_type.clone() {
-            Some(expected) if is_void && self.is_assignable(&expected, &bare_return_type()) => {
-                bare_return_type()
-            }
-            _ => value_type,
-        };
+        if matches!(value_type, Type::Named { name: "void" })
+            && self
+                .return_type
+                .as_ref()
+                .is_some_and(return_type_accepts_no_value)
+        {
+            return;
+        }
         self.check_return_value_type(value_type, span);
     }
 
@@ -2465,13 +2474,11 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// The type a bare `return` (and a body that falls off its end) produces:
-/// `Option<never>`, which is assignable to `void` and to any `Option<T>`.
-fn bare_return_type<'a>() -> Type<'a> {
-    Type::Generic {
-        base: "Option",
-        args: vec![Type::Never],
-    }
+/// Whether a function whose return type is `ty` may finish without a value:
+/// the types `return_type_requires_value` excuses, plus `Option<T>`, where
+/// `None` erases to the `undefined` that "nothing" evaluates to.
+fn return_type_accepts_no_value(ty: &Type<'_>) -> bool {
+    !return_type_requires_value(ty) || matches!(ty, Type::Option { .. })
 }
 
 /// Whether a declared return type obliges the body to produce a value.

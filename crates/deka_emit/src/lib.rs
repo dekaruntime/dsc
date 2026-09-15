@@ -295,6 +295,29 @@ const nested: Request = { options: {} };
         run_hats_fixtures("contextual_typing", 5);
     }
 
+    #[test]
+    fn arrow_functions_hats_fixtures() {
+        run_hats_fixtures("arrow_functions", 5);
+    }
+
+    #[test]
+    fn arrow_functions_lower_to_function_literals() {
+        // An arrow is the same node as a `fn` literal after the parser, so
+        // the emitter needs no arrow path: both spellings produce the same
+        // `function` expression, and an expression body is a `return`.
+        let arrow = parse_check_and_emit(
+            "fn apply(xs: Array<number>, f: fn(number) number) Array<number> { return xs.map(f); }\n\
+             const ys = apply([1], (x) => x * 2);",
+        );
+        let literal = parse_check_and_emit(
+            "fn apply(xs: Array<number>, f: fn(number) number) Array<number> { return xs.map(f); }\n\
+             const ys = apply([1], fn(x) { return x * 2; });",
+        );
+        assert_eq!(arrow, literal, "{arrow}");
+        assert!(arrow.contains("function(x) {"), "{arrow}");
+        assert!(arrow.contains("return x * 2;"), "{arrow}");
+    }
+
     fn run_hats_fixtures(group: &str, expected_count: usize) {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join(format!("../../tests/fixtures/{group}"));

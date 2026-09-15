@@ -1,0 +1,25 @@
+const xs = [1, 2, 3]
+const doubled = xs.map((x) => x * 2)
+if (doubled.join(",") != "2,4,6") {
+  panic("expression body did not return its value")
+}
+const labels = xs.map((x) => x > 1 ? "big" : "small")
+if (labels.join(",") != "small,big,big") {
+  panic("ternary expression body")
+}
+const products = xs.map((x) => xs.map((y) => x * y).join("."))
+if (products.join("|") != "1.2.3|2.4.6|3.6.9") {
+  panic("nested arrows")
+}
+const inc = (x: number) => x + 1
+if (inc(41) != 42) {
+  panic("annotated arrow without context")
+}
+const one = () => 1
+if (one() != 1) {
+  panic("zero-parameter arrow")
+}
+const big = xs.filter((x) => x >= 2)
+if (big.length != 2) {
+  panic("filter callback")
+}

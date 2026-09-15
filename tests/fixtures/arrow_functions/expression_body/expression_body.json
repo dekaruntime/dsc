@@ -1,0 +1,5 @@
+{
+  "title": "Arrow expression bodies",
+  "stage": "run",
+  "notes": "rfd#67 part 2 (dsc#252): `(x) => expr` returns the expression; parameter types come from the position (dsc#251), or from an annotation when there is no position."
+}

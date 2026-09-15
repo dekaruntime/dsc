@@ -237,3 +237,40 @@ Node.js; `cargo test -p deka_syntax contextual_tests` covers the checker,
 including `useEffect`, interface methods, annotated bindings, and the
 now-single diagnostic for errors inside a callback passed to a generic
 function (previously reported twice, once per inference pass).
+
+## Arrow functions (rfd#67 part 2, dsc#252)
+
+`(x) => x * 2` and `(x) => { … }` are function literals: the parser builds
+the same `Expr::Function` node as `fn(…) { … }`, tagged with its `form`, so
+the checker, emitter and every other consumer see one construct. An
+expression body is one synthesized `return`. Parameters always need parens
+(Sami, rfd#67): `x => x` is a parse error that says to write `(x) =>`. There
+is no return-type slot; an arrow's types come from its position (dsc#251),
+or a parameter may be annotated — `(x: number) => x + 1` — and `fn(…) T { … }`
+remains the form that spells a return type. Where no function type is
+expected, the checker reports that it cannot infer the parameter and names
+both ways out, instead of dsc#243's bare parser error. A `void` expression
+body in a `void` or `Option<T>` slot is a statement (`xs.forEach((x) =>
+echo(x))`, `useEffect(() => setN(1))`); elsewhere the expression is the
+return value and checks as one. The multi-line JSX rule (dsc#245) applies
+to expression bodies: `(i) => (<li>…</li>)` over several lines needs the
+parens. `async (…) => …` is the async form.
+
+`tests/fixtures/arrow_functions/` covers expression bodies (`map`, ternary,
+nested arrows, annotated and zero-parameter arrows with no context), block
+bodies (the `useEffect(() => { … })` shape, multi-statement bodies,
+closures), void expression bodies, and two rejections: no expected type,
+and an expression body that conflicts with the expected return.
+`cargo test -p deka_emit arrow_functions` executes the passing fixtures
+with Node.js; `cargo test -p deka_syntax arrow_tests` covers the parser
+(forms, lookahead against parenthesized expressions, the bare-parameter and
+multi-line JSX diagnostics) and the checker; `cargo test -p deka-fmt
+arrow_roundtrip` checks that `deka fmt` prints arrows back as arrows,
+idempotently.
+
+`deka fmt` also changed how it prints any function literal body — `fn` or
+arrow — with more than one statement, or a statement it could not print on
+one line: it is now laid out as a block by the ordinary statement
+formatter. Before, the body was joined on one line with a space between
+statements (which does not parse back) and an `if`/`for`/`match` came out as
+`/* stmt */`, so formatting `run(fn() { if (x) { a() } b() })` destroyed it.

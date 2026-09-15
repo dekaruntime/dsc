@@ -9,6 +9,8 @@ use crate::ast::{Program, Span};
 use crate::diagnostics::Diagnostic;
 use crate::lexer::{Lexer, Token, TokenKind};
 
+#[cfg(test)]
+mod arrow_tests;
 mod expr;
 mod jsx;
 mod pattern;
@@ -559,21 +561,6 @@ mod tests {
         // One golden for the wording; every position shares that diagnostic.
         insta::assert_snapshot!(messages[0], @"nested tuple patterns are not supported; destructure in two steps: `const [pair, label] = ...` then `const [x, y] = pair`");
         assert!(messages.iter().all(|message| message == &messages[0]));
-    }
-
-    #[test]
-    fn arrow_function_diagnostic_is_unchanged() {
-        // Tuple parameters use the existing fn literal surface.
-        for (source, column, count, message) in [
-            ("const f = ([k, v]) => k;", 20, 1, "expected `;` or newline, found ``=>``"),
-        ] {
-            let arena = Bump::new();
-            let result = parse(source, &arena);
-            assert!(result.program.is_none(), "{source}");
-            assert_eq!(result.errors.len(), count, "{source}: {:?}", result.errors);
-            assert_eq!(result.errors[0].message, message, "{source}");
-            assert_eq!((result.errors[0].line, result.errors[0].column), (1, column));
-        }
     }
 
     #[test]

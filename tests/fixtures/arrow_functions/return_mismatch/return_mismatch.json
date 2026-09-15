@@ -1,0 +1,6 @@
+{
+  "title": "Arrow expression body return mismatch",
+  "stage": "typecheck",
+  "notes": "rfd#67 part 2 (dsc#252): the expression body is the return, so a conflicting value is the ordinary return-type diagnostic, at the expression.",
+  "expectedDiagnosticContains": "expected return type `number`, found type `string`"
+}

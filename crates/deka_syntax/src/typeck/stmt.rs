@@ -2424,7 +2424,47 @@ impl<'a> Checker<'a> {
                 args: vec![Type::Never],
             },
         };
+        self.check_return_value_type(value_type, span);
+    }
 
+    /// The body of `(…) => expr` (dsc#252). The value checks as `return expr`
+    /// would, with one allowance: a `void` expression in a slot that needs
+    /// no value is a statement, and the body returns nothing — exactly as
+    /// `(…) => { expr }` does — so `xs.forEach((x) => echo(x))` and
+    /// `useEffect(() => setN(1))` are not return-type mismatches. The slots
+    /// that need no value are `void` (and `Promise<void>`) and `Option<T>`,
+    /// whose `None` is what a void call evaluates to under erasure. Any
+    /// other value must fit the expected return type: `(x) => tick()` in a
+    /// `fn(number) number` slot and `(x) => total = total + x` in a
+    /// `fn(number) void` slot are the ordinary return diagnostics, and the
+    /// block spelling is how to say the value is not the result.
+    pub(super) fn check_arrow_expression_body(
+        &mut self,
+        stmt: &'a ast::Stmt<'a>,
+        value: &'a ast::Expr<'a>,
+        span: ast::Span,
+    ) {
+        let value_type = self.check_exception_use(
+            value,
+            super::exceptions::Use::Return,
+            self.return_type.clone(),
+        );
+        if matches!(value_type, Type::Named { name: "void" })
+            && self
+                .return_type
+                .as_ref()
+                .is_some_and(return_type_accepts_no_value)
+        {
+            // Checked as a statement, so it must also emit as one.
+            self.exception_forms
+                .statement_returns
+                .insert(stmt as *const _);
+            return;
+        }
+        self.check_return_value_type(value_type, span);
+    }
+
+    fn check_return_value_type(&mut self, value_type: Type<'a>, span: ast::Span) {
         if let Some(expected) = self.return_type.clone() {
             if !self.is_assignable(&expected, &value_type) {
                 self.error_span(
@@ -2441,6 +2481,13 @@ impl<'a> Checker<'a> {
         }
         self.hook_seen_return = true;
     }
+}
+
+/// Whether a function whose return type is `ty` may finish without a value:
+/// the types `return_type_requires_value` excuses, plus `Option<T>`, where
+/// `None` erases to the `undefined` that "nothing" evaluates to.
+fn return_type_accepts_no_value(ty: &Type<'_>) -> bool {
+    !return_type_requires_value(ty) || matches!(ty, Type::Option { .. })
 }
 
 /// Whether a declared return type obliges the body to produce a value.

@@ -555,14 +555,38 @@ pub enum Expr<'a> {
         parts: &'a [TemplatePart<'a>],
         span: Span,
     },
-    /// Anonymous function expression: `fn (x: number) number { return x * 2 }`.
+    /// Anonymous function expression: `fn (x: number) number { return x * 2 }`,
+    /// or its arrow spelling `(x) => x * 2` / `(x) => { return x * 2 }`
+    /// (rfd#67 part 2, dsc#252). Every consumer sees one node: an arrow is
+    /// a function literal whose types come from its position (dsc#251), and
+    /// an expression body is a single synthesized `Stmt::Return`. `form`
+    /// records the spelling for the formatter and for diagnostics.
     Function {
         params: &'a [Param<'a>],
         return_type: Option<Type<'a>>,
         body: &'a [Stmt<'a>],
         is_async: bool,
+        form: FunctionForm,
         span: Span,
     },
+}
+
+/// How a function literal was spelled (dsc#252).
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+pub enum FunctionForm {
+    /// `fn(x: number) number { … }` — the explicitly typed form.
+    Fn,
+    /// `(x) => { … }` — a block body with the ordinary return rules.
+    ArrowBlock,
+    /// `(x) => expr` — the body is exactly one `Stmt::Return` of `expr`,
+    /// synthesized by the parser with the expression's span.
+    ArrowExpr,
+}
+
+impl FunctionForm {
+    pub fn is_arrow(self) -> bool {
+        !matches!(self, Self::Fn)
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]

@@ -1,0 +1,29 @@
+fn run(cb: fn() void) void {
+  cb()
+}
+let ran = false
+run(() => { ran = true })
+if (!ran) {
+  panic("block body did not run")
+}
+let steps = 0
+run(() => {
+  steps = steps + 1
+  if (steps > 0) {
+    steps = steps + 10
+  }
+})
+if (steps != 11) {
+  panic("multi-statement block body")
+}
+const strs = [1, 2, 3].map((x) => {
+  const doubled = x * 2
+  return string(doubled)
+})
+if (strs.join("-") != "2-4-6") {
+  panic("block body return")
+}
+const f: fn(number) number = (x) => { return x * 3 }
+if (f(2) != 6) {
+  panic("annotated binding")
+}

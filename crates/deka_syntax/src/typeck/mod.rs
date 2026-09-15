@@ -23,6 +23,8 @@ mod descriptor;
 mod exceptions;
 mod expr;
 #[cfg(test)]
+mod arrow_tests;
+#[cfg(test)]
 mod contextual_tests;
 mod hooks;
 #[cfg(test)]
@@ -101,6 +103,12 @@ pub struct ExceptionLowering<'a> {
     pub option_patterns: HashSet<*const ast::Pattern<'a>>,
     pub catches: HashMap<*const ast::Type<'a>, &'a str>,
     pub summons: HashMap<*const ast::Expr<'a>, (Vec<Type<'a>>, Type<'a>, bool)>,
+    /// The synthesized `return` of an arrow expression body whose value is
+    /// `void` in a function that accepts no value (dsc#252): `() => setN(1)`
+    /// as an effect. The checker treated it as a statement, so emit writes
+    /// `expr;` — a `return expr` would hand the value's runtime result (not
+    /// always `undefined`) to a caller such as React's cleanup slot.
+    pub statement_returns: HashSet<*const ast::Stmt<'a>>,
 }
 impl<'a> std::ops::Deref for ExceptionLowering<'a> {
     type Target = HashMap<*const ast::Expr<'a>, ExceptionEmit>;

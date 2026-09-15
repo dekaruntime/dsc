@@ -5,8 +5,9 @@
 //! returned unchanged so the formatter is safe to run on incomplete code.
 
 use deka_syntax::ast::{
-    BinOp, Embed, EnumCase, ExportDecl, ExportName, Expr, ForInit, ImportSpec, InterfaceMember,
-    JsxElement, MatchArm, ObjectField, Param, Pattern, Program, Span, Stmt, StructField,
+    BinOp, Embed, EnumCase, ExportDecl, ExportName, Expr, ForInit, FunctionForm, ImportSpec,
+    InterfaceMember, JsxElement, MatchArm, ObjectField, Param, Pattern, Program, Span, Stmt,
+    StructField,
     TemplatePart, Type, TypeParam, UnOp, UnwrapAlternative,
 };
 use deka_syntax::parse;
@@ -1264,31 +1265,121 @@ impl<'src> Formatter<'src> {
                 return_type,
                 body,
                 is_async,
+                form,
                 ..
             } => {
                 let mut s = String::new();
                 if *is_async {
                     s.push_str("async ");
                 }
-                s.push_str("fn(");
-                s.push_str(
-                    &params
-                        .iter()
-                        .map(|p| param_to_string(p))
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                );
-                s.push(')');
-                if let Some(ty) = return_type {
-                    s.push_str(" ");
-                    s.push_str(&type_to_string(ty));
+                let params = params
+                    .iter()
+                    .map(|p| param_to_string(p))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                // Arrows format back as arrows (dsc#252): the spelling is the
+                // author's, and rewriting `(x) => x * 2` into a `fn` literal
+                // would also have to invent the annotations the arrow omits.
+                match form {
+                    FunctionForm::Fn => {
+                        s.push_str("fn(");
+                        s.push_str(&params);
+                        s.push(')');
+                        if let Some(ty) = return_type {
+                            s.push_str(" ");
+                            s.push_str(&type_to_string(ty));
+                        }
+                        s.push(' ');
+                        s.push_str(&self.literal_body_to_string(body));
+                    }
+                    FunctionForm::ArrowBlock => {
+                        s.push('(');
+                        s.push_str(&params);
+                        s.push_str(") => ");
+                        s.push_str(&self.literal_body_to_string(body));
+                    }
+                    FunctionForm::ArrowExpr => {
+                        s.push('(');
+                        s.push_str(&params);
+                        s.push_str(") => ");
+                        match body {
+                            // dsc#245 applies to an expression body the
+                            // same as to `return`: multi-line JSX is laid
+                            // out as `(\n  <jsx>\n)`, never collapsed onto
+                            // the paren lines.
+                            [Stmt::Return {
+                                value: Some(value),
+                                ..
+                            }] => match jsx_payload_if_multiline(value) {
+                                Some(jsx) => {
+                                    s.push_str("(\n");
+                                    s.push_str(&"  ".repeat(self.indent + 1));
+                                    s.push_str(&self.expr_to_string(jsx));
+                                    s.push('\n');
+                                    s.push_str(&"  ".repeat(self.indent));
+                                    s.push(')');
+                                }
+                                None => s.push_str(&self.expr_to_string(value)),
+                            },
+                            // The parser only ever builds the one-return
+                            // shape; anything else is a bug upstream, and
+                            // the block spelling keeps the output parseable.
+                            _ => s.push_str(&self.literal_body_to_string(body)),
+                        }
+                    }
                 }
-                s.push_str(" { ");
-                s.push_str(&stmt_list_to_string(body, " ", self));
-                s.push_str(" }");
                 s
             }
         }
+    }
+
+    /// The `{ … }` body of a function literal, `fn` or arrow (dsc#252).
+    ///
+    /// An empty body and a single statement that fits on one line stay
+    /// inline: `fn() { return x }`, `() => { setN(1) }`. Anything else is
+    /// laid out as a block at the enclosing indent, with every statement
+    /// printed by the ordinary statement formatter. The previous single-line
+    /// join could not print an `if`/`for`/`match` inside a literal (it wrote
+    /// `/* stmt */` in its place) and joined consecutive statements with a
+    /// space, which does not parse back — `deka fmt` destroyed the body of
+    /// any literal with two statements in it.
+    fn literal_body_to_string(&self, body: &[Stmt<'_>]) -> String {
+        let stmts: Vec<&Stmt<'_>> = body
+            .iter()
+            .filter(|s| !matches!(s, Stmt::Empty { .. }))
+            .collect();
+        match stmts.as_slice() {
+            [] => return "{}".to_string(),
+            [single] if stmt_fits_inline(single) => {
+                let rendered = stmt_to_string(single, self);
+                if !rendered.contains('\n') {
+                    return format!("{{ {rendered} }}");
+                }
+            }
+            _ => {}
+        }
+        // A fresh formatter over the same source, one level deeper, with no
+        // comment stream: the enclosing formatter's cursor owns comments,
+        // and a second cursor would print each one twice.
+        let mut inner = Formatter {
+            source: self.source,
+            out: String::new(),
+            indent: self.indent + 1,
+            at_line_start: true,
+            comments: Vec::new(),
+            comment_cursor: 0,
+        };
+        for stmt in stmts {
+            inner.fmt_stmt(stmt);
+            inner.newline();
+        }
+        let mut s = String::from("{\n");
+        s.push_str(&inner.out);
+        for _ in 0..self.indent {
+            s.push_str("  ");
+        }
+        s.push('}');
+        s
     }
 
     fn expr_prec(&self, expr: &Expr<'_>) -> Prec {
@@ -1589,13 +1680,12 @@ fn object_key_to_string(key: &str) -> String {
     }
 }
 
-fn stmt_list_to_string(stmts: &[Stmt<'_>], sep: &str, fmt: &Formatter<'_>) -> String {
-    stmts
-        .iter()
-        .filter(|s| !matches!(s, Stmt::Empty { .. }))
-        .map(|s| stmt_to_string(s, fmt))
-        .collect::<Vec<_>>()
-        .join(sep)
+/// The statements `stmt_to_string` can print on one line.
+fn stmt_fits_inline(stmt: &Stmt<'_>) -> bool {
+    matches!(
+        stmt,
+        Stmt::Return { .. } | Stmt::Expr { .. } | Stmt::Const { .. } | Stmt::Let { .. }
+    )
 }
 
 fn stmt_to_string(stmt: &Stmt<'_>, fmt: &Formatter<'_>) -> String {

@@ -342,7 +342,10 @@ impl<'a> Parser<'a> {
                         None
                     } else {
                         let expr = self.parse_expression()?;
-                        self.reject_unparenthesized_multiline_jsx_return(&expr);
+                        self.reject_unparenthesized_multiline_jsx(
+                            &expr,
+                            "a multi-line JSX return must be wrapped in parentheses",
+                        );
                         Some(expr)
                     };
                 self.expect_statement_end(in_block)?;
@@ -371,7 +374,15 @@ impl<'a> Parser<'a> {
     /// <div>x</div>` needs no parens. A `return (<div>...</div>)` already
     /// wrapped in parens is always fine, multi-line or not — `Expr::Paren`
     /// is what this rule is asking for, so it never re-flags its own inside.
-    fn reject_unparenthesized_multiline_jsx_return(&mut self, expr: &Expr<'a>) {
+    ///
+    /// The same rule covers an arrow function's expression body (dsc#252):
+    /// `() => (<div>…</div>)` over several lines needs the parens too, so
+    /// `message` names whichever position is being checked.
+    pub(super) fn reject_unparenthesized_multiline_jsx(
+        &mut self,
+        expr: &Expr<'a>,
+        message: &'static str,
+    ) {
         let is_bare_jsx = matches!(expr, Expr::JsxElement { .. } | Expr::JsxFragment { .. });
         if !is_bare_jsx {
             return;
@@ -380,10 +391,7 @@ impl<'a> Parser<'a> {
         if span.start.line == span.end.line {
             return;
         }
-        self.error_at(
-            span.start,
-            "a multi-line JSX return must be wrapped in parentheses",
-        );
+        self.error_at(span.start, message);
     }
 
     fn parse_fn_statement(&mut self, start: Pos, start_byte: usize) -> Option<Stmt<'a>> {

@@ -3034,6 +3034,33 @@ impl<'a> Emitter<'a> {
                 }
             }
             Stmt::Return { value, .. } => {
+                // `() => voidExpr` checked as a statement (dsc#252): emit it as
+                // one, so the arrow returns `undefined`, not the value's
+                // runtime result.
+                if let Some(value) = value {
+                    if self
+                        .exception_forms
+                        .statement_returns
+                        .contains(&(stmt as *const _))
+                    {
+                        if self.exception_form(value)
+                            == Some(deka_syntax::typeck::ExceptionEmit::Throw)
+                        {
+                            return self.emit_raise(value);
+                        }
+                        write_indent(&mut self.out, 0);
+                        if let Expr::Match {
+                            scrutinee, arms, ..
+                        } = peel_exception_parens(value)
+                        {
+                            self.emit_match_statements(scrutinee, arms, None)?;
+                        } else {
+                            self.emit_expr(value)?;
+                            self.out.push_str(";");
+                        }
+                        return Ok(());
+                    }
+                }
                 if let Some(value) = value {
                     if self.exception_form(value) == Some(deka_syntax::typeck::ExceptionEmit::Throw)
                     {

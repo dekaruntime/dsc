@@ -1,0 +1,5 @@
+{
+  "title": "Arrow void expression bodies",
+  "stage": "run",
+  "notes": "rfd#67 part 2 (dsc#252): a void expression body in a slot that accepts a bare return is a statement, not a return-type mismatch — `xs.forEach((x) => echo(x))`."
+}

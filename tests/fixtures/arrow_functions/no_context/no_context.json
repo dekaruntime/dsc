@@ -1,0 +1,6 @@
+{
+  "title": "Arrow with no expected type",
+  "stage": "typecheck",
+  "notes": "rfd#67 part 2 (dsc#252): an arrow in a position with no expected function type cannot infer its parameters; the diagnostic names both ways out instead of dsc#243's bare parser error.",
+  "expectedDiagnosticContains": "cannot infer the type of parameter `x`: no function type is expected at this position — annotate it (`(x: T) => …`) or use `fn(x: T) R { … }`"
+}

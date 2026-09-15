@@ -227,6 +227,7 @@ impl<'a> Checker<'a> {
                 return_type,
                 body,
                 is_async,
+                form,
                 span,
             } => {
                 let contextual = expected.as_ref().and_then(contextual_function_type);
@@ -235,6 +236,7 @@ impl<'a> Checker<'a> {
                     return_type.as_ref(),
                     body,
                     *is_async,
+                    *form,
                     *span,
                     contextual.as_ref(),
                 );

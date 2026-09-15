@@ -295,6 +295,78 @@ const nested: Request = { options: {} };
         run_hats_fixtures("contextual_typing", 5);
     }
 
+    #[test]
+    fn arrow_void_expression_body_emits_a_statement_not_a_return() {
+        // dsc#254 review (Codex P1): a `void` arrow expression body in a slot
+        // that accepts no value is checked as a statement, so it must emit as
+        // one. `return <expr>` leaked the runtime value (7 here) into
+        // useEffect's cleanup slot. Non-void bodies keep their `return`.
+        let out = parse_check_and_emit(
+            "fn tick() void {}\n\
+             fn Counter() ReactNode {\n\
+               const [n, setN] = useState(0)\n\
+               useEffect(() => match (unsafe<void> { 7 }) { Ok(v) => v, Err(e) => tick() })\n\
+               useEffect(() => setN(1))\n\
+               const doubled = [1, 2].map((x) => x * 2)\n\
+               return <p>{doubled.join(\",\")}</p>\n\
+             }\n",
+        );
+        assert!(!out.contains("return __deka_match_result"), "got: {out}");
+        assert!(!out.contains("return setN(1)"), "got: {out}");
+        assert!(out.contains("return x * 2;"), "non-void body keeps return, got: {out}");
+        let stub = "const __effects = [];\n\
+                    const useState = (v) => [v, () => 7];\n\
+                    const useEffect = (f) => { __effects.push(f()); };\n\
+                    const useMemo = (f) => f();\n\
+                    const jsx = () => null; const jsxs = jsx; const Fragment = null;\n";
+        let body: String = out
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("import "))
+            .map(|line| format!("{line}\n"))
+            .collect();
+        let script = format!(
+            "{stub}{body}\nCounter();\nif (__effects.length !== 2 || __effects.some((r) => r !== undefined)) {{\n  \
+             console.error(JSON.stringify(__effects)); process.exit(1);\n}}\n"
+        );
+        let mut child = std::process::Command::new("node")
+            .arg("--input-type=module")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("Node.js is required");
+        std::io::Write::write_all(&mut child.stdin.take().unwrap(), script.as_bytes()).unwrap();
+        let result = child.wait_with_output().unwrap();
+        assert!(
+            result.status.success(),
+            "effects must return undefined: {}\n{script}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+
+    #[test]
+    fn arrow_functions_hats_fixtures() {
+        run_hats_fixtures("arrow_functions", 5);
+    }
+
+    #[test]
+    fn arrow_functions_lower_to_function_literals() {
+        // An arrow is the same node as a `fn` literal after the parser, so
+        // the emitter needs no arrow path: both spellings produce the same
+        // `function` expression, and an expression body is a `return`.
+        let arrow = parse_check_and_emit(
+            "fn apply(xs: Array<number>, f: fn(number) number) Array<number> { return xs.map(f); }\n\
+             const ys = apply([1], (x) => x * 2);",
+        );
+        let literal = parse_check_and_emit(
+            "fn apply(xs: Array<number>, f: fn(number) number) Array<number> { return xs.map(f); }\n\
+             const ys = apply([1], fn(x) { return x * 2; });",
+        );
+        assert_eq!(arrow, literal, "{arrow}");
+        assert!(arrow.contains("function(x) {"), "{arrow}");
+        assert!(arrow.contains("return x * 2;"), "{arrow}");
+    }
+
     fn run_hats_fixtures(group: &str, expected_count: usize) {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join(format!("../../tests/fixtures/{group}"));

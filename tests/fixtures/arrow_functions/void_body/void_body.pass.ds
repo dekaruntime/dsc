@@ -1,0 +1,17 @@
+fn each(xs: Array<number>, f: fn(number) void) void {
+  for (const x of xs) {
+    f(x)
+  }
+}
+let total = 0
+fn add(x: number) void {
+  total = total + x
+}
+each([1, 2, 3], (x) => add(x))
+if (total != 6) {
+  panic("void expression body did not run as a statement")
+}
+each([1, 2, 3], (x) => { total = total - x })
+if (total != 0) {
+  panic("assignment in a block body")
+}

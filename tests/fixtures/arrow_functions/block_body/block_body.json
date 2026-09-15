@@ -1,0 +1,5 @@
+{
+  "title": "Arrow block bodies",
+  "stage": "run",
+  "notes": "rfd#67 part 2 (dsc#252): `(x) => { … }` is a block body with the ordinary return rules; `useEffect(() => { echo(\"x\") })` is this shape."
+}

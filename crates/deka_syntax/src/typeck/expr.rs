@@ -1168,11 +1168,13 @@ impl<'a> Checker<'a> {
             // value; everything else checks exactly as `return expr` does.
             (
                 ast::FunctionForm::ArrowExpr,
-                [ast::Stmt::Return {
-                    value: Some(value),
-                    span: value_span,
-                }],
-            ) => self.check_arrow_expression_body(value, *value_span),
+                [
+                    stmt @ ast::Stmt::Return {
+                        value: Some(value),
+                        span: value_span,
+                    },
+                ],
+            ) => self.check_arrow_expression_body(stmt, value, *value_span),
             _ => {
                 for stmt in body {
                     self.check_statement(stmt);

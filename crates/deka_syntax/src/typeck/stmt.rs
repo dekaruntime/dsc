@@ -2438,7 +2438,12 @@ impl<'a> Checker<'a> {
     /// `fn(number) number` slot and `(x) => total = total + x` in a
     /// `fn(number) void` slot are the ordinary return diagnostics, and the
     /// block spelling is how to say the value is not the result.
-    pub(super) fn check_arrow_expression_body(&mut self, value: &'a ast::Expr<'a>, span: ast::Span) {
+    pub(super) fn check_arrow_expression_body(
+        &mut self,
+        stmt: &'a ast::Stmt<'a>,
+        value: &'a ast::Expr<'a>,
+        span: ast::Span,
+    ) {
         let value_type = self.check_exception_use(
             value,
             super::exceptions::Use::Return,
@@ -2450,6 +2455,10 @@ impl<'a> Checker<'a> {
                 .as_ref()
                 .is_some_and(return_type_accepts_no_value)
         {
+            // Checked as a statement, so it must also emit as one.
+            self.exception_forms
+                .statement_returns
+                .insert(stmt as *const _);
             return;
         }
         self.check_return_value_type(value_type, span);

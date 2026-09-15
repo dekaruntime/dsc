@@ -341,7 +341,9 @@ impl<'a> Parser<'a> {
                     if self.at(TokenKind::Semicolon) || (in_block && self.at(TokenKind::RBrace)) {
                         None
                     } else {
-                        Some(self.parse_expression()?)
+                        let expr = self.parse_expression()?;
+                        self.reject_unparenthesized_multiline_jsx_return(&expr);
+                        Some(expr)
                     };
                 self.expect_statement_end(in_block)?;
                 Some(Stmt::Return {
@@ -359,6 +361,29 @@ impl<'a> Parser<'a> {
                 })
             }
         }
+    }
+
+    /// dsc#245: a multi-line `return` of a bare JSX expression must be
+    /// wrapped in parentheses, matching TS/React. DekaScript has no ASI, so
+    /// this is not a safety rule (there is no `return⏎<div>` hazard) — it is
+    /// purely about matching the smaller mental model developers already
+    /// carry from TS. Single-line JSX returns are unaffected: `return
+    /// <div>x</div>` needs no parens. A `return (<div>...</div>)` already
+    /// wrapped in parens is always fine, multi-line or not — `Expr::Paren`
+    /// is what this rule is asking for, so it never re-flags its own inside.
+    fn reject_unparenthesized_multiline_jsx_return(&mut self, expr: &Expr<'a>) {
+        let is_bare_jsx = matches!(expr, Expr::JsxElement { .. } | Expr::JsxFragment { .. });
+        if !is_bare_jsx {
+            return;
+        }
+        let span = expr.span();
+        if span.start.line == span.end.line {
+            return;
+        }
+        self.error_at(
+            span.start,
+            "a multi-line JSX return must be wrapped in parentheses",
+        );
     }
 
     fn parse_fn_statement(&mut self, start: Pos, start_byte: usize) -> Option<Stmt<'a>> {

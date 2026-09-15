@@ -1,0 +1,46 @@
+--- a/utility-classes.dsx
++++ b/utility-classes.dsx
+@@ -1,8 +1,10 @@
+ fn Card() ReactNode {
+-  return <div class={"p-4 rounded-lg bg-card shadow"}>
++  return (
++    <div class={"p-4 rounded-lg bg-card shadow"}>
+ <h1 class={"text-2xl font-bold text-foreground"}>Hello</h1>
+ <p class={"text-muted-foreground"}>Styled with utility classes</p>
+ </div>
++  )
+ }
+ 
+ export fn Page() ReactNode {
+--- a/props.dsx
++++ b/props.dsx
+@@ -11,10 +11,12 @@
+     None => <></>,
+   }
+ 
+-  return <div>
++  return (
++    <div>
+ <h2>{props.title}</h2>
+ {sub}
+ </div>
++  )
+ }
+ 
+ // The caller writes neither Some nor None: a JSX element is a construction
+--- a/props-checked.dsx
++++ b/props-checked.dsx
+@@ -15,10 +15,12 @@
+     Some(s) => <p>{s}</p>,
+     None => <></>,
+   }
+-  return <article>
++  return (
++    <article>
+ <h2>{props.title}</h2>
+ {sub}
+ </article>
++  )
+ }
+ 
+ // `children` is filled by nesting rather than by an attribute.

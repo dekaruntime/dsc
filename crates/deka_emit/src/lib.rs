@@ -2730,6 +2730,30 @@ assert.equal(threw, true, `expected throw, got ${uncovered}`);
     }
 
     #[test]
+    fn emit_react_fragment_keyed_list_item() {
+        // dsc#246: `<React.Fragment key={...}>` is the RFD 8 exception that
+        // lets a list of grouped children (here, `<dt>`/`<dd>` pairs) carry a
+        // `key` -- the `<>...</>` shorthand cannot take attributes at all.
+        let out = parse_check_and_emit(
+            "interface GlossaryProps {\n\
+               term: string;\n\
+               id: string;\n\
+             }\n\
+             export fn Glossary(props: GlossaryProps) ReactNode {\n\
+               return <React.Fragment key={props.id}><dt>{props.term}</dt><dd>{props.id}</dd></React.Fragment>;\n\
+             }",
+        );
+        assert!(
+            out.contains("React.Fragment"),
+            "React.Fragment must pass through JSX emission verbatim, got: {out}"
+        );
+        assert!(
+            out.contains("\"dt\"") && out.contains("\"dd\""),
+            "children must still emit, got: {out}"
+        );
+    }
+
+    #[test]
     fn emit_usecontext_alias_imports_resolved_reference() {
         let out = parse_check_and_emit(
             "const LocaleContext = createContext<string>(\"en\");\n\
@@ -2804,13 +2828,15 @@ assert.equal(threw, true, `expected throw, got ${uncovered}`);
                if (theme == \"dark\") {\n\
                  label = \"Light\";\n\
                }\n\
-               return <button type=\"button\" id=\"theme-toggle\" class=\"theme-toggle\" data-theme={theme} onClick={fn() void {\n\
-                   if (theme == \"dark\") {\n\
-                     setTheme(\"light\");\n\
-                   } else {\n\
-                     setTheme(\"dark\");\n\
-                   }\n\
-                 }}>{label}</button>;\n\
+               return (\n\
+                 <button type=\"button\" id=\"theme-toggle\" class=\"theme-toggle\" data-theme={theme} onClick={fn() void {\n\
+                     if (theme == \"dark\") {\n\
+                       setTheme(\"light\");\n\
+                     } else {\n\
+                       setTheme(\"dark\");\n\
+                     }\n\
+                   }}>{label}</button>\n\
+               );\n\
              }",
         );
         assert_eq!(

@@ -1013,8 +1013,17 @@ impl<'a> Checker<'a> {
                 return_type,
                 body,
                 is_async,
+                form,
                 span,
-            } => self.check_function_expr(params, return_type.as_ref(), body, *is_async, *span, None),
+            } => self.check_function_expr(
+                params,
+                return_type.as_ref(),
+                body,
+                *is_async,
+                *form,
+                *span,
+                None,
+            ),
             _ => {
                 self.error_at_expr(expr, "unsupported expression in v2 typeck");
                 Type::Error
@@ -1048,6 +1057,7 @@ impl<'a> Checker<'a> {
         return_type: Option<&ast::Type<'a>>,
         body: &'a [ast::Stmt<'a>],
         is_async: bool,
+        form: ast::FunctionForm,
         span: ast::Span,
         expected: Option<&Type<'a>>,
     ) -> Type<'a> {
@@ -1091,10 +1101,18 @@ impl<'a> Checker<'a> {
                 (Some(t), _) => param_types.push(self.resolve_ast_type(t)),
                 (None, Some(t)) => param_types.push(t.clone()),
                 (None, None) => {
-                    self.error_span(
-                        p.span,
-                        format!("parameter `{}` is missing a type annotation", p.binding),
-                    );
+                    // An arrow is the inferred form (rfd#67): with nothing to
+                    // infer from, say so and name both ways out, instead of
+                    // the bare parser error dsc#243 complained about.
+                    let message = if form.is_arrow() {
+                        format!(
+                            "cannot infer the type of parameter `{}`: no function type is expected at this position — annotate it (`({}: T) => …`) or use `fn({}: T) R {{ … }}`",
+                            p.binding, p.binding, p.binding
+                        )
+                    } else {
+                        format!("parameter `{}` is missing a type annotation", p.binding)
+                    };
+                    self.error_span(p.span, message);
                     param_types.push(Type::Error);
                 }
             }
@@ -1142,8 +1160,24 @@ impl<'a> Checker<'a> {
         self.return_type = body_expected_ret.clone();
         let saved_body = self.current_body.replace(body);
 
-        for stmt in body {
-            self.check_statement(stmt);
+        match (form, body) {
+            // `(x) => expr` (dsc#252): the parser stored the body as one
+            // `return expr`. A void-typed expression in a slot that accepts
+            // an effect with nothing to return — `xs.forEach((x) => echo(x))`,
+            // `useEffect(() => setN(1))` — is a statement, not a return
+            // value; everything else checks exactly as `return expr` does.
+            (
+                ast::FunctionForm::ArrowExpr,
+                [ast::Stmt::Return {
+                    value: Some(value),
+                    span: value_span,
+                }],
+            ) => self.check_arrow_expression_body(value, *value_span),
+            _ => {
+                for stmt in body {
+                    self.check_statement(stmt);
+                }
+            }
         }
 
         self.current_body = saved_body;

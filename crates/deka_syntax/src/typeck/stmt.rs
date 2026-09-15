@@ -2419,12 +2419,34 @@ impl<'a> Checker<'a> {
                 super::exceptions::Use::Return,
                 self.return_type.clone(),
             ),
-            None => Type::Generic {
-                base: "Option",
-                args: vec![Type::Never],
-            },
+            None => bare_return_type(),
         };
+        self.check_return_value_type(value_type, span);
+    }
 
+    /// The body of `(…) => expr` (dsc#252). The value checks as a `return`
+    /// of `expr`, with one allowance: a `void` expression in a function whose
+    /// return type accepts a bare `return` is treated as that bare `return`,
+    /// so `xs.forEach((x) => echo(x))` and `useEffect(() => setN(1))` are not
+    /// return-type mismatches. A `void` expression where a value is required
+    /// still fails with the ordinary return diagnostic.
+    pub(super) fn check_arrow_expression_body(&mut self, value: &'a ast::Expr<'a>, span: ast::Span) {
+        let value_type = self.check_exception_use(
+            value,
+            super::exceptions::Use::Return,
+            self.return_type.clone(),
+        );
+        let is_void = matches!(value_type, Type::Named { name: "void" });
+        let value_type = match self.return_type.clone() {
+            Some(expected) if is_void && self.is_assignable(&expected, &bare_return_type()) => {
+                bare_return_type()
+            }
+            _ => value_type,
+        };
+        self.check_return_value_type(value_type, span);
+    }
+
+    fn check_return_value_type(&mut self, value_type: Type<'a>, span: ast::Span) {
         if let Some(expected) = self.return_type.clone() {
             if !self.is_assignable(&expected, &value_type) {
                 self.error_span(
@@ -2440,6 +2462,15 @@ impl<'a> Checker<'a> {
             self.return_type = Some(value_type);
         }
         self.hook_seen_return = true;
+    }
+}
+
+/// The type a bare `return` (and a body that falls off its end) produces:
+/// `Option<never>`, which is assignable to `void` and to any `Option<T>`.
+fn bare_return_type<'a>() -> Type<'a> {
+    Type::Generic {
+        base: "Option",
+        args: vec![Type::Never],
     }
 }
 

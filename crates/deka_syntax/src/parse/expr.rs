@@ -1,6 +1,6 @@
 //! Expression parsing (Pratt parser).
 
-use crate::ast::{Expr, StructLiteralField, Type, UnOp, alloc, alloc_slice};
+use crate::ast::{Expr, FunctionForm, Stmt, StructLiteralField, Type, UnOp, alloc, alloc_slice};
 use crate::lexer::TokenKind;
 
 use super::Parser;
@@ -17,6 +17,18 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
         let (start, start_byte) = self.span_start();
         let mut left = self.parse_prefix()?;
+
+        // `x => x + 1`: parameters always need parens (Sami, rfd#67). Without
+        // this the failure is the generic `expected `;` or newline, found
+        // `=>`` — true, but it does not say what to write instead (dsc#252).
+        if self.at(TokenKind::FatArrow) {
+            if let Expr::Identifier { name, .. } = &left {
+                self.error(format!(
+                    "arrow function parameters must be parenthesized: write `({name}) =>` instead of `{name} =>`"
+                ));
+                return None;
+            }
+        }
 
         loop {
             // Optional-semicolon rule: do not eagerly skip newlines here.
@@ -357,6 +369,9 @@ impl<'a> Parser<'a> {
                     span: self.span_from(start, start_byte),
                 })
             }
+            TokenKind::LParen if self.paren_group_starts_arrow() => {
+                self.parse_arrow_expression(start, start_byte, false)
+            }
             TokenKind::LParen => {
                 self.advance();
                 // Newlines are insignificant inside a parenthesized expression:
@@ -420,8 +435,13 @@ impl<'a> Parser<'a> {
             TokenKind::Async => {
                 if self.tokens.get(self.pos + 1).map(|t| t.kind) == Some(TokenKind::Fn) {
                     self.parse_fn_expression(start, start_byte)
+                } else if self.tokens.get(self.pos + 1).map(|t| t.kind) == Some(TokenKind::LParen)
+                    && self.paren_group_starts_arrow_at(self.pos + 1)
+                {
+                    self.advance(); // `async`
+                    self.parse_arrow_expression(start, start_byte, true)
                 } else {
-                    self.error("expected `fn` after `async`");
+                    self.error("expected `fn` or `(…) =>` after `async`");
                     None
                 }
             }
@@ -675,6 +695,107 @@ impl<'a> Parser<'a> {
             return_type,
             body,
             is_async,
+            form: FunctionForm::Fn,
+            span: self.span_from(start, start_byte),
+        })
+    }
+
+    /// Whether the `(` at the current position opens an arrow function's
+    /// parameter list rather than a parenthesized expression (rfd#67 part 2,
+    /// dsc#252). The answer is the token after the matching `)`: `=>` means
+    /// arrow, anything else means expression. That is the whole
+    /// disambiguation — parameters always need parens (Sami, rfd#67), so
+    /// there is no bare-identifier form to look for, and `=>` never follows
+    /// a parenthesized expression in any other construct (match arms take a
+    /// pattern, not an expression, before their `=>`).
+    fn paren_group_starts_arrow(&self) -> bool {
+        self.paren_group_starts_arrow_at(self.pos)
+    }
+
+    fn paren_group_starts_arrow_at(&self, open: usize) -> bool {
+        if self.tokens.get(open).map(|t| t.kind) != Some(TokenKind::LParen) {
+            return false;
+        }
+        let mut depth = 0usize;
+        let mut i = open;
+        while i < self.tokens.len() {
+            match self.tokens[i].kind {
+                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => depth += 1,
+                TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        // `=>` must follow the `)` on the same line; a newline
+                        // there ends the statement, exactly as it would after
+                        // any other parenthesized expression.
+                        return self.tokens.get(i + 1).map(|t| t.kind) == Some(TokenKind::FatArrow);
+                    }
+                }
+                TokenKind::Eof => return false,
+                _ => {}
+            }
+            i += 1;
+        }
+        false
+    }
+
+    /// Parse an arrow function: `(params) => expr` or `(params) => { … }`
+    /// (rfd#67 part 2, dsc#252). The cursor is on the `(`; the caller has
+    /// already established via `paren_group_starts_arrow` that `=>` follows
+    /// the parameter list.
+    ///
+    /// The parameter grammar is `fn`'s own (`parse_params`), so a parameter
+    /// may carry an annotation — `(x: number) => x * 2` — or omit it and
+    /// take its type from the position (dsc#251). There is no slot for a
+    /// return type: an arrow's return type is the expected one, or inferred
+    /// from the body; `fn(…) T { … }` remains the form that spells it.
+    ///
+    /// An expression body desugars to a single `return`, so every consumer
+    /// after the parser sees the block form. The multi-line JSX rule
+    /// (dsc#245) applies to that expression exactly as it does to a `return`:
+    /// `() => (<div>…</div>)` over several lines needs the parens.
+    fn parse_arrow_expression(
+        &mut self,
+        start: crate::ast::Pos,
+        start_byte: usize,
+        is_async: bool,
+    ) -> Option<Expr<'a>> {
+        self.advance(); // `(`
+        let params = self.parse_params()?;
+        self.expect(TokenKind::RParen)?;
+        self.expect(TokenKind::FatArrow)?;
+
+        if self.peek_after_newlines() == TokenKind::LBrace {
+            self.skip_newlines();
+            let body = self.parse_block()?;
+            return Some(Expr::Function {
+                params,
+                return_type: None,
+                body,
+                is_async,
+                form: FunctionForm::ArrowBlock,
+                span: self.span_from(start, start_byte),
+            });
+        }
+
+        let expr = self.parse_expression()?;
+        self.reject_unparenthesized_multiline_jsx(
+            &expr,
+            "a multi-line JSX arrow body must be wrapped in parentheses",
+        );
+        let value_span = expr.span();
+        let body = alloc_slice(
+            self.arena,
+            vec![Stmt::Return {
+                value: Some(expr),
+                span: value_span,
+            }],
+        );
+        Some(Expr::Function {
+            params,
+            return_type: None,
+            body,
+            is_async,
+            form: FunctionForm::ArrowExpr,
             span: self.span_from(start, start_byte),
         })
     }

@@ -615,6 +615,7 @@ fn transform_expr<'a>(
             return_type,
             body,
             is_async,
+            form,
             span,
         } => {
             let new_body: Vec<Stmt<'a>> = body
@@ -626,6 +627,7 @@ fn transform_expr<'a>(
                 return_type: return_type.clone(),
                 body: ast::alloc_slice(arena, new_body),
                 is_async: *is_async,
+                form: *form,
                 span: *span,
             }
         }
@@ -1367,6 +1369,7 @@ fn lower_expr<'a>(
             return_type,
             body,
             is_async,
+            form,
             span,
         } => {
             let new_body: Vec<Stmt<'a>> = body
@@ -1378,6 +1381,7 @@ fn lower_expr<'a>(
                 return_type: return_type.clone(),
                 body: ast::alloc_slice(arena, new_body),
                 is_async: *is_async,
+                form: *form,
                 span: *span,
             }
         }

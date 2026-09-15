@@ -1,0 +1,10 @@
+fn each<T>(f: fn(T) void, xs: Array<T>) void {
+  for (const x of xs) {
+    f(x)
+  }
+}
+let total = 0
+each(fn(x) { total = total + x }, [1, 2, 3])
+if (total != 6) {
+  panic("type parameter was not solved from the later argument")
+}

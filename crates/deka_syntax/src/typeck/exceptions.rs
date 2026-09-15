@@ -15,6 +15,20 @@ pub(super) enum Use {
     Convert,
 }
 
+/// The function type a literal in this position can take its omitted
+/// annotations from (dsc#251). Hook color is looked through: a `Hook<fn() T>`
+/// slot accepts a plain `fn() T`, so that is the spelling the literal
+/// completes to.
+fn contextual_function_type<'a>(expected: &Type<'a>) -> Option<Type<'a>> {
+    match expected {
+        Type::Function { .. } => Some(expected.clone()),
+        Type::Generic { base: "Hook", args } if args.len() == 1 => {
+            contextual_function_type(&args[0])
+        }
+        _ => None,
+    }
+}
+
 fn channels<'a>(ty: &Type<'a>, channel: &str) -> Option<(Type<'a>, Type<'a>)> {
     match ty {
         Type::Generic { base, args } if *base == channel && args.len() == 2 => {
@@ -202,6 +216,30 @@ impl<'a> Checker<'a> {
             };
         }
         match expr {
+            // Contextual typing (rfd#67 part 1, dsc#251): a function literal
+            // in a position whose function type is known takes its omitted
+            // parameter and return types from that position. The expected
+            // type comes from the same channel every other target-typed form
+            // uses, so call arguments, interface method arguments, `Some(…)`
+            // payloads and annotated bindings all reach here.
+            ast::Expr::Function {
+                params,
+                return_type,
+                body,
+                is_async,
+                span,
+            } => {
+                let contextual = expected.as_ref().and_then(contextual_function_type);
+                let ty = self.check_function_expr(
+                    params,
+                    return_type.as_ref(),
+                    body,
+                    *is_async,
+                    *span,
+                    contextual.as_ref(),
+                );
+                return self.consume_exception(expr, ty, usage);
+            }
             ast::Expr::Paren { expr: inner, .. } | ast::Expr::Safe { expr: inner, .. } => {
                 let ty = self.check_exception_use(inner, usage, expected);
                 if self

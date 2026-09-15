@@ -1,0 +1,6 @@
+{
+  "title": "Contextual typing arity mismatch",
+  "stage": "typecheck",
+  "notes": "rfd#67 part 1 (dsc#251): a literal whose arity disagrees with the expected function type is one diagnostic at the argument.",
+  "expectedDiagnosticContains": "function literal has 2 parameters, but the expected type `fn(number) number` has 1"
+}

@@ -1014,7 +1014,7 @@ impl<'a> Checker<'a> {
                 body,
                 is_async,
                 span,
-            } => self.check_function_expr(params, return_type.as_ref(), body, *is_async, *span),
+            } => self.check_function_expr(params, return_type.as_ref(), body, *is_async, *span, None),
             _ => {
                 self.error_at_expr(expr, "unsupported expression in v2 typeck");
                 Type::Error
@@ -1022,19 +1022,75 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_function_expr(
+    /// Check a function literal.
+    ///
+    /// `expected` is the function type the literal's position asks for, when
+    /// one is known (a call argument, an interface method argument, an
+    /// annotated binding). Contextual typing (rfd#67 part 1, dsc#251) fills
+    /// the literal's *omitted* annotations from it before the body is
+    /// checked, so `useEffect(fn() { … })` and `xs.map(fn(x) { … })` check
+    /// exactly as their fully annotated spellings do. Written annotations are
+    /// never overridden: a literal with every type spelled out ignores
+    /// `expected` and behaves as it always has, and a written type that
+    /// conflicts with the expected one still fails the ordinary argument
+    /// assignability check at the argument.
+    ///
+    /// This is the opposite direction from dsc#223 (`Type::Infer` is not
+    /// assignable as a source): nothing here produces an `Infer` to assign.
+    /// The expected type is solved *before* the body is checked, and an
+    /// expected slot that inference left open (`Var`, `Infer`, `Error`)
+    /// supplies nothing, so the literal falls back to the existing
+    /// missing-annotation diagnostic rather than silently typing a parameter
+    /// as unknown.
+    pub(super) fn check_function_expr(
         &mut self,
         params: &'a [ast::Param<'a>],
         return_type: Option<&ast::Type<'a>>,
         body: &'a [ast::Stmt<'a>],
         is_async: bool,
         span: ast::Span,
+        expected: Option<&Type<'a>>,
     ) -> Type<'a> {
+        let fully_annotated = return_type.is_some() && params.iter().all(|p| p.ty.is_some());
+        let (expected_params, expected_ret) = match expected {
+            Some(Type::Function {
+                params: expected_params,
+                ret: expected_ret,
+                ..
+            }) if !fully_annotated => (Some(expected_params), Some(expected_ret.as_ref())),
+            _ => (None, None),
+        };
+
+        if let Some(expected_params) = expected_params {
+            if expected_params.len() != params.len() {
+                // The position fixes the arity, and a literal that disagrees
+                // has no parameter types to take from it. Report once at the
+                // literal and let `Error` absorb the argument check so the
+                // mismatch is not reported a second time as an assignability
+                // failure over half-typed parameters.
+                let expected = expected.expect("expected_params comes from expected");
+                self.error_span(
+                    span,
+                    format!(
+                        "function literal has {} parameter{}, but the expected type `{expected}` has {}",
+                        params.len(),
+                        if params.len() == 1 { "" } else { "s" },
+                        expected_params.len()
+                    ),
+                );
+                return Type::Error;
+            }
+        }
+
         let mut param_types = Vec::new();
-        for p in params {
-            match &p.ty {
-                Some(t) => param_types.push(self.resolve_ast_type(t)),
-                None => {
+        for (index, p) in params.iter().enumerate() {
+            let contextual = expected_params
+                .and_then(|ps| ps.get(index))
+                .filter(|t| contextual_type_is_known(t));
+            match (&p.ty, contextual) {
+                (Some(t), _) => param_types.push(self.resolve_ast_type(t)),
+                (None, Some(t)) => param_types.push(t.clone()),
+                (None, None) => {
                     self.error_span(
                         p.span,
                         format!("parameter `{}` is missing a type annotation", p.binding),
@@ -1044,7 +1100,15 @@ impl<'a> Checker<'a> {
             }
         }
 
-        let explicit_ret = return_type.map(|t| self.resolve_ast_type(t));
+        // An omitted return type takes the expected one when it is known;
+        // otherwise (a generic `U` the call site has yet to solve, as in
+        // `map`) the body's returns infer it, as they always have.
+        let explicit_ret = match return_type {
+            Some(t) => Some(self.resolve_ast_type(t)),
+            None => expected_ret
+                .filter(|t| contextual_type_is_known(t))
+                .cloned(),
+        };
         let (body_expected_ret, _final_ret) =
             self.function_return_context(is_async, explicit_ret.clone(), span);
 
@@ -5059,6 +5123,17 @@ impl<'a> Checker<'a> {
                         span,
                         format!("expected {}, found {}", expected_msg, args.len()),
                     );
+                    // The inference pass above was silent, so every argument
+                    // is checked here too or an error inside one (a callback
+                    // body, say) would vanish behind the arity diagnostic
+                    // (dsc#253 review). Positions that line up with a
+                    // parameter keep it as context so a literal is typed the
+                    // same way; the arity error is the only call-level
+                    // diagnostic, so assignability is not reported on top.
+                    for (index, arg) in args.iter().enumerate() {
+                        let context = substituted_params.get(index).cloned();
+                        self.check_exception_use(arg, super::exceptions::Use::Value, context);
+                    }
                 } else {
                     for (expected, arg) in substituted_params.iter().zip(args.iter()) {
                         let arg_type = self.check_exception_use(
@@ -5247,18 +5322,49 @@ impl<'a> Checker<'a> {
         // Array<T>)` inferred nothing and reported `expected Array<T>, found
         // Array<number>`. infer_type_args descends through Array, Option and
         // nested generics, and is the same helper the enum constructors use.
+        //
+        // Function literals are visited after every other argument so a
+        // parameter they need (`T` in `fn(T) U`) is solved from the plain
+        // arguments first, whatever the parameter order (dsc#251).
+        //
+        // This pass is silent: `check_call` checks every argument again
+        // against the substituted signature, and that pass owns the
+        // diagnostics. Reporting from both passes doubled every error inside
+        // a callback body passed to a generic function.
         let mut subst = HashMap::new();
-        for (param_ty, arg) in function_params.iter().zip(call_args.iter()) {
-            if !contains_param(param_ty) {
-                continue;
-            }
+        let reported = self.errors.len();
+        let generic_args = function_params
+            .iter()
+            .zip(call_args.iter())
+            .filter(|(param_ty, _)| contains_param(param_ty));
+        let (literals, plain): (Vec<_>, Vec<_>) =
+            generic_args.partition(|(_, arg)| is_function_literal(arg));
+        for (param_ty, arg) in plain.into_iter().chain(literals) {
             let context = unsolved_params_to_var(param_ty, &subst);
             let arg_type =
                 self.check_exception_use(arg, super::exceptions::Use::Value, Some(context));
             infer_type_args(param_ty, &arg_type, &param_names, &mut subst);
         }
+        self.errors.truncate(reported);
         subst
     }
+}
+
+/// A function literal, possibly parenthesized, in argument position.
+fn is_function_literal(expr: &ast::Expr<'_>) -> bool {
+    match expr {
+        ast::Expr::Function { .. } => true,
+        ast::Expr::Paren { expr, .. } => is_function_literal(expr),
+        _ => false,
+    }
+}
+
+/// Whether an expected type says enough to stand in for an omitted
+/// annotation. An open slot (`Var`, `Infer`, `Error`) names no type the
+/// literal could take, so it supplies nothing and the ordinary
+/// missing-annotation diagnostic stands (dsc#251).
+pub(super) fn contextual_type_is_known(ty: &Type<'_>) -> bool {
+    !matches!(ty, Type::Var | Type::Infer | Type::Error)
 }
 
 fn collect_param_names<'a>(tys: &[Type<'a>]) -> Vec<&'a str> {

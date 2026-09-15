@@ -211,3 +211,29 @@ payload as `string`/`number`. The owner patches, pin bases, and validation
 summaries live in
 [migrations/infer-assignability-115/README.md](migrations/infer-assignability-115/README.md).
 Do not merge this gate against the old pins.
+
+## Contextual typing for call arguments (rfd#67 part 1, dsc#251)
+
+A function literal in a position whose function type is known — a call
+argument, an interface method argument, `useEffect`'s slot, an annotated
+binding — takes its omitted parameter and return types from that position:
+`useEffect(fn() { … })` and `xs.map(fn(x) { … })` check exactly as their
+annotated spellings do. Written annotations are never overridden, a fully
+annotated literal is unchanged, and omitted annotations remain illegal where
+no expected type exists (an untyped `const`, a top-level `fn`). This is the
+opposite direction from dsc#115/dsc#223: the expected type is solved before
+the body is checked, and an open slot (`Var`, `Infer`) supplies nothing, so
+the missing-annotation diagnostic stands. Function types still cannot be
+union members (rfd#42); `Option<fn() void>` remains `useEffect`'s declared
+type and nobody has to write it.
+
+`tests/fixtures/contextual_typing/` covers callback parameters (`apply`,
+`map`, `filter`, a `void` callback), a generic callee whose type parameter is
+solved from a later argument, and three rejections: a written parameter type
+that conflicts with the position (at the argument), an arity disagreement
+(one diagnostic at the argument), and a conflicting return (at the return).
+`cargo test -p deka_emit contextual_typing` executes the passing fixtures with
+Node.js; `cargo test -p deka_syntax contextual_tests` covers the checker,
+including `useEffect`, interface methods, annotated bindings, and the
+now-single diagnostic for errors inside a callback passed to a generic
+function (previously reported twice, once per inference pass).

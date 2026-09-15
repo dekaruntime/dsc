@@ -1,0 +1,2 @@
+fn apply(xs: Array<number>, f: fn(number) number) Array<number> { return xs.map(f); }
+const ys = apply([1, 2], fn(x: string) { return 1; });

@@ -1,0 +1,5 @@
+{
+  "title": "Contextual typing callback params",
+  "stage": "run",
+  "notes": "rfd#67 part 1 (dsc#251): a function literal passed where a function type is expected takes its parameter and return types from that position."
+}

@@ -55,5 +55,11 @@ fn multiline_jsx_expression_body_keeps_its_parens() {
     let once = format(
         "const items = xs.map((i) => (\n  <li>\n    {i}\n  </li>\n))\n",
     );
-    assert!(once.contains("(i) => (<li>"), "{once}");
+    // dsc#245's layout, same as `return (…)`: never collapsed to `(<li>`.
+    assert_eq!(once, "const items = xs.map((i) => (\n  <li>\n    {i}\n  </li>\n))\n");
+    let nested = format(
+        "fn View() ReactNode {\n  const items = xs.map((i) => (\n    <li>\n      {i}\n    </li>\n  ))\n  return <ul>{items}</ul>\n}\n",
+    );
+    assert!(nested.contains("xs.map((i) => (\n    <li>"), "{nested}");
+    assert!(nested.contains("</li>\n  ))\n"), "{nested}");
 }

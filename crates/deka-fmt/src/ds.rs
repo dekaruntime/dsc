@@ -1303,10 +1303,24 @@ impl<'src> Formatter<'src> {
                         s.push_str(&params);
                         s.push_str(") => ");
                         match body {
+                            // dsc#245 applies to an expression body the
+                            // same as to `return`: multi-line JSX is laid
+                            // out as `(\n  <jsx>\n)`, never collapsed onto
+                            // the paren lines.
                             [Stmt::Return {
                                 value: Some(value),
                                 ..
-                            }] => s.push_str(&self.expr_to_string(value)),
+                            }] => match jsx_payload_if_multiline(value) {
+                                Some(jsx) => {
+                                    s.push_str("(\n");
+                                    s.push_str(&"  ".repeat(self.indent + 1));
+                                    s.push_str(&self.expr_to_string(jsx));
+                                    s.push('\n');
+                                    s.push_str(&"  ".repeat(self.indent));
+                                    s.push(')');
+                                }
+                                None => s.push_str(&self.expr_to_string(value)),
+                            },
                             // The parser only ever builds the one-return
                             // shape; anything else is a bug upstream, and
                             // the block spelling keeps the output parseable.

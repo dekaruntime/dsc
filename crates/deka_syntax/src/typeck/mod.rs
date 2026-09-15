@@ -22,6 +22,8 @@ mod ast_type;
 mod descriptor;
 mod exceptions;
 mod expr;
+#[cfg(test)]
+mod contextual_tests;
 mod hooks;
 #[cfg(test)]
 mod hooks_tests;

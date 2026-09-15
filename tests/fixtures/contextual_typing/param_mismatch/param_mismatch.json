@@ -1,0 +1,6 @@
+{
+  "title": "Contextual typing param mismatch",
+  "stage": "typecheck",
+  "notes": "rfd#67 part 1 (dsc#251): a written parameter type is never overridden; one that conflicts with the position fails at the argument.",
+  "expectedDiagnosticContains": "expected argument type `fn(number) number`, found type `fn(string) number`"
+}

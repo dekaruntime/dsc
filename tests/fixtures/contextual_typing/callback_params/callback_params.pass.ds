@@ -1,0 +1,25 @@
+fn apply(xs: Array<number>, f: fn(number) number) Array<number> {
+  return xs.map(f)
+}
+fn run(cb: fn() void) void {
+  cb()
+}
+const ys = apply([1, 2, 3], fn(x) { return x * 2 })
+const doubled: string = ys.join(",")
+if (doubled != "2,4,6") {
+  panic("callback parameter was not typed from the call")
+}
+const zs = [1, 2, 3].map(fn(x) { return string(x) })
+const joined: string = zs.join("-")
+if (joined != "1-2-3") {
+  panic("map callback did not infer its element type")
+}
+const big = ys.filter(fn(x) { return x > 2 })
+if (big.length != 2) {
+  panic("filter callback did not infer its element type")
+}
+let ran = false
+run(fn() { ran = true })
+if (!ran) {
+  panic("void callback did not run")
+}

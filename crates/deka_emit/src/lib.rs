@@ -290,6 +290,11 @@ const nested: Request = { options: {} };
         run_hats_fixtures("ternary", 5);
     }
 
+    #[test]
+    fn contextual_typing_hats_fixtures() {
+        run_hats_fixtures("contextual_typing", 5);
+    }
+
     fn run_hats_fixtures(group: &str, expected_count: usize) {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join(format!("../../tests/fixtures/{group}"));

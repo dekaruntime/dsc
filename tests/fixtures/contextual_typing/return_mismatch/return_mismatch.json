@@ -1,0 +1,6 @@
+{
+  "title": "Contextual typing return mismatch",
+  "stage": "typecheck",
+  "notes": "rfd#67 part 1 (dsc#251): the omitted return type is the expected one, so a conflicting return is the ordinary return-type diagnostic inside the argument.",
+  "expectedDiagnosticContains": "expected return type `number`, found type `string`"
+}

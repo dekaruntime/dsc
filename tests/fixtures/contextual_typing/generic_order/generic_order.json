@@ -1,0 +1,5 @@
+{
+  "title": "Contextual typing generic order",
+  "stage": "run",
+  "notes": "rfd#67 part 1 (dsc#251): the literal is typed after the plain arguments solve the callee's type parameters, whatever the parameter order."
+}

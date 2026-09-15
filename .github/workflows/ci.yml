@@ -1,3 +1,6 @@
+# SCCACHE IS REQUIRED FOR ALL RUST COMPILATION.
+# EVERY CARGO BUILD/TEST/CHECK MUST RUN WITH RUSTC_WRAPPER=sccache. NO EXCEPTIONS.
+
 name: CI
 
 on:
@@ -106,18 +109,17 @@ jobs:
           components: clippy
 
       - name: Install sccache
-        if: ${{ env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != '' && env.SCCACHE_ENDPOINT != '' }}
         uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Configure sccache
         run: |
           if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ] || [ -z "$SCCACHE_ENDPOINT" ]; then
-            echo "::notice::R2 cache is not configured for this run; building without sccache."
-            exit 0
+            echo "::error::R2 sccache credentials are missing. SCCACHE IS REQUIRED FOR ALL RUST COMPILATION."
+            exit 1
           fi
           if ! command -v sccache >/dev/null 2>&1; then
-            echo "::warning::sccache is unavailable; building without a compiler cache."
-            exit 0
+            echo "::error::sccache is not on PATH. SCCACHE IS REQUIRED FOR ALL RUST COMPILATION. Reinstall it on this runner (cargo install sccache --locked), see deka#656."
+            exit 1
           fi
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
           echo "sccache enabled for dsc-sccache-linux-x64"

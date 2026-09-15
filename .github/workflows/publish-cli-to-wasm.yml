@@ -1,3 +1,6 @@
+# SCCACHE IS REQUIRED FOR ALL RUST COMPILATION.
+# EVERY CARGO BUILD/TEST/CHECK MUST RUN WITH RUSTC_WRAPPER=sccache. NO EXCEPTIONS.
+
 # Copies already-built CLI binaries from a GitHub Release onto the public
 # wasm host (https://dsc-wasm.deka.gg). The tag-driven Release workflow does
 # this going forward; this job exists so a version published before that

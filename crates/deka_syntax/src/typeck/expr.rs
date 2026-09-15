@@ -5157,6 +5157,17 @@ impl<'a> Checker<'a> {
                         span,
                         format!("expected {}, found {}", expected_msg, args.len()),
                     );
+                    // The inference pass above was silent, so every argument
+                    // is checked here too or an error inside one (a callback
+                    // body, say) would vanish behind the arity diagnostic
+                    // (dsc#253 review). Positions that line up with a
+                    // parameter keep it as context so a literal is typed the
+                    // same way; the arity error is the only call-level
+                    // diagnostic, so assignability is not reported on top.
+                    for (index, arg) in args.iter().enumerate() {
+                        let context = substituted_params.get(index).cloned();
+                        self.check_exception_use(arg, super::exceptions::Use::Value, context);
+                    }
                 } else {
                     for (expected, arg) in substituted_params.iter().zip(args.iter()) {
                         let arg_type = self.check_exception_use(

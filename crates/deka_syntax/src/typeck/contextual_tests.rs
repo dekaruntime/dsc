@@ -198,6 +198,27 @@ fn unsolved_type_parameter_supplies_nothing() {
 }
 
 #[test]
+fn arity_error_does_not_swallow_callback_body_errors() {
+    // The silent inference pass checks the literal; the arity branch of
+    // check_call must check it again or the body error is lost behind the
+    // arity diagnostic (dsc#253 review).
+    let got = errors(
+        "fn generic<T>(value: T, cb: fn(T) void) void { }\n\
+         generic(fn(x: number) void { const bad: string = x })",
+    );
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert!(
+        got.iter().any(|m| m.contains("expected 2 arguments, found 1")),
+        "{got:?}"
+    );
+    assert!(
+        got.iter()
+            .any(|m| m.contains("expected type `string`, found type `number`")),
+        "{got:?}"
+    );
+}
+
+#[test]
 fn generic_callee_reports_body_errors_once() {
     // Before dsc#251 the inference pass and the check pass both reported
     // errors inside a callback passed to a generic function.

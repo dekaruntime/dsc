@@ -444,6 +444,11 @@ impl LanguageServer for Backend {
         let Some(text) = self.get_document(&uri).await else {
             return Ok(None);
         };
+        let file_path = uri
+            .to_file_path()
+            .ok()
+            .and_then(|path| path.to_str().map(|path| path.to_string()))
+            .unwrap_or_else(|| uri.to_string());
 
         let line_index = LineIndex::new(&text);
         let offset = match line_index.position_to_offset(position) {
@@ -451,19 +456,21 @@ impl LanguageServer for Backend {
             None => return Ok(None),
         };
 
-        let hover_text = hover_for_annotation(&text, offset)
-            .or_else(|| hover_from_import(&text, offset));
+        let documents = self.documents.read().await.clone();
+        let hover_text = entry_hover(&documents, &text, &file_path, offset);
 
         let Some(value) = hover_text else {
             return Ok(None);
         };
 
+        let range = word_span_at_offset(text.as_bytes(), offset)
+            .map(|span| span_to_range(span, &line_index));
         Ok(Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,
                 value,
             }),
-            range: None,
+            range,
         }))
     }
 

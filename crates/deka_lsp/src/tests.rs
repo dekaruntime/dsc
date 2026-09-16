@@ -773,3 +773,256 @@ fn completes_prefix_filtered_items_after_const_x_eq_use() {
         "every item must match the prefix: labels={labels:?}"
     );
 }
+
+// ---------------------------------------------------------------------
+// dsc#265 part 3: hover + references/rename. The hover tests map to the
+// issue's measured `null` positions — a local, a param, a top-level
+// function call, an imported name — and assert the signature content, not
+// just a non-null response. The references/rename tests pin the same
+// symbol table (local, param, imported name) in a `.dsx` workspace, which
+// the old `.ds`-only workspace scan never saw.
+// ---------------------------------------------------------------------
+
+fn hover_at(
+    documents: &HashMap<Url, String>,
+    text: &str,
+    file_path: &str,
+    needle: &str,
+) -> Option<String> {
+    let offset = text.rfind(needle).expect("needle present") + 1;
+    entry_hover(documents, text, file_path, offset)
+}
+
+/// Issue position: hovering a local shows its declaration with the type.
+#[test]
+fn hover_shows_local_const_declaration_with_type() {
+    let source = "fn f() int {\n    const total: int = 41;\n    return total;\n}\n";
+    let hover = hover_at(&HashMap::new(), source, "main.ds", "total").expect("hover on local");
+    assert!(
+        hover.contains("const total: int"),
+        "hover must show the declared type: {hover}"
+    );
+}
+
+/// Issue position: hovering a param shows its declared type.
+#[test]
+fn hover_shows_parameter_declaration_with_type() {
+    let source = "fn greeting(name: string) string {\n    return name;\n}\n";
+    let hover = hover_at(&HashMap::new(), source, "main.ds", "name").expect("hover on param");
+    assert!(
+        hover.contains("(parameter) name: string"),
+        "hover must show the parameter type: {hover}"
+    );
+}
+
+/// Issue position: hovering a call to a top-level function shows its
+/// signature — `fn greeting(name: string) string`.
+#[test]
+fn hover_shows_function_signature_at_call_site() {
+    let source =
+        "fn greeting(name: string) string {\n    return name;\n}\nconst msg = greeting('sami');\n";
+    let hover = hover_at(&HashMap::new(), source, "main.ds", "greeting(")
+        .expect("hover on function call");
+    assert!(
+        hover.contains("fn greeting(name: string) string"),
+        "hover must show the declared signature: {hover}"
+    );
+}
+
+/// Issue position: hovering an imported name shows the signature as declared
+/// in the exporting module, resolved through the project loader. Fixture
+/// syntax is `export fn`.
+#[test]
+fn hover_shows_imported_function_signature_from_exporting_module() {
+    let (workspace, app) = project_workspace("dekascript_lsp_hover_import");
+    fs::write(
+        app.join("greet.ds"),
+        "export fn greeting(name: string) string {\n    return name;\n}\n",
+    )
+    .expect("write greet.ds");
+    let main = app.join("main.ds");
+    let source = "import { greeting } from './greet'\nconst msg = greeting('sami');\n";
+    fs::write(&main, source).expect("write main.ds");
+
+    let hover = hover_at(
+        &HashMap::new(),
+        source,
+        main.to_str().expect("main path"),
+        "greeting(",
+    )
+    .expect("hover on imported name");
+    assert!(
+        hover.contains("fn greeting(name: string) string"),
+        "hover must show the exporting module's signature: {hover}"
+    );
+    assert!(
+        hover.contains("./greet"),
+        "hover must name the module the name comes from: {hover}"
+    );
+    let _ = workspace;
+}
+
+/// An open, unsaved buffer for the exporting module wins over disk, exactly
+/// like the diagnostics overlay.
+#[test]
+fn hover_on_import_uses_unsaved_buffer_of_exporting_module() {
+    let (workspace, app) = project_workspace("dekascript_lsp_hover_import_overlay");
+    let greet = app.join("greet.ds");
+    fs::write(&greet, "export fn greeting(name: string) string {\n    return name;\n}\n")
+        .expect("write greet.ds");
+    let main = app.join("main.ds");
+    let source = "import { greeting } from './greet'\nconst msg = greeting('sami');\n";
+    fs::write(&main, source).expect("write main.ds");
+
+    let greet_uri = Url::from_file_path(&greet).expect("greet uri");
+    let unsaved = "export fn greeting(name: string, punct: string) string {\n    return name;\n}\n";
+    let documents = HashMap::from([(greet_uri, unsaved.to_string())]);
+    let hover = hover_at(&documents, source, main.to_str().expect("main path"), "greeting(")
+        .expect("hover on imported name");
+    assert!(
+        hover.contains("fn greeting(name: string, punct: string) string"),
+        "hover must reflect the unsaved buffer: {hover}"
+    );
+    let _ = workspace;
+}
+
+/// A word that binds nothing (a keyword, an unknown name) still returns no
+/// hover rather than a wrong one.
+#[test]
+fn hover_returns_none_for_unbound_words() {
+    let source = "fn f() {\n    return;\n}\n";
+    assert!(hover_at(&HashMap::new(), source, "main.ds", "return").is_none());
+}
+
+/// The scope query must see mid-edit source: `parse_recovering` keeps the
+/// declarations around a half-typed statement, so hover works while the file
+/// does not fully parse.
+#[test]
+fn hover_works_mid_edit_with_recovering_parse() {
+    let source = "fn greeting(name: string) string {\n    const shout = name;\n    return sh\n}\n";
+    // Hover the local's declaration use while the `return sh` line is
+    // incomplete: the scope walk must still resolve `name`.
+    let hover = hover_at(&HashMap::new(), source, "main.ds", "name").expect("hover mid-edit");
+    assert!(
+        hover.contains("(parameter) name: string"),
+        "mid-edit hover must resolve the param: {hover}"
+    );
+}
+
+/// Issue symbol table, references: a local, a param, and an imported name in
+/// a `.dsx` workspace (the old scanner indexed `.ds` files only, so this
+/// workspace returned nothing at all before the fix).
+#[test]
+fn references_find_local_param_and_imported_name_across_dsx_files() {
+    let dir = temp_dir("dekascript_lsp_references_dsx");
+    let counter = dir.join("Counter.dsx");
+    let page = dir.join("page.dsx");
+    let counter_src = "export fn Counter() ReactNode { return <button /> }\n";
+    let page_src = "import { Counter } from \"./Counter.dsx\"\n\
+fn Page() ReactNode { return <Counter /> }\n";
+    fs::write(&counter, counter_src).expect("write Counter.dsx");
+    fs::write(&page, page_src).expect("write page.dsx");
+
+    let page_uri = Url::from_file_path(&page).expect("page uri");
+    let counter_uri = Url::from_file_path(&counter).expect("counter uri");
+    let refs =
+        collect_reference_locations(std::slice::from_ref(&dir), &page_uri, page_src, "Counter");
+    assert_eq!(
+        refs.iter().filter(|loc| loc.uri == counter_uri).count(),
+        1,
+        "the declaration in Counter.dsx: {refs:?}"
+    );
+    assert_eq!(
+        refs.iter().filter(|loc| loc.uri == page_uri).count(),
+        2,
+        "the import and the tag in page.dsx: {refs:?}"
+    );
+}
+
+#[test]
+fn references_find_local_and_param_in_active_file() {
+    let dir = temp_dir("dekascript_lsp_references_local");
+    let file = dir.join("main.ds");
+    let source = "fn greeting(name: string) string {\n    const shout = name;\n    return shout;\n}\n";
+    fs::write(&file, source).expect("write main.ds");
+    let uri = Url::from_file_path(&file).expect("uri");
+
+    let param_refs = collect_reference_locations(std::slice::from_ref(&dir), &uri, source, "name");
+    assert_eq!(param_refs.len(), 2, "param decl + use: {param_refs:?}");
+    let local_refs =
+        collect_reference_locations(std::slice::from_ref(&dir), &uri, source, "shout");
+    assert_eq!(local_refs.len(), 2, "local decl + use: {local_refs:?}");
+}
+
+/// The file under the cursor answers even when no workspace root contains
+/// it (single-file session): references fall back to the open buffer.
+#[test]
+fn references_include_active_file_outside_workspace_roots() {
+    let roots_dir = temp_dir("dekascript_lsp_references_roots");
+    let file_dir = temp_dir("dekascript_lsp_references_orphan");
+    let file = file_dir.join("main.ds");
+    let source = "const total = 41;\nconst answer = total;\n";
+    fs::write(&file, source).expect("write main.ds");
+    let uri = Url::from_file_path(&file).expect("uri");
+
+    let refs =
+        collect_reference_locations(std::slice::from_ref(&roots_dir), &uri, source, "total");
+    assert_eq!(
+        refs.len(),
+        2,
+        "the open buffer must be searched even outside every root: {refs:?}"
+    );
+    assert!(refs.iter().all(|loc| loc.uri == uri));
+}
+
+#[test]
+fn rename_rewrites_imported_name_across_dsx_files() {
+    let dir = temp_dir("dekascript_lsp_rename_dsx");
+    let counter = dir.join("Counter.dsx");
+    let page = dir.join("page.dsx");
+    let counter_src = "export fn Counter() ReactNode { return <button /> }\n";
+    let page_src = "import { Counter } from \"./Counter.dsx\"\n\
+fn Page() ReactNode { return <Counter /> }\n";
+    fs::write(&counter, counter_src).expect("write Counter.dsx");
+    fs::write(&page, page_src).expect("write page.dsx");
+
+    let page_uri = Url::from_file_path(&page).expect("page uri");
+    let counter_uri = Url::from_file_path(&counter).expect("counter uri");
+    let edits = collect_symbol_rename_edits(
+        std::slice::from_ref(&dir),
+        &page_uri,
+        page_src,
+        "Counter",
+        "CounterButton",
+    );
+    assert_eq!(
+        edits.get(&counter_uri).map(Vec::len),
+        Some(1),
+        "the declaration file: {edits:?}"
+    );
+    assert_eq!(
+        edits.get(&page_uri).map(Vec::len),
+        Some(2),
+        "the import and the tag: {edits:?}"
+    );
+    assert!(
+        edits
+            .values()
+            .flatten()
+            .all(|edit| edit.new_text == "CounterButton"),
+        "every edit renames to the new symbol: {edits:?}"
+    );
+}
+
+#[test]
+fn rename_rewrites_param_and_local_in_active_file() {
+    let dir = temp_dir("dekascript_lsp_rename_local");
+    let file = dir.join("main.ds");
+    let source = "fn greeting(name: string) string {\n    return name;\n}\n";
+    fs::write(&file, source).expect("write main.ds");
+    let uri = Url::from_file_path(&file).expect("uri");
+
+    let edits =
+        collect_symbol_rename_edits(std::slice::from_ref(&dir), &uri, source, "name", "who");
+    assert_eq!(edits.get(&uri).map(Vec::len), Some(2), "edits={edits:?}");
+}

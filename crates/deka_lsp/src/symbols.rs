@@ -54,6 +54,12 @@ pub(crate) fn span_to_range(span: Span, line_index: &LineIndex) -> Range {
 }
 
 pub(crate) fn word_at_offset(source: &[u8], offset: usize) -> Option<String> {
+    let span = word_span_at_offset(source, offset)?;
+    Some(String::from_utf8_lossy(&source[span.start..span.end]).to_string())
+}
+
+/// The byte span of the identifier under `offset`, for hover ranges.
+pub(crate) fn word_span_at_offset(source: &[u8], offset: usize) -> Option<Span> {
     let bytes = source;
     if offset >= bytes.len() {
         return None;
@@ -73,7 +79,7 @@ pub(crate) fn word_at_offset(source: &[u8], offset: usize) -> Option<String> {
     if word.iter().all(|b| b.is_ascii_whitespace()) {
         return None;
     }
-    Some(String::from_utf8_lossy(word).to_string())
+    Some(Span::new(start, end))
 }
 
 pub(crate) fn is_ident_char(byte: u8) -> bool {

@@ -17,7 +17,10 @@ pub use canonicalize::{lower_method_calls, resolve_imported_enum_constructors};
 pub use diagnostics::{Diagnostic, Severity};
 pub use lexer::Lexer;
 pub use parse::{ParseResult, parse, parse_recovering};
-pub use scope::{ScopeItem, ScopeItemKind, jsx_tag_prefix_at, names_in_scope_at_offset};
+pub use scope::{
+    ScopeDeclaration, ScopeItem, ScopeItemKind, declarations_in_scope_at_offset,
+    jsx_tag_prefix_at, names_in_scope_at_offset,
+};
 pub use typeck::{
     build_module_build_fragments, check_program, check_program_with_imports,
     collect_exported_interactive_components, collect_interactive_components, collect_module_exports,

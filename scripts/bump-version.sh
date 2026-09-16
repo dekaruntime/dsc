@@ -123,7 +123,11 @@ if [[ "$NEW" =~ ^0\.42\. ]]; then
   exit 1
 fi
 
-LATEST_TAG="$(git tag -l 'v[0-9]*' --sort=-v:refname | head -n1 || true)"
+# rfd#68: canary tags (v0.58.3-canary-a1b2c3d) live alongside stable tags
+# and always sort ahead of the stable tag they're built from (semver
+# prerelease ordering), so they must be filtered out here -- otherwise this
+# check would refuse to bump past a canary that was never promoted.
+LATEST_TAG="$(git tag -l 'v[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
 if [[ -n "$LATEST_TAG" ]]; then
   LATEST_VER="${LATEST_TAG#v}"
   if [[ "$LATEST_VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && ! semver_gt "$NEW" "$LATEST_VER"; then

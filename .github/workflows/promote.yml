@@ -1,0 +1,283 @@
+# rfd#68: promotes an already-built, already-published canary to stable.
+#
+# No Rust toolchain, no rebuild. "Stable is a promotion of the same bytes"
+# means exactly that: this workflow copies the canary's R2 objects to the
+# vX.Y.Z path, rewrites only the version/tag/channel/promoted_from bookkeeping
+# in manifest.json and release.json, creates the vX.Y.Z tag at the canary's
+# commit, and flips the latest/ pointers. It never invokes cargo.
+#
+# The pressing of this button (Actions -> Promote -> Run workflow, with a
+# canary tag typed in) is the human sign-off this RFD is built around.
+name: Promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      canary:
+        description: "Canary tag to promote (e.g. v0.58.3-canary-a1b2c3d)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  R2_BUCKET_RELEASES: "dsc-releases"
+  R2_BUCKET_WASM: "dsc-wasm"
+
+jobs:
+  promote:
+    name: Promote canary to stable
+    runs-on: ubuntu-latest
+    environment: release
+    env:
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Where am I
+        uses: ./.github/actions/where-am-i
+
+      - name: Require R2 release credentials
+        run: |
+          if [ -z "${R2_ENDPOINT:-}" ] || [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+            echo "::error::promote requires R2_ENDPOINT, R2_ACCESS_KEY_ID, and R2_SECRET_ACCESS_KEY in the release environment."
+            exit 1
+          fi
+
+      - name: Install AWS CLI
+        run: command -v aws >/dev/null 2>&1 || pip install --break-system-packages awscli
+
+      # --------------------------------------------------------------
+      # (a) The input names a real canary, and the target stable tag is free.
+      # --------------------------------------------------------------
+      - name: Validate the canary input
+        id: validate
+        run: |
+          set -euo pipefail
+
+          CANARY="${{ inputs.canary }}"
+
+          if [[ ! "$CANARY" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-canary-[0-9a-f]{7}$ ]]; then
+            echo "::error::'${CANARY}' is not a canary tag. Expected vX.Y.Z-canary-<7-char-sha>."
+            exit 1
+          fi
+          V="${BASH_REMATCH[1]}"
+
+          if ! git rev-parse "$CANARY" >/dev/null 2>&1; then
+            echo "::error::canary tag ${CANARY} does not exist in this repository."
+            exit 1
+          fi
+
+          if git rev-parse "v${V}" >/dev/null 2>&1; then
+            echo "::error::v${V} already exists. A canary can only be promoted once; bump the version for the next release."
+            exit 1
+          fi
+
+          CANARY_COMMIT="$(git rev-parse "${CANARY}^{}")"
+
+          {
+            echo "canary=${CANARY}"
+            echo "v=${V}"
+            echo "canary_commit=${CANARY_COMMIT}"
+          } >> "$GITHUB_OUTPUT"
+
+      # --------------------------------------------------------------
+      # (b) The canary's own release.json in R2 must record the same commit
+      # the git tag points at, i.e. what we're about to promote is what was
+      # actually built and published, not a re-pointed or hand-edited tag.
+      # --------------------------------------------------------------
+      - name: Verify canary artifacts match the tagged commit
+        run: |
+          set -euo pipefail
+
+          CANARY="${{ steps.validate.outputs.canary }}"
+          CANARY_COMMIT="${{ steps.validate.outputs.canary_commit }}"
+
+          aws s3 cp "s3://${R2_BUCKET_RELEASES}/${CANARY}/release.json" canary-release.json \
+            --endpoint-url="${R2_ENDPOINT}"
+
+          ARTIFACT_COMMIT="$(python3 -c 'import json; print(json.load(open("canary-release.json"))["commit"])')"
+          if [ "$ARTIFACT_COMMIT" != "$CANARY_COMMIT" ]; then
+            echo "::error::release.json at ${CANARY}/ records commit ${ARTIFACT_COMMIT}, but tag ${CANARY} points at ${CANARY_COMMIT}."
+            exit 1
+          fi
+
+      # --------------------------------------------------------------
+      # (c) Copy bytes, don't rebuild. Then rewrite only the bookkeeping
+      # keys in the two JSON files that carry channel identity.
+      # --------------------------------------------------------------
+      - name: Copy canary artifacts to the stable path
+        run: |
+          set -euo pipefail
+
+          V="${{ steps.validate.outputs.v }}"
+          CANARY="${{ steps.validate.outputs.canary }}"
+
+          aws s3 cp --recursive "s3://${R2_BUCKET_RELEASES}/${CANARY}/" "s3://${R2_BUCKET_RELEASES}/v${V}/" \
+            --endpoint-url="${R2_ENDPOINT}"
+          aws s3 cp --recursive "s3://${R2_BUCKET_WASM}/${CANARY}/" "s3://${R2_BUCKET_WASM}/v${V}/" \
+            --endpoint-url="${R2_ENDPOINT}"
+
+      - name: Rewrite manifest.json and release.json for the stable channel
+        run: |
+          set -euo pipefail
+
+          V="${{ steps.validate.outputs.v }}"
+          CANARY="${{ steps.validate.outputs.canary }}"
+
+          mkdir -p "promote/v${V}"
+          aws s3 cp "s3://${R2_BUCKET_RELEASES}/v${V}/release.json" "promote/v${V}/release.json" \
+            --endpoint-url="${R2_ENDPOINT}"
+          aws s3 cp "s3://${R2_BUCKET_WASM}/v${V}/manifest.json" "promote/v${V}/manifest.json" \
+            --endpoint-url="${R2_ENDPOINT}"
+
+          # release.json: version/tag change (it carried the full canary
+          # string), channel flips, promoted_from records where this came
+          # from. commit and every checksum are untouched -- same bytes.
+          python3 - "promote/v${V}/release.json" "$V" "$CANARY" <<'PY'
+          import json
+          import sys
+
+          path, v, canary = sys.argv[1:4]
+          with open(path) as f:
+              data = json.load(f)
+          data["version"] = v
+          data["tag"] = f"v{v}"
+          data["channel"] = "stable"
+          data["promoted_from"] = canary
+          with open(path, "w") as f:
+              json.dump(data, f, indent=2)
+              f.write("\n")
+          PY
+
+          # manifest.json's "version" was already the bare base version
+          # (build-wasm.sh reads it straight from Cargo.toml); only the
+          # channel bookkeeping needs to change.
+          python3 - "promote/v${V}/manifest.json" "$CANARY" <<'PY'
+          import json
+          import sys
+
+          path, canary = sys.argv[1:3]
+          with open(path) as f:
+              data = json.load(f)
+          data["channel"] = "stable"
+          data["promoted_from"] = canary
+          with open(path, "w") as f:
+              json.dump(data, f, indent=2)
+              f.write("\n")
+          PY
+
+          aws s3 cp "promote/v${V}/release.json" "s3://${R2_BUCKET_RELEASES}/v${V}/release.json" \
+            --endpoint-url="${R2_ENDPOINT}"
+          aws s3 cp "promote/v${V}/release.json" "s3://${R2_BUCKET_WASM}/v${V}/release.json" \
+            --endpoint-url="${R2_ENDPOINT}"
+          aws s3 cp "promote/v${V}/manifest.json" "s3://${R2_BUCKET_WASM}/v${V}/manifest.json" \
+            --endpoint-url="${R2_ENDPOINT}"
+
+      # --------------------------------------------------------------
+      # (d) The stable tag, at the canary's commit -- not at whatever HEAD
+      # happens to be when the button gets pressed.
+      # --------------------------------------------------------------
+      - name: Create and push the stable tag
+        run: |
+          set -euo pipefail
+
+          V="${{ steps.validate.outputs.v }}"
+          CANARY="${{ steps.validate.outputs.canary }}"
+          CANARY_COMMIT="${{ steps.validate.outputs.canary_commit }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${V}" "$CANARY_COMMIT" -m "dsc v${V} (promoted from ${CANARY})"
+          git push origin "v${V}"
+
+      # --------------------------------------------------------------
+      # (e) release.yml used to create a GitHub release on every tag; keep
+      # that true for stable tags, minus the prerelease flag.
+      # --------------------------------------------------------------
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          V="${{ steps.validate.outputs.v }}"
+          CANARY="${{ steps.validate.outputs.canary }}"
+
+          mkdir -p "ghrelease/v${V}"
+          aws s3 sync "s3://${R2_BUCKET_RELEASES}/v${V}/" "ghrelease/v${V}/" --endpoint-url="${R2_ENDPOINT}"
+
+          TMPDIR="$(mktemp -d)"
+          curl -fsSL -o "${TMPDIR}/gh.tar.gz" \
+            "https://github.com/cli/cli/releases/download/v2.98.0/gh_2.98.0_linux_amd64.tar.gz"
+          tar -xzf "${TMPDIR}/gh.tar.gz" -C "${TMPDIR}"
+          GH_BIN="${TMPDIR}/gh_2.98.0_linux_amd64/bin/gh"
+
+          ASSETS=()
+          for f in "ghrelease/v${V}"/*; do
+            [ -f "$f" ] && ASSETS+=("$f")
+          done
+          TITLE="dsc v${V}"
+          NOTES="dsc v${V}. Promoted from canary ${CANARY} -- same bytes, no rebuild."
+          if "$GH_BIN" release view "v${V}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release v${V} already exists. Uploading/overwriting assets."
+            "$GH_BIN" release upload "v${V}" "${ASSETS[@]}" \
+              --repo "${{ github.repository }}" --clobber
+          else
+            "$GH_BIN" release create "v${V}" \
+              --repo "${{ github.repository }}" \
+              --title "$TITLE" \
+              --notes "$NOTES" \
+              "${ASSETS[@]}"
+          fi
+
+      - name: Point latest/ at the promoted release
+        run: |
+          set -euo pipefail
+
+          V="${{ steps.validate.outputs.v }}"
+
+          aws s3 cp "s3://${R2_BUCKET_RELEASES}/v${V}/release.json" "s3://${R2_BUCKET_RELEASES}/latest.json" \
+            --endpoint-url="${R2_ENDPOINT}"
+          for f in dsc.wasm dsc_diagnostics.wasm deka_compiler.wasm deka_diagnostics.wasm \
+            manifest.json release.json deka-compiler-artifact.json deka-diagnostics-artifact.json \
+            dsc-linux-x64 dsc-darwin-x64 dsc-darwin-arm64; do
+            aws s3 cp "s3://${R2_BUCKET_WASM}/v${V}/${f}" "s3://${R2_BUCKET_WASM}/latest/${f}" \
+              --endpoint-url="${R2_ENDPOINT}"
+          done
+
+      - name: Summary
+        run: |
+          V="${{ steps.validate.outputs.v }}"
+          CANARY="${{ steps.validate.outputs.canary }}"
+          echo "Promoted ${CANARY} to v${V}."
+          echo "  wasm host: https://dsc-wasm.deka.gg/latest/dsc.wasm"
+          echo "  versioned: https://dsc-wasm.deka.gg/v${V}/dsc.wasm"
+
+      # --------------------------------------------------------------
+      # (f) Same downstream notification release.yml sends for a canary,
+      # now with channel: stable so create-deka-app knows to publish to
+      # npm's default (latest) dist-tag instead of canary.
+      # --------------------------------------------------------------
+      - name: Notify downstream (create-deka-app)
+        env:
+          GH_TOKEN: ${{ secrets.CASCADE_DISPATCH_TOKEN }}
+        run: |
+          V="${{ steps.validate.outputs.v }}"
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::CASCADE_DISPATCH_TOKEN is not visible to this repo (org secret -> Repository access). The npm publish for this release was NOT triggered; create-deka-app's hourly schedule will publish it within the hour, but fix the secret."
+            exit 1
+          fi
+          curl -sSL --fail-with-body -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/dekaruntime/create-deka-app/dispatches \
+            -d "{\"event_type\":\"dsc-released\",\"client_payload\":{\"tag\":\"v${V}\",\"channel\":\"stable\"}}"

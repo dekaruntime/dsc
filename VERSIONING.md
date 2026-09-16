@@ -76,11 +76,21 @@ drift internally. Do not hand-edit crate files.
 
 That updates `[workspace.package]`, any crate that still inlines a version,
 and `Cargo.lock`. It refuses to go backwards or reuse a version that already
-has a `v*` tag. It does not commit or tag.
+has a **stable** `v*` tag — canary tags (`vX.Y.Z-canary-<sha>`, see below)
+don't count against this check, since a base version can grow several
+canaries before one of them is promoted. It does not commit or tag.
 
 `scripts/dsc-version.sh` prints that version. Wasm `manifest.json` reads it
 the same way.
 
-Do **not** push the bump to `main`. Open a PR, merge with a merge commit,
-then release per [PUBLISH.md](PUBLISH.md) — which tags all four repos,
-builds deka and dsc, and only lands the tags once that build succeeds.
+Do **not** push the bump to `main`. Open a PR, merge with a merge commit.
+
+## Release channels ([rfd#68](https://github.com/dekaruntime/rfd/issues/68))
+
+Merging the bump does not, by itself, cut a stable tag. The merge commit
+automatically becomes a **canary** (`v<VERSION>-canary-<sha>`) — see
+[PUBLISH.md](PUBLISH.md) for the full canary → test → promote loop, and
+[`dekaruntime/deka`'s `PUBLISH.md`](https://github.com/dekaruntime/deka/blob/main/PUBLISH.md)
+for how the runtime applies the same channel split. A plain `vX.Y.Z` tag
+only exists once a human promotes a canary; it is never the first thing a
+merge produces.

@@ -228,7 +228,10 @@ jobs:
           BIN="$PWD/dist/dsc-${{ matrix.platform }}"
           chmod +x "$BIN"
 
-          VERSION_OUT="$("$BIN" --version)"
+          # dsc --version prints to stderr, not stdout (create-deka-app's
+          # sync.js hit the same bug) — capture both streams or VERSION_OUT
+          # is always empty and this check passes/fails on nothing.
+          VERSION_OUT="$("$BIN" --version 2>&1)"
           echo "$VERSION_OUT"
           case "$VERSION_OUT" in
             *"$BASE_VERSION"*) ;;
@@ -238,15 +241,17 @@ jobs:
               ;;
           esac
 
+          # Judge dsc check by exit code, not by its output (which may also
+          # land on stderr) — the same lesson as above.
           printf 'const x = 1 + 1\n' > valid.ds
-          if ! "$BIN" check --single-file valid.ds; then
-            echo "::error::dsc check rejected valid input"
+          if ! "$BIN" check --single-file valid.ds >valid.out 2>&1; then
+            echo "::error::dsc check rejected valid input: $(cat valid.out)"
             exit 1
           fi
 
           printf 'const x = 1 +\n' > invalid.ds
-          if "$BIN" check --single-file invalid.ds; then
-            echo "::error::dsc check accepted invalid input"
+          if "$BIN" check --single-file invalid.ds >invalid.out 2>&1; then
+            echo "::error::dsc check accepted invalid input: $(cat invalid.out)"
             exit 1
           fi
 

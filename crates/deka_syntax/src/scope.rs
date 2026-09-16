@@ -1,10 +1,14 @@
 //! Names visible at a byte offset in a parsed program.
 //!
-//! This is the scope query behind LSP completion (and, later, hover): given
-//! the parsed AST and a cursor offset, it answers "which locals, params,
-//! top-level items and imported names are in scope here" so every consumer
-//! (native LSP, wasm worker) shares one scope implementation instead of
-//! re-scanning source text.
+//! This is the scope query behind LSP completion and hover: given the parsed
+//! AST and a cursor offset, it answers "which locals, params, top-level items
+//! and imported names are in scope here" so every consumer (native LSP, wasm
+//! worker) shares one scope implementation instead of re-scanning source text.
+//!
+//! [`names_in_scope_at_offset`] returns the bare binding set for completion;
+//! [`declarations_in_scope_at_offset`] additionally carries each binding's
+//! declaration span and its declaration rendered as source (e.g.
+//! `fn greeting(name: string) string`), which is what hover shows.
 //!
 //! Position semantics mirror the typechecker: module-level functions and type
 //! declarations are visible throughout the module, `const`/`let` bindings are
@@ -13,7 +17,8 @@
 //! their construct's body.
 
 use crate::ast::{
-    Expr, ExportDecl, ForInit, MatchArm, Param, Pattern, Program, Stmt, UnwrapAlternative,
+    Expr, ExportDecl, ForInit, MatchArm, NewtypeRepr, Param, ParamBinding, Pattern, Program, Span,
+    Stmt, Type, TypeParam, UnwrapAlternative,
 };
 use std::collections::HashSet;
 
@@ -36,6 +41,21 @@ pub enum ScopeItemKind {
 pub struct ScopeItem<'a> {
     pub name: &'a str,
     pub kind: ScopeItemKind,
+    /// Byte span of the declaration node — the statement, parameter, import
+    /// specifier or pattern that introduces the binding — so consumers can
+    /// resolve a use back to its declaration.
+    pub span: Span,
+}
+
+/// A name in scope together with its declaration rendered as source, e.g.
+/// `fn greeting(name: string) string` or `(parameter) name: string`. This is
+/// the hover payload; [`ScopeItem`] is the completion payload.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScopeDeclaration<'a> {
+    pub name: &'a str,
+    pub kind: ScopeItemKind,
+    pub span: Span,
+    pub detail: String,
 }
 
 /// Every name visible at byte `offset` into the source `program` was parsed
@@ -44,6 +64,22 @@ pub fn names_in_scope_at_offset<'a>(
     program: &'a Program<'a>,
     offset: usize,
 ) -> Vec<ScopeItem<'a>> {
+    declarations_in_scope_at_offset(program, offset)
+        .into_iter()
+        .map(|decl| ScopeItem {
+            name: decl.name,
+            kind: decl.kind,
+            span: decl.span,
+        })
+        .collect()
+}
+
+/// Every name visible at byte `offset`, each with its declaration span and
+/// rendered declaration detail.
+pub fn declarations_in_scope_at_offset<'a>(
+    program: &'a Program<'a>,
+    offset: usize,
+) -> Vec<ScopeDeclaration<'a>> {
     let mut collector = Collector::default();
     for stmt in program.statements.iter() {
         collect_module_item(stmt, &mut collector);
@@ -105,24 +141,213 @@ pub fn jsx_tag_prefix_at<'p, 's>(
 
 #[derive(Default)]
 struct Collector<'a> {
-    items: Vec<ScopeItem<'a>>,
+    items: Vec<ScopeDeclaration<'a>>,
     seen: HashSet<&'a str>,
 }
 
 impl<'a> Collector<'a> {
-    fn push(&mut self, name: &'a str, kind: ScopeItemKind) {
+    fn push(&mut self, name: &'a str, kind: ScopeItemKind, span: Span, detail: String) {
         if name.is_empty() || !self.seen.insert(name) {
             return;
         }
-        self.items.push(ScopeItem { name, kind });
+        self.items.push(ScopeDeclaration {
+            name,
+            kind,
+            span,
+            detail,
+        });
     }
 
     fn push_params(&mut self, params: &'a [Param<'a>]) {
         for param in params {
-            for name in param.binding.names() {
-                self.push(name, ScopeItemKind::Param);
+            match &param.binding {
+                ParamBinding::Identifier(name) => {
+                    let detail = match &param.ty {
+                        Some(ty) => format!("(parameter) {name}: {}", render_type(ty)),
+                        None => format!("(parameter) {name}"),
+                    };
+                    self.push(name, ScopeItemKind::Param, param.span, detail);
+                }
+                ParamBinding::Tuple(names) => {
+                    for name in names.iter() {
+                        self.push(
+                            name,
+                            ScopeItemKind::Param,
+                            param.span,
+                            format!("(parameter) {name}"),
+                        );
+                    }
+                }
             }
         }
+    }
+}
+
+/// Render a type annotation the way it is spelled in source.
+fn render_type(ty: &Type<'_>) -> String {
+    match ty {
+        Type::Named { name, .. } => (*name).to_string(),
+        Type::Generic { base, args, .. } => format!(
+            "{base}<{}>",
+            args.iter()
+                .map(render_type)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Type::Function { params, ret, .. } => format!(
+            "fn({}) {}",
+            params.iter().map(render_type).collect::<Vec<_>>().join(", "),
+            render_type(ret)
+        ),
+        Type::Option { inner, .. } => format!("Option<{}>", render_type(inner)),
+        Type::Tuple { elements, .. } => format!(
+            "[{}]",
+            elements
+                .iter()
+                .map(render_type)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Type::Record { fields, .. } => format!(
+            "{{ {} }}",
+            fields
+                .iter()
+                .map(|field| format!("{}: {}", field.name, render_type(&field.ty)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Type::Union { members, .. } => members
+            .iter()
+            .map(render_type)
+            .collect::<Vec<_>>()
+            .join(" | "),
+    }
+}
+
+fn render_type_params(type_params: &[TypeParam<'_>]) -> String {
+    if type_params.is_empty() {
+        return String::new();
+    }
+    let rendered = type_params
+        .iter()
+        .map(|param| match &param.bound {
+            Some(bound) => format!("{}: {}", param.name, render_type(bound)),
+            None => param.name.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("<{rendered}>")
+}
+
+/// `fn greeting(name: string) string` — a function declaration's signature
+/// line, without the body.
+fn function_signature(
+    name: &str,
+    type_params: &[TypeParam<'_>],
+    params: &[Param<'_>],
+    return_type: Option<&Type<'_>>,
+    is_async: bool,
+) -> String {
+    let rendered_params = params
+        .iter()
+        .map(|param| match &param.ty {
+            Some(ty) => format!("{}: {}", param.binding, render_type(ty)),
+            None => param.binding.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut signature = String::new();
+    if is_async {
+        signature.push_str("async ");
+    }
+    signature.push_str("fn ");
+    signature.push_str(name);
+    signature.push_str(&render_type_params(type_params));
+    signature.push('(');
+    signature.push_str(&rendered_params);
+    signature.push(')');
+    if let Some(return_type) = return_type {
+        signature.push(' ');
+        signature.push_str(&render_type(return_type));
+    }
+    signature
+}
+
+/// `const total: int` — a binding declaration line, with the type annotation
+/// when the declaration carries one.
+fn binding_detail(keyword: &str, name: &str, ty: Option<&Type<'_>>) -> String {
+    match ty {
+        Some(ty) => format!("{keyword} {name}: {}", render_type(ty)),
+        None => format!("{keyword} {name}"),
+    }
+}
+
+/// The value-declaring statements (`fn`/`const`/`let` and their tuple and
+/// unwrap forms) share one collection path at module level and inside blocks.
+fn push_value_decl<'a>(stmt: &'a Stmt<'a>, collector: &mut Collector<'a>) {
+    match stmt {
+        Stmt::Function {
+            name,
+            type_params,
+            params,
+            return_type,
+            is_async,
+            span,
+            ..
+        } => collector.push(
+            name,
+            ScopeItemKind::Function,
+            *span,
+            function_signature(name, type_params, params, return_type.as_ref(), *is_async),
+        ),
+        Stmt::Const {
+            name, ty, span, ..
+        } => collector.push(
+            name,
+            ScopeItemKind::Const,
+            *span,
+            binding_detail("const", name, ty.as_ref()),
+        ),
+        Stmt::Let {
+            name, ty, span, ..
+        } => collector.push(
+            name,
+            ScopeItemKind::Variable,
+            *span,
+            binding_detail("let", name, ty.as_ref()),
+        ),
+        Stmt::TupleBinding {
+            names,
+            is_const,
+            span,
+            ..
+        } => {
+            let (kind, keyword) = if *is_const {
+                (ScopeItemKind::Const, "const")
+            } else {
+                (ScopeItemKind::Variable, "let")
+            };
+            for name in names.iter() {
+                collector.push(name, kind, *span, format!("{keyword} {name}"));
+            }
+        }
+        Stmt::UnwrapLet {
+            name,
+            ty,
+            is_const,
+            span,
+            ..
+        } => collector.push(
+            name,
+            if *is_const {
+                ScopeItemKind::Const
+            } else {
+                ScopeItemKind::Variable
+            },
+            *span,
+            binding_detail(if *is_const { "const" } else { "let" }, name, ty.as_ref()),
+        ),
+        _ => {}
     }
 }
 
@@ -132,52 +357,130 @@ impl<'a> Collector<'a> {
 /// surface is the useful answer).
 fn collect_module_item<'a>(stmt: &'a Stmt<'a>, collector: &mut Collector<'a>) {
     match stmt {
-        Stmt::Function { name, .. } => collector.push(name, ScopeItemKind::Function),
+        Stmt::Function { .. }
+        | Stmt::Const { .. }
+        | Stmt::Let { .. }
+        | Stmt::TupleBinding { .. }
+        | Stmt::UnwrapLet { .. } => push_value_decl(stmt, collector),
         Stmt::ReceiverMethod { .. } => {}
-        Stmt::Const { name, .. } => collector.push(name, ScopeItemKind::Const),
-        Stmt::Let { name, .. } => collector.push(name, ScopeItemKind::Variable),
-        Stmt::TupleBinding {
-            names, is_const, ..
+        Stmt::Import {
+            specifiers, source, ..
         } => {
-            let kind = if *is_const {
-                ScopeItemKind::Const
-            } else {
-                ScopeItemKind::Variable
-            };
-            for name in names.iter() {
-                collector.push(name, kind);
-            }
-        }
-        Stmt::UnwrapLet { name, is_const, .. } => collector.push(
-            name,
-            if *is_const {
-                ScopeItemKind::Const
-            } else {
-                ScopeItemKind::Variable
-            },
-        ),
-        Stmt::Import { specifiers, .. } => {
             for spec in specifiers.iter() {
-                collector.push(spec.local, ScopeItemKind::Import);
+                let detail = if spec.imported == spec.local {
+                    format!("import {{ {} }} from '{source}'", spec.imported)
+                } else {
+                    format!(
+                        "import {{ {} as {} }} from '{source}'",
+                        spec.imported, spec.local
+                    )
+                };
+                collector.push(spec.local, ScopeItemKind::Import, spec.span, detail);
             }
         }
-        Stmt::Export { decl, .. } => match decl {
-            ExportDecl::Const { name, .. } => collector.push(name, ScopeItemKind::Const),
-            ExportDecl::Function { name, .. } => collector.push(name, ScopeItemKind::Function),
+        Stmt::Export { decl, span } => match decl {
+            ExportDecl::Const { name, ty, .. } => collector.push(
+                name,
+                ScopeItemKind::Const,
+                *span,
+                binding_detail("const", name, ty.as_ref()),
+            ),
+            ExportDecl::Function {
+                name,
+                type_params,
+                params,
+                return_type,
+                is_async,
+                ..
+            } => collector.push(
+                name,
+                ScopeItemKind::Function,
+                *span,
+                function_signature(name, type_params, params, return_type.as_ref(), *is_async),
+            ),
             // `export { a, b }` re-exports names already declared (and thus
             // already collected); `export { a } from "./m"` names live in the
             // other module.
             ExportDecl::NamedGroup { .. } => {}
         },
-        Stmt::Struct { name, .. } => collector.push(name, ScopeItemKind::Struct),
-        Stmt::Enum { name, .. } => collector.push(name, ScopeItemKind::Enum),
-        Stmt::TypeAlias { name, .. }
-        | Stmt::Newtype { name, .. }
-        | Stmt::Interface { name, .. }
-        | Stmt::Opaque { name, .. } => collector.push(name, ScopeItemKind::Type),
+        Stmt::Struct {
+            name,
+            type_params,
+            span,
+            ..
+        } => collector.push(
+            name,
+            ScopeItemKind::Struct,
+            *span,
+            format!("struct {name}{}", render_type_params(type_params)),
+        ),
+        Stmt::Enum {
+            name,
+            type_params,
+            span,
+            ..
+        } => collector.push(
+            name,
+            ScopeItemKind::Enum,
+            *span,
+            format!("enum {name}{}", render_type_params(type_params)),
+        ),
+        Stmt::TypeAlias {
+            name,
+            type_params,
+            value,
+            span,
+        } => collector.push(
+            name,
+            ScopeItemKind::Type,
+            *span,
+            format!(
+                "type {name}{} = {}",
+                render_type_params(type_params),
+                render_type(value)
+            ),
+        ),
+        Stmt::Newtype { name, repr, span } => {
+            let repr = match repr {
+                NewtypeRepr::Number => "number",
+                NewtypeRepr::String => "string",
+                NewtypeRepr::Bool => "bool",
+            };
+            collector.push(
+                name,
+                ScopeItemKind::Type,
+                *span,
+                format!("type {name} {repr}"),
+            );
+        }
+        Stmt::Interface {
+            name,
+            type_params,
+            span,
+            ..
+        } => collector.push(
+            name,
+            ScopeItemKind::Type,
+            *span,
+            format!("interface {name}{}", render_type_params(type_params)),
+        ),
+        Stmt::Opaque { name, span } => {
+            collector.push(name, ScopeItemKind::Type, *span, format!("opaque {name}"));
+        }
         Stmt::Summon { functions, .. } => {
             for function in functions.iter() {
-                collector.push(function.name, ScopeItemKind::Function);
+                collector.push(
+                    function.name,
+                    ScopeItemKind::Function,
+                    function.span,
+                    function_signature(
+                        function.name,
+                        &[],
+                        function.params,
+                        Some(&function.return_type),
+                        false,
+                    ),
+                );
             }
         }
         _ => {}
@@ -200,32 +503,7 @@ fn descend_stmts<'a>(stmts: &'a [Stmt<'a>], offset: usize, collector: &mut Colle
         if stmt_span(stmt).byte_end > offset {
             continue;
         }
-        match stmt {
-            Stmt::Function { name, .. } => collector.push(name, ScopeItemKind::Function),
-            Stmt::Const { name, .. } => collector.push(name, ScopeItemKind::Const),
-            Stmt::Let { name, .. } => collector.push(name, ScopeItemKind::Variable),
-            Stmt::TupleBinding {
-                names, is_const, ..
-            } => {
-                let kind = if *is_const {
-                    ScopeItemKind::Const
-                } else {
-                    ScopeItemKind::Variable
-                };
-                for name in names.iter() {
-                    collector.push(name, kind);
-                }
-            }
-            Stmt::UnwrapLet { name, is_const, .. } => collector.push(
-                name,
-                if *is_const {
-                    ScopeItemKind::Const
-                } else {
-                    ScopeItemKind::Variable
-                },
-            ),
-            _ => {}
-        }
+        push_value_decl(stmt, collector);
     }
 }
 
@@ -266,12 +544,32 @@ fn descend_stmt<'a>(stmt: &'a Stmt<'a>, offset: usize, collector: &mut Collector
             descend_stmts(body, offset, collector);
         }
         Stmt::ReceiverMethod {
+            receiver_type,
+            receiver_type_args,
             receiver_name,
             params,
             body,
+            span,
             ..
         } => {
-            collector.push(receiver_name, ScopeItemKind::Variable);
+            let type_args = if receiver_type_args.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "<{}>",
+                    receiver_type_args
+                        .iter()
+                        .map(|arg| arg.name)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+            collector.push(
+                receiver_name,
+                ScopeItemKind::Variable,
+                *span,
+                format!("(receiver) {receiver_name}: {receiver_type}{type_args}"),
+            );
             collector.push_params(params);
             descend_stmts(body, offset, collector);
         }
@@ -297,12 +595,18 @@ fn descend_stmt<'a>(stmt: &'a Stmt<'a>, offset: usize, collector: &mut Collector
         Stmt::Try {
             body,
             catch_name,
+            catch_type,
             catch_body,
+            span,
             ..
         } => {
             descend_stmts(body, offset, collector);
             if catch_body.iter().any(|s| contains(stmt_span(s), offset)) {
-                collector.push(catch_name, ScopeItemKind::Variable);
+                let detail = match catch_type {
+                    Some(ty) => format!("(variable) {catch_name}: {}", render_type(ty)),
+                    None => format!("(variable) {catch_name}"),
+                };
+                collector.push(catch_name, ScopeItemKind::Variable, *span, detail);
                 descend_stmts(catch_body, offset, collector);
             }
         }
@@ -311,16 +615,22 @@ fn descend_stmt<'a>(stmt: &'a Stmt<'a>, offset: usize, collector: &mut Collector
             condition,
             step,
             body,
+            span,
             ..
         } => {
             if let Some(init) = init {
                 match init {
                     ForInit::Const { name, value } => {
-                        collector.push(name, ScopeItemKind::Const);
+                        collector.push(
+                            name,
+                            ScopeItemKind::Const,
+                            *span,
+                            format!("const {name}"),
+                        );
                         descend_expr(value, offset, collector);
                     }
                     ForInit::Let { name, value } => {
-                        collector.push(name, ScopeItemKind::Variable);
+                        collector.push(name, ScopeItemKind::Variable, *span, format!("let {name}"));
                         descend_expr(value, offset, collector);
                     }
                     ForInit::Expr(expr) => descend_expr(expr, offset, collector),
@@ -338,10 +648,16 @@ fn descend_stmt<'a>(stmt: &'a Stmt<'a>, offset: usize, collector: &mut Collector
             name,
             iterable,
             body,
+            span,
             ..
         } => {
             descend_expr(iterable, offset, collector);
-            collector.push(name, ScopeItemKind::Variable);
+            collector.push(
+                name,
+                ScopeItemKind::Variable,
+                *span,
+                format!("(variable) {name}"),
+            );
             descend_stmts(body, offset, collector);
         }
         Stmt::Const { value, .. } | Stmt::Let { value, .. } => {
@@ -383,7 +699,12 @@ fn descend_arms<'a>(arms: &'a [MatchArm<'a>], offset: usize, collector: &mut Col
 
 fn collect_pattern_names<'a>(pattern: &'a Pattern<'a>, collector: &mut Collector<'a>) {
     match pattern {
-        Pattern::Identifier { name, .. } => collector.push(name, ScopeItemKind::Variable),
+        Pattern::Identifier { name, span } => collector.push(
+            name,
+            ScopeItemKind::Variable,
+            *span,
+            format!("(variable) {name}"),
+        ),
         Pattern::Constructor {
             payload: Some(payload),
             ..
@@ -517,6 +838,21 @@ mod tests {
             .collect()
     }
 
+    fn scope_declarations(
+        source: &str,
+        marker: &str,
+    ) -> Vec<(String, ScopeItemKind, Span, String)> {
+        let offset = source.find(marker).expect("marker present");
+        let arena = Bump::new();
+        let program = crate::parse(source, &arena)
+            .program
+            .expect("fixture parses");
+        declarations_in_scope_at_offset(&program, offset)
+            .into_iter()
+            .map(|decl| (decl.name.to_string(), decl.kind, decl.span, decl.detail))
+            .collect()
+    }
+
     #[test]
     fn function_body_sees_params_locals_and_module_items() {
         let source = "import { query } from 'db'\n\
@@ -536,6 +872,53 @@ fn greeting(name: string) string {\n\
         assert!(has("helper", ScopeItemKind::Function), "names={names:?}");
         assert!(has("VERSION", ScopeItemKind::Const), "names={names:?}");
         assert!(has("query", ScopeItemKind::Import), "names={names:?}");
+    }
+
+    #[test]
+    fn declarations_carry_signature_detail_and_declaration_span() {
+        let source = "import { query } from 'db'\n\
+const VERSION: int = 1;\n\
+fn greeting(name: string) string {\n\
+    const shout = name;\n\
+    return /*cursor*/ shout;\n\
+}\n";
+        let decls = scope_declarations(source, "/*cursor*/");
+        let detail = |needle: &str| {
+            decls.iter()
+                .find(|(name, _, _, _)| name == needle)
+                .unwrap_or_else(|| panic!("{needle} in scope: {decls:?}"))
+                .3
+                .clone()
+        };
+        assert_eq!(detail("greeting"), "fn greeting(name: string) string");
+        assert_eq!(detail("name"), "(parameter) name: string");
+        assert_eq!(detail("shout"), "const shout");
+        assert_eq!(detail("VERSION"), "const VERSION: int");
+        assert_eq!(detail("query"), "import { query } from 'db'");
+    }
+
+    #[test]
+    fn declaration_spans_point_at_the_declaring_node() {
+        let source = "fn greeting(name: string) string {\n    return /*cursor*/ name;\n}\n";
+        let decls = scope_declarations(source, "/*cursor*/");
+        let greeting = decls
+            .iter()
+            .find(|(name, _, _, _)| name == "greeting")
+            .expect("greeting in scope");
+        assert_eq!(
+            &source[greeting.2.byte_start..greeting.2.byte_start + "fn greeting".len()],
+            "fn greeting",
+            "the function's declaration span starts at its declaration"
+        );
+        let name = decls
+            .iter()
+            .find(|(name, _, _, _)| name == "name")
+            .expect("name in scope");
+        assert_eq!(
+            &source[name.2.byte_start..name.2.byte_end],
+            "name: string",
+            "the parameter's span covers its declaration"
+        );
     }
 
     #[test]

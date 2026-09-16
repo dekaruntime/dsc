@@ -99,6 +99,26 @@ fn module_source(path: &Path, open_documents: &HashMap<PathBuf, String>) -> Stri
     std::fs::read_to_string(path).unwrap_or_default()
 }
 
+/// The source of `module_spec` as imported from `entry`, resolved and loaded
+/// through the same overlay loader the project graph check uses (unsaved
+/// buffers win over disk). Returns `None` outside a project or when the
+/// specifier does not resolve. Hover uses this to read the exporting module's
+/// own declarations.
+pub(crate) fn project_module_source(
+    entry: &Path,
+    module_spec: &str,
+    open_documents: &HashMap<PathBuf, String>,
+) -> Option<String> {
+    let project_root = module_graph::find_project_root(entry, entry)?;
+    let loader = OverlayLoader {
+        inner: FsModuleLoader::new(project_root),
+        documents: open_documents,
+    };
+    let canonical_entry = std::fs::canonicalize(entry).unwrap_or_else(|_| entry.to_path_buf());
+    let path = loader.resolve(module_spec, &canonical_entry).ok()?;
+    loader.load(&path).ok()
+}
+
 /// The importable names of `module_spec` as imported from `entry`, resolved
 /// and parsed through the same loader + parser the project graph check uses:
 /// the overlay serves unsaved buffers, `FsModuleLoader` owns resolution, and

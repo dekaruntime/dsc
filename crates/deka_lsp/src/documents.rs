@@ -187,6 +187,35 @@ pub(crate) fn import_module_spans(source: &str, module_spec: &str) -> Vec<Span> 
     spans
 }
 
+/// Every quoted module specifier in the file's import lines. Symbol
+/// references and renames exclude these: `./Counter.dsx` is a module path,
+/// not a use of the `Counter` binding, and rewriting it would corrupt the
+/// import.
+fn import_module_specifier_spans(source: &str) -> Vec<Span> {
+    let mut spans = Vec::new();
+    for (line, line_offset) in line_with_offsets(source) {
+        if !line.contains("import") || !line.contains("from") {
+            continue;
+        }
+        if let Some((_, span)) = parse_module_path_with_span(line, line_offset) {
+            spans.push(span);
+        }
+    }
+    spans
+}
+
+/// Whole-word occurrences of `word` outside `excluded` spans.
+fn symbol_occurrences(source: &str, word: &str, excluded: &[Span]) -> Vec<Span> {
+    find_word_occurrences(source.as_bytes(), word)
+        .into_iter()
+        .filter(|span| {
+            !excluded
+                .iter()
+                .any(|ex| ex.start <= span.start && span.end <= ex.end)
+        })
+        .collect()
+}
+
 pub(crate) fn line_with_offsets(source: &str) -> Vec<(&str, usize)> {
     let mut out = Vec::new();
     let mut offset = 0usize;
@@ -580,6 +609,7 @@ pub(crate) fn collect_reference_locations(
     symbol: &str,
 ) -> Vec<Location> {
     let mut locations = Vec::new();
+    let mut saw_active = false;
     for root in roots {
         for file in collect_dekascript_files(root) {
             let file_uri = match Url::from_file_path(&file) {
@@ -587,17 +617,32 @@ pub(crate) fn collect_reference_locations(
                 Err(_) => continue,
             };
             let content = if &file_uri == active_uri {
+                saw_active = true;
                 active_text.to_string()
             } else {
                 fs::read_to_string(&file).unwrap_or_default()
             };
             let line_index = LineIndex::new(&content);
-            for span in find_word_occurrences(content.as_bytes(), symbol) {
+            let module_spans = import_module_specifier_spans(&content);
+            for span in symbol_occurrences(&content, symbol, &module_spans) {
                 locations.push(Location {
                     uri: file_uri.clone(),
                     range: span_to_range(span, &line_index),
                 });
             }
+        }
+    }
+    // The file under the cursor may live outside every workspace root (a
+    // single-file session, or a root that does not contain it); its unsaved
+    // text still holds occurrences.
+    if !saw_active {
+        let line_index = LineIndex::new(active_text);
+        let module_spans = import_module_specifier_spans(active_text);
+        for span in symbol_occurrences(active_text, symbol, &module_spans) {
+            locations.push(Location {
+                uri: active_uri.clone(),
+                range: span_to_range(span, &line_index),
+            });
         }
     }
     locations
@@ -611,6 +656,7 @@ pub(crate) fn collect_symbol_rename_edits(
     new_symbol: &str,
 ) -> HashMap<Url, Vec<TextEdit>> {
     let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+    let mut saw_active = false;
     for root in roots {
         for file in collect_dekascript_files(root) {
             let file_uri = match Url::from_file_path(&file) {
@@ -618,13 +664,15 @@ pub(crate) fn collect_symbol_rename_edits(
                 Err(_) => continue,
             };
             let content = if &file_uri == active_uri {
+                saw_active = true;
                 active_text.to_string()
             } else {
                 fs::read_to_string(&file).unwrap_or_default()
             };
             let line_index = LineIndex::new(&content);
+            let module_spans = import_module_specifier_spans(&content);
             let mut edits = Vec::new();
-            for span in find_word_occurrences(content.as_bytes(), old_symbol) {
+            for span in symbol_occurrences(&content, old_symbol, &module_spans) {
                 edits.push(TextEdit {
                     range: span_to_range(span, &line_index),
                     new_text: new_symbol.to_string(),
@@ -633,6 +681,22 @@ pub(crate) fn collect_symbol_rename_edits(
             if !edits.is_empty() {
                 changes.insert(file_uri, edits);
             }
+        }
+    }
+    // Same guarantee as references: the file under the cursor is renamed even
+    // when no workspace root contains it.
+    if !saw_active {
+        let line_index = LineIndex::new(active_text);
+        let module_spans = import_module_specifier_spans(active_text);
+        let edits: Vec<TextEdit> = symbol_occurrences(active_text, old_symbol, &module_spans)
+            .into_iter()
+            .map(|span| TextEdit {
+                range: span_to_range(span, &line_index),
+                new_text: new_symbol.to_string(),
+            })
+            .collect();
+        if !edits.is_empty() {
+            changes.insert(active_uri.clone(), edits);
         }
     }
     changes
@@ -654,10 +718,8 @@ pub(crate) fn collect_dekascript_files(root: &Path) -> Vec<PathBuf> {
                 stack.push(path);
                 continue;
             }
-            if let Some(ext) = path.extension().and_then(|ext| ext.to_str()) {
-                if ext == "ds" {
-                    files.push(path);
-                }
+            if is_dekascript_path(&path) {
+                files.push(path);
             }
         }
     }

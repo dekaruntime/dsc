@@ -35,6 +35,8 @@ mod documents;
 #[cfg(feature = "native")]
 mod handlers;
 #[cfg(feature = "native")]
+mod hover;
+#[cfg(feature = "native")]
 mod project;
 #[cfg(feature = "native")]
 mod symbols;
@@ -55,6 +57,8 @@ pub(crate) use diagnostics::*;
 pub(crate) use documents::*;
 #[cfg(feature = "native")]
 pub(crate) use handlers::TargetMode;
+#[cfg(feature = "native")]
+pub(crate) use hover::*;
 #[cfg(feature = "native")]
 pub(crate) use project::*;
 #[cfg(feature = "native")]

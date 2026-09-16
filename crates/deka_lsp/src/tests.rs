@@ -189,6 +189,20 @@ fn provides_annotation_hover_docs() {
 }
 
 #[test]
+fn builtin_completion_lists_every_console_method() {
+    // `console` is a global (rfd#44's console addition); its method names
+    // must appear in the flat builtin list this server always returns,
+    // reading the same `deka_syntax::console::METHODS` the checker enforces.
+    let items = builtin_completion_items();
+    for method in deka_syntax::console::METHODS {
+        assert!(
+            items.iter().any(|item| item.label == *method),
+            "completion is missing console method `{method}`"
+        );
+    }
+}
+
+#[test]
 fn resolves_project_alias_module_file() {
     let dir = temp_dir("dekascript_lsp_alias_resolve");
     let php_modules = dir.join(MODULES_DIR);

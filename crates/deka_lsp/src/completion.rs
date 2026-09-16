@@ -93,6 +93,23 @@ pub(crate) fn builtin_completion_items() -> Vec<CompletionItem> {
             ..CompletionItem::default()
         });
     }
+    // `console` is a global (rfd#44's console addition), never imported, so
+    // its methods complete alongside the other builtins rather than through
+    // `completion_for_import`. This server does not yet narrow completion by
+    // the receiver before a `.`, so — like every other entry in this
+    // function — these surface in every request; `detail` marks their
+    // origin for the client's own filtering once the user has typed
+    // `console.`. `deka_syntax::console::METHODS` is the same list the
+    // checker's unknown-method diagnostic reads, so this cannot drift from
+    // what `console.<method>(...)` actually typechecks.
+    for name in deka_syntax::console::METHODS {
+        items.push(CompletionItem {
+            label: name.to_string(),
+            kind: Some(CompletionItemKind::METHOD),
+            detail: Some("console".to_string()),
+            ..CompletionItem::default()
+        });
+    }
     items
 }
 

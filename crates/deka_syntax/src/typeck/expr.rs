@@ -505,6 +505,217 @@ impl<'a> Checker<'a> {
         })
     }
 
+    /// Whether `ty` is `Printable` (rfd#44's console addition): a value the
+    /// runtime can format through its type descriptor — primitives,
+    /// structs, enums, unions, arrays, objects, tuples, `Option`/`Result`,
+    /// and any nesting of those. Reuses `descriptor_tree`, the same walk
+    /// `.toJSON()`/`.signature()` use to decide whether a type has a
+    /// descriptor at all: a function value or an opaque host handle fails
+    /// that walk, which is exactly the "no printable form" boundary. This is
+    /// the one predicate every console method's variadic goes through —
+    /// there is no `any`; a rejected value is still typed, only unformattable.
+    /// `Error`/`Infer`/`Var` are accepted here so an already-diagnosed or
+    /// checker-opaque expression does not also fail printability.
+    fn is_printable(&mut self, ty: &Type<'a>, span: ast::Span) -> bool {
+        matches!(ty, Type::Error | Type::Infer | Type::Var) || self.descriptor_tree(ty, span).is_ok()
+    }
+
+    /// Check one `Printable`-bound console argument: evaluate it, then run
+    /// [`Checker::is_printable`] and report the named diagnostic on failure.
+    /// Shared by every console method that takes `Printable` values so the
+    /// wording (and the predicate) never drifts between them.
+    fn check_printable_arg(&mut self, method: &str, arg: &ast::Expr<'a>) {
+        let span = arg.span();
+        let ty = self.check_expr(arg);
+        if !self.is_printable(&ty, span) {
+            self.error_span(
+                span,
+                format!("console.{method}: value of type {ty} has no printable form"),
+            );
+        }
+    }
+
+    /// Check a `console.<method>(...)` call (rfd#44 console addition, the
+    /// full WHATWG namespace WinterTC requires, minus `profile`/
+    /// `profileEnd`/`timeStamp`/`createTask`). `console` is a host surface,
+    /// not a typed object — this matches the call's AST shape directly
+    /// (`console` is never evaluated as an expression, never added to
+    /// `self.globals`), the same treatment `check_catalog_call` gives
+    /// `deka.<kind>.<method>(...)`. Returns `None` when `callee` is not of
+    /// the form `console.<field>(...)` at all, so ordinary call-checking
+    /// (and, for a bare `console`/`console.<field>` reference outside a
+    /// call, the "not a value" diagnostic in `check_expr_inner`) takes over.
+    /// Once matched, every branch returns `Some(..)`, including unknown
+    /// methods — a mistyped `console.<method>` call must never fall through
+    /// to "console is not a value", which would misname the mistake.
+    fn check_console_call(
+        &mut self,
+        callee: &ast::Expr<'a>,
+        args: &'a [ast::Expr<'a>],
+        span: ast::Span,
+    ) -> Option<Type<'a>> {
+        let ast::Expr::FieldAccess {
+            object,
+            field: method,
+            ..
+        } = callee
+        else {
+            return None;
+        };
+        if !matches!(object, ast::Expr::Identifier { name: "console", .. }) {
+            return None;
+        }
+        let method = *method;
+        let void = Type::Named { name: "void" };
+
+        // A call's argument list can never hold `Expr::Spread` — the parser
+        // only produces spread elements inside array/object literals
+        // (`parse_spreadable_expr`, `crates/deka_syntax/src/parse/expr.rs`),
+        // so there is no `console.log(...xs)` shape to reject here; adding
+        // one would be an unreachable check (dsc's recurring bug shape).
+
+        match method {
+            // `(...values: Printable[]) void`
+            "log" | "info" | "debug" | "warn" | "error" | "dirxml" | "trace" | "group"
+            | "groupCollapsed" => {
+                for arg in args.iter() {
+                    self.check_printable_arg(method, arg);
+                }
+                Some(void)
+            }
+            // `assert(condition: boolean, ...values: Printable[]) void`
+            "assert" => {
+                if args.is_empty() {
+                    self.error_span(
+                        span,
+                        "console.assert expects a `condition` argument".to_string(),
+                    );
+                    return Some(Type::Error);
+                }
+                let condition = self.check_expr(&args[0]);
+                if !condition.is_error() && !matches!(condition, Type::Named { name: "boolean" }) {
+                    self.error_span(
+                        args[0].span(),
+                        format!(
+                            "console.assert: `condition` expects `boolean`, got `{condition}`"
+                        ),
+                    );
+                }
+                for arg in &args[1..] {
+                    self.check_printable_arg(method, arg);
+                }
+                Some(void)
+            }
+            // `(label?: string) void`
+            "count" | "countReset" | "time" | "timeEnd" => {
+                if args.len() > 1 {
+                    self.error_span(
+                        span,
+                        format!(
+                            "console.{method} expects at most 1 argument (label), found {}",
+                            args.len()
+                        ),
+                    );
+                    return Some(Type::Error);
+                }
+                if let Some(arg) = args.first() {
+                    let ty = self.check_expr(arg);
+                    if !ty.is_error() && !matches!(ty, Type::Named { name: "string" }) {
+                        self.error_span(
+                            arg.span(),
+                            format!("console.{method}: `label` expects `string`, got `{ty}`"),
+                        );
+                    }
+                }
+                Some(void)
+            }
+            // `timeLog(label?: string, ...values: Printable[]) void`
+            "timeLog" => {
+                if let Some(label) = args.first() {
+                    let ty = self.check_expr(label);
+                    if !ty.is_error() && !matches!(ty, Type::Named { name: "string" }) {
+                        self.error_span(
+                            label.span(),
+                            format!("console.timeLog: `label` expects `string`, got `{ty}`"),
+                        );
+                    }
+                }
+                for arg in args.iter().skip(1) {
+                    self.check_printable_arg(method, arg);
+                }
+                Some(void)
+            }
+            // `() void`
+            "groupEnd" | "clear" => {
+                if !args.is_empty() {
+                    self.error_span(
+                        span,
+                        format!(
+                            "console.{method} expects no arguments, found {}",
+                            args.len()
+                        ),
+                    );
+                    return Some(Type::Error);
+                }
+                Some(void)
+            }
+            // `dir(item: Printable, options?: Printable) void`
+            "dir" => {
+                if args.is_empty() || args.len() > 2 {
+                    self.error_span(
+                        span,
+                        format!(
+                            "console.dir expects 1 or 2 arguments (item, options?), found {}",
+                            args.len()
+                        ),
+                    );
+                    return Some(Type::Error);
+                }
+                for arg in args.iter() {
+                    self.check_printable_arg(method, arg);
+                }
+                Some(void)
+            }
+            // `table(data: Printable, columns?: Array<string>) void`
+            "table" => {
+                if args.is_empty() || args.len() > 2 {
+                    self.error_span(
+                        span,
+                        format!(
+                            "console.table expects 1 or 2 arguments (data, columns?), found {}",
+                            args.len()
+                        ),
+                    );
+                    return Some(Type::Error);
+                }
+                self.check_printable_arg(method, &args[0]);
+                if let Some(columns) = args.get(1) {
+                    let ty = self.check_expr(columns);
+                    let expected = Type::Array {
+                        elem: Box::new(Type::Named { name: "string" }),
+                    };
+                    if !ty.is_error() && !self.is_assignable(&expected, &ty) {
+                        self.error_span(
+                            columns.span(),
+                            format!("console.table: `columns` expects `Array<string>`, got `{ty}`"),
+                        );
+                    }
+                }
+                Some(void)
+            }
+            other => {
+                self.error_span(
+                    span,
+                    format!(
+                        "console has no method `{other}`; available: {}",
+                        crate::console::METHODS.join(", ")
+                    ),
+                );
+                Some(Type::Error)
+            }
+        }
+    }
+
     pub(super) fn check_expr_inner(&mut self, expr: &ast::Expr<'a>) -> Type<'a> {
         match expr {
             ast::Expr::Number { .. } => Type::Named { name: "number" },
@@ -528,6 +739,9 @@ impl<'a> Checker<'a> {
                     None => {
                         let message = if *name == "Math" {
                             "`Math` is not available in DekaScript; import { PI } from \"math\" instead for PI, or use number methods such as `x.sqrt()`"
+                                .to_string()
+                        } else if *name == "console" {
+                            "`console` is not a value; call its methods directly, e.g. `console.log(...)`"
                                 .to_string()
                         } else {
                             format!("unknown identifier `{name}`")
@@ -575,9 +789,15 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
+                // `console.<method>(...)` must not go through method-call
+                // typeck: `console` is a host surface, not a typed object
+                // (rfd#44's console addition), same treatment as `deka`
+                // below.
+                if let Some(ret) = self.check_console_call(callee, args, *span) {
+                    ret
                 // `deka.panic` must not go through method-call typeck: `deka`
                 // is not a typed object (RFD 21 lang item).
-                if let Some(ret) = self.check_catalog_call(callee, args) {
+                } else if let Some(ret) = self.check_catalog_call(callee, args) {
                     ret
                 } else if is_panic_callee(callee) {
                     self.check_call(expr, callee, type_args, args, *span)

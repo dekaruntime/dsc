@@ -23,5 +23,6 @@ pub use typeck::{
     EnumInfo, MethodInfo, ModuleExports, StructInfo, TypeError,
 };
 
+pub mod console;
 pub mod deka_catalog;
 pub mod visit;

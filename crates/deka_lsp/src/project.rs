@@ -98,3 +98,74 @@ fn module_source(path: &Path, open_documents: &HashMap<PathBuf, String>) -> Stri
     }
     std::fs::read_to_string(path).unwrap_or_default()
 }
+
+/// The importable names of `module_spec` as imported from `entry`, resolved
+/// and parsed through the same loader + parser the project graph check uses:
+/// the overlay serves unsaved buffers, `FsModuleLoader` owns resolution, and
+/// `collect_module_exports` owns the export surface (`export fn`, not just the
+/// legacy `export function` spelling). Returns `None` outside a project or
+/// when the specifier does not resolve to a parseable module.
+pub(crate) fn project_module_exports(
+    entry: &Path,
+    module_spec: &str,
+    open_documents: &HashMap<PathBuf, String>,
+) -> Option<Vec<ExportInfo>> {
+    let project_root = module_graph::find_project_root(entry, entry)?;
+    let loader = OverlayLoader {
+        inner: FsModuleLoader::new(project_root),
+        documents: open_documents,
+    };
+    let canonical_entry = std::fs::canonicalize(entry).unwrap_or_else(|_| entry.to_path_buf());
+    let path = loader.resolve(module_spec, &canonical_entry).ok()?;
+    let source = loader.load(&path).ok()?;
+    let arena = bumpalo::Bump::new();
+    let program = deka_syntax::parse_recovering(&source, &arena).program?;
+    let exports = deka_syntax::collect_module_exports(&program, &arena);
+    Some(export_infos_from_module_exports(&exports))
+}
+
+/// Map the graph's `ModuleExports` to completion-facing export info: the
+/// importable surface is `values`, the type tables, and pass-through
+/// re-exports — never the compiler-private metadata tables.
+fn export_infos_from_module_exports(exports: &deka_syntax::ModuleExports) -> Vec<ExportInfo> {
+    let mut infos: Vec<ExportInfo> = Vec::new();
+    let mut push = |name: &str, kind: CompletionItemKind| {
+        if infos.iter().any(|info| info.name == name) {
+            return;
+        }
+        infos.push(ExportInfo {
+            name: name.to_string(),
+            kind: Some(kind),
+        });
+    };
+    for (name, ty) in exports.values.iter() {
+        let kind = if matches!(ty, deka_syntax::typeck::Type::Function { .. }) {
+            CompletionItemKind::FUNCTION
+        } else {
+            CompletionItemKind::CONSTANT
+        };
+        push(name, kind);
+    }
+    for name in exports.structs.keys() {
+        push(name, CompletionItemKind::STRUCT);
+    }
+    for name in exports.enums.keys() {
+        push(name, CompletionItemKind::ENUM);
+    }
+    for name in exports.interfaces.keys() {
+        push(name, CompletionItemKind::INTERFACE);
+    }
+    for name in exports
+        .aliases
+        .keys()
+        .chain(exports.newtypes.keys())
+        .chain(exports.opaques.keys())
+    {
+        push(name, CompletionItemKind::TYPE_PARAMETER);
+    }
+    for name in exports.re_exports.iter() {
+        push(name, CompletionItemKind::VARIABLE);
+    }
+    infos.sort_by(|a, b| a.name.cmp(&b.name));
+    infos
+}

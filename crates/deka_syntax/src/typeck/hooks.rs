@@ -40,15 +40,22 @@ pub(super) fn hook_builtin_name(name: &str) -> Option<&'static str> {
     }
 }
 
+/// React-style builtins the compiler treats as ambient in component (`.dsx`)
+/// modules: usable without an import, auto-imported from `@js/react` at emit.
+/// Tooling (completion) lists these instead of maintaining its own copy.
+pub const AMBIENT_REACT_BUILTINS: &[&str] = &[
+    "useState",
+    "useRef",
+    "useEffect",
+    "useContext",
+    "createContext",
+];
+
 pub(super) fn react_import_name(name: &str) -> Option<&'static str> {
-    match name {
-        "useState" => Some("useState"),
-        "useRef" => Some("useRef"),
-        "useEffect" => Some("useEffect"),
-        "useContext" => Some("useContext"),
-        "createContext" => Some("createContext"),
-        _ => None,
-    }
+    AMBIENT_REACT_BUILTINS
+        .iter()
+        .copied()
+        .find(|builtin| *builtin == name)
 }
 
 pub(super) fn is_hook_builtin(name: &str) -> bool {

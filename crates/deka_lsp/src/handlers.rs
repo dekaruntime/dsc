@@ -210,6 +210,54 @@ pub(crate) async fn validate_document(
     client.publish_diagnostics(uri, diagnostics, None).await;
 }
 
+/// Completion items for one document. Import-clause and module-path contexts
+/// come first (the imported module's exports, or stdlib items for bare stdlib
+/// specifiers), then `@` annotations, then the scope-aware path: component
+/// names in JSX tag position, otherwise everything in scope at the cursor —
+/// locals/params from the enclosing blocks, top-level items, imports — plus
+/// the static builtin/stdlib/snippet lists, all filtered by the identifier
+/// prefix before the cursor.
+pub(crate) fn entry_completions(
+    documents: &HashMap<Url, String>,
+    workspace_roots: &[PathBuf],
+    text: &str,
+    file_path: &str,
+    offset: usize,
+) -> Vec<CompletionItem> {
+    let open_documents = open_document_paths(documents);
+    if let Some(items) =
+        completion_for_import(text, file_path, offset, workspace_roots, &open_documents)
+    {
+        return items;
+    }
+    if let Some(items) = completion_for_annotation(text, offset) {
+        return items;
+    }
+
+    let arena = bumpalo::Bump::new();
+    let program = deka_syntax::parse_recovering(text, &arena).program;
+    if let Some(items) = component_completion_items(program.as_ref(), text, offset) {
+        return items;
+    }
+
+    let prefix = identifier_prefix_at(text, offset);
+    let mut items = match &program {
+        Some(program) => scope_completion_items(program, offset),
+        None => Vec::new(),
+    };
+    let is_dsx = Path::new(file_path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("dsx"));
+    if is_dsx {
+        items.extend(ambient_hook_completion_items());
+    }
+    items.extend(builtin_completion_items());
+    items.extend(stdlib_completion_items());
+    items.extend(snippet_completion_items());
+    filter_by_prefix(items, prefix)
+}
+
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(
@@ -443,17 +491,9 @@ impl LanguageServer for Backend {
             None => return Ok(None),
         };
 
+        let documents = self.documents.read().await.clone();
         let workspace_roots = self.workspace_roots.read().await.clone();
-        if let Some(items) = completion_for_import(&text, &file_path, offset, &workspace_roots) {
-            return Ok(Some(CompletionResponse::Array(items)));
-        }
-        if let Some(items) = completion_for_annotation(&text, offset) {
-            return Ok(Some(CompletionResponse::Array(items)));
-        }
-
-        let mut items = builtin_completion_items();
-        items.extend(stdlib_completion_items());
-        items.extend(snippet_completion_items());
+        let items = entry_completions(&documents, &workspace_roots, &text, &file_path, offset);
         Ok(Some(CompletionResponse::Array(items)))
     }
 

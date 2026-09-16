@@ -55,6 +55,27 @@ impl Drop for DepthGuard {
 
 /// Parse a full `.ds` source file into a DekaScript AST.
 pub fn parse<'a>(source: &'a str, arena: &'a Bump) -> ParseResult<'a> {
+    let (program, errors) = parse_with_recovery(source, arena);
+    ParseResult {
+        program: if errors.is_empty() { program } else { None },
+        errors,
+    }
+}
+
+/// Parse like [`parse`], but keep the partially recovered program when errors
+/// exist: `parse_program` already recovers at statement boundaries, so the
+/// surviving statements still describe the scopes around them. Tooling that
+/// must answer queries mid-edit (completion, hover) uses this; compilers keep
+/// using [`parse`], which withholds the program on any error.
+pub fn parse_recovering<'a>(source: &'a str, arena: &'a Bump) -> ParseResult<'a> {
+    let (program, errors) = parse_with_recovery(source, arena);
+    ParseResult { program, errors }
+}
+
+fn parse_with_recovery<'a>(
+    source: &'a str,
+    arena: &'a Bump,
+) -> (Option<Program<'a>>, Vec<Diagnostic>) {
     let mut lexer = Lexer::new(source);
     let mut tokens: Vec<Token> = Vec::new();
 
@@ -83,10 +104,7 @@ pub fn parse<'a>(source: &'a str, arena: &'a Bump) -> ParseResult<'a> {
         crate::canonicalize::resolve_enum_constructors(program, arena);
     }
 
-    ParseResult {
-        program: if errors.is_empty() { program } else { None },
-        errors,
-    }
+    (program, errors)
 }
 
 /// True for tokens that are keywords (or keyword-like literals) in

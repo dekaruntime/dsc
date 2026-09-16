@@ -176,7 +176,10 @@ pub fn is_math_module_spec(spec: &str) -> bool {
     deka_project::module_spec::is_closed_stdlib_module_spec(spec)
 }
 
-pub(crate) use deka_project::module_spec::is_stdlib_module_spec;
+/// Whether `spec` names a stdlib module (bare or `@deka/`-aliased) — the
+/// project gate's vocabulary, shared with tooling (completion) so the LSP
+/// offers stdlib items exactly where the compiler accepts the import.
+pub use deka_project::module_spec::is_stdlib_module_spec;
 
 /// Build synthetic signatures for recognized virtual stdlib modules.
 ///

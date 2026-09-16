@@ -65,23 +65,36 @@ pub fn analyze(source: &str, context: &AnalysisContext) -> Vec<AnalysisDiagnosti
     };
 
     diagnostics
-        .into_iter()
-        .filter(|diagnostic| !should_skip_diagnostic(diagnostic))
-        .map(|diagnostic| AnalysisDiagnostic {
-            range: source_range(
-                source,
-                diagnostic.line,
-                diagnostic.column,
-                diagnostic.underline_length,
-            ),
-            severity: severity(diagnostic.severity),
-            code: "compiler".to_string(),
-            message: plain_message(
-                &diagnostic.message,
-                diagnostic.help_text.as_deref().unwrap_or(""),
-            ),
-        })
+        .iter()
+        .filter_map(|diagnostic| analysis_from_compiler_diagnostic(source, diagnostic))
         .collect()
+}
+
+/// Convert one compiler diagnostic into an analysis diagnostic against
+/// `source`, applying the same filtering and UTF-16 range mapping as
+/// [`analyze`]. The project-aware path uses this to render graph diagnostics
+/// against each module's own source.
+pub(crate) fn analysis_from_compiler_diagnostic(
+    source: &str,
+    diagnostic: &CompilerDiagnostic,
+) -> Option<AnalysisDiagnostic> {
+    if should_skip_diagnostic(diagnostic) {
+        return None;
+    }
+    Some(AnalysisDiagnostic {
+        range: source_range(
+            source,
+            diagnostic.line,
+            diagnostic.column,
+            diagnostic.underline_length,
+        ),
+        severity: severity(diagnostic.severity),
+        code: "compiler".to_string(),
+        message: plain_message(
+            &diagnostic.message,
+            diagnostic.help_text.as_deref().unwrap_or(""),
+        ),
+    })
 }
 
 pub fn is_dekascript_context(context: &AnalysisContext) -> bool {

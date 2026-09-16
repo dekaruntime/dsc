@@ -35,11 +35,15 @@ mod documents;
 #[cfg(feature = "native")]
 mod handlers;
 #[cfg(feature = "native")]
+mod project;
+#[cfg(feature = "native")]
 mod symbols;
 pub use analysis::{
     AnalysisContext, AnalysisDiagnostic, AnalysisPosition, AnalysisRange, AnalysisSeverity,
     analyze, is_dekascript_context,
 };
+#[cfg(feature = "native")]
+pub(crate) use analysis::analysis_from_compiler_diagnostic;
 #[cfg(feature = "native")]
 pub use handlers::run_stdio;
 
@@ -52,6 +56,8 @@ pub(crate) use documents::*;
 #[cfg(feature = "native")]
 pub(crate) use handlers::TargetMode;
 #[cfg(feature = "native")]
+pub(crate) use project::*;
+#[cfg(feature = "native")]
 pub(crate) use symbols::*;
 
 #[cfg(feature = "native")]
@@ -61,7 +67,9 @@ pub(crate) const LANGUAGE_ID: &str = "dekascript";
 pub(crate) fn is_dekascript_path(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("ds"))
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("ds") || extension.eq_ignore_ascii_case("dsx")
+        })
 }
 
 #[cfg(feature = "native")]

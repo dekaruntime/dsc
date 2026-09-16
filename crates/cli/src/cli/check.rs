@@ -120,7 +120,9 @@ fn check_project_file(
         cwd.join(path)
     };
     let loader = deka_compile::module_graph::FsModuleLoader::new(project_root.to_path_buf());
-    deka_compile::module_graph::compile_module_graph_with_options(
+    // The one project-aware check path, shared with the language server
+    // (dsc#265); diagnostics are flattened to the historical CLI rendering.
+    deka_compile::module_graph::check_module_graph_with_options(
         &absolute_path,
         &loader,
         deka_compile::module_graph::GraphCompileOptions {
@@ -128,7 +130,13 @@ fn check_project_file(
             ..Default::default()
         },
     )
-    .map_err(|diagnostics| deka_compile::format_diagnostics(&diagnostics))?;
+    .map_err(|diagnostics| {
+        let legacy: Vec<_> = diagnostics
+            .into_iter()
+            .map(deka_compile::module_graph::ModuleDiagnostic::into_legacy)
+            .collect();
+        deka_compile::format_diagnostics(&legacy)
+    })?;
     Ok(())
 }
 

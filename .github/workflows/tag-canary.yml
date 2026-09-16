@@ -1,0 +1,65 @@
+# rfd#68: every push to main becomes a canary build.
+#
+# This workflow's only job is to name that build and start it:
+#   1. Compute TAG = v<workspace version>-canary-<7-char short sha>.
+#   2. Push TAG as a plain annotated tag (authored by the github-actions
+#      bot). Pushing it triggers nothing by itself.
+#   3. Explicitly dispatch release.yml against TAG.
+#
+# Why two steps instead of letting the tag push trigger release.yml the way
+# a human-pushed tag would: GitHub does not run workflows off of pushes made
+# with the built-in GITHUB_TOKEN (loop-prevention). workflow_dispatch is the
+# one documented exception — a `gh workflow run` call authenticated with
+# GITHUB_TOKEN DOES start the target workflow. So the tag exists as a normal,
+# inspectable ref, and the dispatch call is what actually starts the build.
+name: Tag canary
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  tag-canary:
+    name: Tag canary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Where am I
+        uses: ./.github/actions/where-am-i
+
+      - name: Compute, push, and dispatch the canary tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          V="$(scripts/dsc-version.sh)"
+
+          if git rev-parse "v${V}" >/dev/null 2>&1; then
+            echo "::warning::v${V} is already promoted; bump the version before the next canary"
+            exit 0
+          fi
+
+          SHA7="$(git rev-parse --short=7 HEAD)"
+          TAG="v${V}-canary-${SHA7}"
+
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "canary tag ${TAG} already exists (re-run or duplicate push); nothing to do"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "dsc canary ${TAG}"
+          git push origin "$TAG"
+
+          echo "pushed ${TAG}; dispatching release.yml against it"
+          gh workflow run release.yml --repo "${{ github.repository }}" --ref "$TAG"

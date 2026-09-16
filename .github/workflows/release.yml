@@ -1,12 +1,24 @@
 # SCCACHE IS REQUIRED FOR ALL RUST COMPILATION.
 # EVERY CARGO BUILD/TEST/CHECK MUST RUN WITH RUSTC_WRAPPER=sccache. NO EXCEPTIONS.
 
-name: Release
+# rfd#68: this workflow builds and publishes CANARY releases only. It never
+# creates a stable vX.Y.Z tag or touches the latest/ pointers — that is
+# promote.yml's job, run by a human against a canary this workflow already
+# built and published. There is no "test" job here: PR CI (ci.yml) already
+# ran the unit-test gate on this exact merge commit before it reached main;
+# re-running it here bought nothing but latency.
+name: Release (canary)
 
 on:
+  # tag-canary.yml dispatches this explicitly (see that file for why a plain
+  # tag push can't trigger it directly).
+  workflow_dispatch: {}
+  # Belt-and-suspenders: if a canary tag is ever pushed with a real user
+  # token (not GITHUB_TOKEN), build it too. Plain vX.Y.Z tags are excluded by
+  # this filter; promote.yml is what creates those.
   push:
     tags:
-      - 'v*'
+      - 'v*-canary-*'
 
 permissions:
   contents: read
@@ -19,88 +31,66 @@ env:
   CARGO_PROFILE_TEST_DEBUG: 0
 
 jobs:
-  test:
-    name: Test
+  resolve:
+    name: Resolve canary ref
     runs-on: ubuntu-latest
-    environment: release
-    env:
-      SCCACHE_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
-      SCCACHE_REGION: auto
-      SCCACHE_BUCKET: dsc-sccache-linux-x64
-      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      base_version: ${{ steps.resolve.outputs.base_version }}
+      sha7: ${{ steps.resolve.outputs.sha7 }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Where am I
         uses: ./.github/actions/where-am-i
 
-      - name: Tag commit is reachable from main
+      - name: Resolve and validate the canary ref
+        id: resolve
         run: |
-          git fetch origin main
-          if ! git merge-base --is-ancestor HEAD origin/main; then
-            echo "::error::${GITHUB_REF_NAME} must reference a commit reachable from main."
+          set -euo pipefail
+
+          TAG="${GITHUB_REF_NAME}"
+
+          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::${TAG} is a stable tag. Stable tags are created by promote.yml, not by running release.yml."
             exit 1
           fi
 
-      - name: Tag matches workspace version
-        run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [[ ! "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-canary-([0-9a-f]{7})$ ]]; then
+            echo "::error::${TAG} is not a canary ref. Expected vX.Y.Z-canary-<7-char-sha>."
+            exit 1
+          fi
+
+          BASE_VERSION="${BASH_REMATCH[1]}"
+          SHA7="${BASH_REMATCH[2]}"
+          VERSION="${TAG#v}"
+
           TREE_VERSION="$(scripts/dsc-version.sh)"
-          if [ "$TREE_VERSION" != "$TAG_VERSION" ]; then
-            echo "::error::git tag ${GITHUB_REF_NAME} does not match workspace version ${TREE_VERSION}."
-            echo "Bump with scripts/bump-version.sh, open a PR, merge, then tag from main."
+          if [ "$BASE_VERSION" != "$TREE_VERSION" ]; then
+            echo "::error::${TAG} names base version ${BASE_VERSION} but the workspace at this commit is ${TREE_VERSION}."
             exit 1
           fi
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.96.0
-        with:
-          targets: wasm32-unknown-unknown
-
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
-
-      - name: Verify sccache can reach R2
-        run: |
-          command -v aws >/dev/null 2>&1 || pip install --break-system-packages awscli
-          echo "SCCACHE_ENDPOINT=$SCCACHE_ENDPOINT"
-          echo "SCCACHE_BUCKET=$SCCACHE_BUCKET"
-          sccache --show-stats
-          aws s3 ls "s3://${SCCACHE_BUCKET}/" --endpoint-url="${SCCACHE_ENDPOINT}"
-
-      - name: Fetch pinned testsuite corpus
-        run: scripts/ci-fetch-testsuite-corpus.sh "$GITHUB_WORKSPACE/.cache/testsuite-corpus"
-
-      - name: Fetch pinned tour
-        run: scripts/ci-fetch-tour.sh "$GITHUB_WORKSPACE/.cache/tour"
-
-      - name: Test workspace
-        env:
-          RUSTC_WRAPPER: sccache
-        run: cargo test --locked --workspace
-
-      - name: Check wasm32 compiler + diagnostics
-        env:
-          RUSTC_WRAPPER: sccache
-        run: |
-          cargo check --locked --target wasm32-unknown-unknown -p deka_compiler_wasm
-          cargo check --locked --target wasm32-unknown-unknown -p dekascript_lsp_wasm --no-default-features
-
-      - name: Forbid V8 in this repo
-        run: |
-          if grep -RInE 'deno_core|rusty_v8' \
-            --include='Cargo.toml' --include='Cargo.lock' --include='*.rs' \
-            crates Cargo.toml Cargo.lock; then
-            echo "::error::dsc must not depend on V8 / deno_core"
+          COMMIT_SHA7="$(git rev-parse --short=7 HEAD)"
+          if [ "$SHA7" != "$COMMIT_SHA7" ]; then
+            echo "::error::${TAG} names commit ${SHA7} but HEAD at this ref is ${COMMIT_SHA7}."
             exit 1
           fi
+
+          {
+            echo "tag=${TAG}"
+            echo "version=${VERSION}"
+            echo "base_version=${BASE_VERSION}"
+            echo "sha7=${SHA7}"
+          } >> "$GITHUB_OUTPUT"
 
   build-wasm:
     name: Build browser compiler + diagnostics WASM
-    needs: [test]
+    needs: [resolve]
     runs-on: ubuntu-latest
     environment: release
     env:
@@ -149,7 +139,7 @@ jobs:
 
   build-cli:
     name: Build CLI (${{ matrix.platform }})
-    needs: [test]
+    needs: [resolve]
     strategy:
       fail-fast: true
       matrix:
@@ -209,9 +199,60 @@ jobs:
           path: dist/dsc-${{ matrix.platform }}
           retention-days: 1
 
+  smoke:
+    name: Smoke test CLI (${{ matrix.platform }})
+    needs: [resolve, build-cli]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: ubuntu-latest
+          - platform: darwin-x64
+            runner: macos-15-intel
+          - platform: darwin-arm64
+            runner: macos-14
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Download CLI binary
+        uses: actions/download-artifact@v4
+        with:
+          name: dsc-cli-${{ matrix.platform }}
+          path: dist
+
+      - name: dsc --version and dsc check smoke test
+        run: |
+          set -euo pipefail
+
+          BASE_VERSION="${{ needs.resolve.outputs.base_version }}"
+          BIN="$PWD/dist/dsc-${{ matrix.platform }}"
+          chmod +x "$BIN"
+
+          VERSION_OUT="$("$BIN" --version)"
+          echo "$VERSION_OUT"
+          case "$VERSION_OUT" in
+            *"$BASE_VERSION"*) ;;
+            *)
+              echo "::error::dsc --version did not print ${BASE_VERSION}: ${VERSION_OUT}"
+              exit 1
+              ;;
+          esac
+
+          printf 'const x = 1 + 1\n' > valid.ds
+          if ! "$BIN" check --single-file valid.ds; then
+            echo "::error::dsc check rejected valid input"
+            exit 1
+          fi
+
+          printf 'const x = 1 +\n' > invalid.ds
+          if "$BIN" check --single-file invalid.ds; then
+            echo "::error::dsc check accepted invalid input"
+            exit 1
+          fi
+
   publish:
     name: Publish
-    needs: [build-wasm, build-cli]
+    needs: [resolve, build-wasm, smoke]
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -236,15 +277,13 @@ jobs:
       - name: Prepare release layout
         id: prepare
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          TAG="${GITHUB_REF_NAME}"
+          set -euo pipefail
+
+          VERSION="${{ needs.resolve.outputs.version }}"
+          TAG="${{ needs.resolve.outputs.tag }}"
+          BASE_VERSION="${{ needs.resolve.outputs.base_version }}"
           COMMIT="${GITHUB_SHA}"
           PUBLISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          TREE_VERSION="$(scripts/dsc-version.sh)"
-          if [ "$TREE_VERSION" != "$VERSION" ]; then
-            echo "::error::git tag ${TAG} does not match workspace version ${TREE_VERSION}."
-            exit 1
-          fi
 
           mkdir -p "release/${VERSION}"
           for platform in linux-x64 darwin-x64 darwin-arm64; do
@@ -264,11 +303,18 @@ jobs:
           DIAGNOSTICS_SHA256="$(sha256 "release/${VERSION}/dsc_diagnostics.wasm")"
           CARGO_LOCK_SHA256="$(sha256sum Cargo.lock | awk '{print $1}')"
 
+          # channel/base_version/promoted_from are the only new keys; every
+          # key release.json already had (version, tag, commit, ...) stays,
+          # with `version` carrying the full canary string as it always has
+          # carried the tag-derived version.
           cat > "release/${VERSION}/release.json" <<EOF
           {
             "version": "${VERSION}",
             "tag": "${TAG}",
             "commit": "${COMMIT}",
+            "channel": "canary",
+            "base_version": "${BASE_VERSION}",
+            "promoted_from": null,
             "published_at": "${PUBLISHED_AT}",
             "cargo_lock_sha256": "${CARGO_LOCK_SHA256}",
             "binaries": {
@@ -286,6 +332,24 @@ jobs:
           EOF
           python3 -m json.tool "release/${VERSION}/release.json" > "release/${VERSION}/release.json.tmp"
           mv "release/${VERSION}/release.json.tmp" "release/${VERSION}/release.json"
+
+          # manifest.json comes out of build-wasm.sh with no channel
+          # awareness (it's also used outside of CI). Stamp the same three
+          # keys onto it here, where channel identity actually lives.
+          python3 - "release/${VERSION}/manifest.json" "canary" "${BASE_VERSION}" <<'PY'
+          import json
+          import sys
+
+          path, channel, base_version = sys.argv[1:4]
+          with open(path) as f:
+              data = json.load(f)
+          data["channel"] = channel
+          data["base_version"] = base_version
+          data["promoted_from"] = None
+          with open(path, "w") as f:
+              json.dump(data, f, indent=2)
+              f.write("\n")
+          PY
 
           COMPILER_SIZE="$(stat -c%s "release/${VERSION}/dsc.wasm")"
           DIAGNOSTICS_SIZE="$(stat -c%s "release/${VERSION}/dsc_diagnostics.wasm")"
@@ -310,12 +374,12 @@ jobs:
       - name: Install AWS CLI
         run: command -v aws >/dev/null 2>&1 || pip install --break-system-packages awscli
 
-      - name: Upload versioned release to R2
+      - name: Upload versioned canary release to R2
         run: |
           VERSION="${{ steps.prepare.outputs.version }}"
-          aws s3 sync "release/${VERSION}/" "s3://${R2_BUCKET_RELEASES}/${VERSION}/" --endpoint-url="${R2_ENDPOINT}"
+          aws s3 sync "release/${VERSION}/" "s3://${R2_BUCKET_RELEASES}/v${VERSION}/" --endpoint-url="${R2_ENDPOINT}"
 
-      - name: Upload versioned WASM to R2
+      - name: Upload versioned canary WASM to R2
         run: |
           VERSION="${{ steps.prepare.outputs.version }}"
           for f in dsc.wasm dsc_diagnostics.wasm deka_compiler.wasm deka_diagnostics.wasm \
@@ -324,7 +388,7 @@ jobs:
             aws s3 cp "release/${VERSION}/${f}" "s3://${R2_BUCKET_WASM}/v${VERSION}/${f}" --endpoint-url="${R2_ENDPOINT}"
           done
 
-      - name: Create GitHub release
+      - name: Create GitHub release (prerelease)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -339,8 +403,8 @@ jobs:
           for f in release/${VERSION}/*; do
             [ -f "$f" ] && ASSETS+=("$f")
           done
-          TITLE="dsc ${VERSION}"
-          NOTES="dsc ${VERSION} CLI binaries and WASM artifacts."
+          TITLE="dsc ${VERSION} (canary)"
+          NOTES="dsc ${VERSION} canary build. Untested until promoted; see PUBLISH.md."
           if "$GH_BIN" release view "${GITHUB_REF_NAME}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             echo "Release ${GITHUB_REF_NAME} already exists. Uploading/overwriting assets."
             "$GH_BIN" release upload "${GITHUB_REF_NAME}" "${ASSETS[@]}" \
@@ -350,33 +414,31 @@ jobs:
               --repo "${{ github.repository }}" \
               --title "$TITLE" \
               --notes "$NOTES" \
+              --prerelease \
               "${ASSETS[@]}"
           fi
 
-      - name: Promote latest
+      - name: Publish canary pointers
         run: |
           VERSION="${{ steps.prepare.outputs.version }}"
-          aws s3 cp "release/${VERSION}/release.json" "s3://${R2_BUCKET_RELEASES}/latest.json" --endpoint-url="${R2_ENDPOINT}"
-          aws s3 cp "release/${VERSION}/dsc.wasm" "s3://${R2_BUCKET_WASM}/latest/dsc.wasm" --endpoint-url="${R2_ENDPOINT}"
-          aws s3 cp "release/${VERSION}/dsc_diagnostics.wasm" "s3://${R2_BUCKET_WASM}/latest/dsc_diagnostics.wasm" --endpoint-url="${R2_ENDPOINT}"
-          aws s3 cp "release/${VERSION}/deka_compiler.wasm" "s3://${R2_BUCKET_WASM}/latest/deka_compiler.wasm" --endpoint-url="${R2_ENDPOINT}"
-          aws s3 cp "release/${VERSION}/deka_diagnostics.wasm" "s3://${R2_BUCKET_WASM}/latest/deka_diagnostics.wasm" --endpoint-url="${R2_ENDPOINT}"
-          aws s3 cp "release/${VERSION}/manifest.json" "s3://${R2_BUCKET_WASM}/latest/manifest.json" --endpoint-url="${R2_ENDPOINT}"
-          aws s3 cp "release/${VERSION}/release.json" "s3://${R2_BUCKET_WASM}/latest/release.json" --endpoint-url="${R2_ENDPOINT}"
-          aws s3 cp "release/${VERSION}/deka-compiler-artifact.json" "s3://${R2_BUCKET_WASM}/latest/deka-compiler-artifact.json" --endpoint-url="${R2_ENDPOINT}"
-          aws s3 cp "release/${VERSION}/deka-diagnostics-artifact.json" "s3://${R2_BUCKET_WASM}/latest/deka-diagnostics-artifact.json" --endpoint-url="${R2_ENDPOINT}"
-          aws s3 cp "release/${VERSION}/dsc-linux-x64" "s3://${R2_BUCKET_WASM}/latest/dsc-linux-x64" --endpoint-url="${R2_ENDPOINT}"
-          aws s3 cp "release/${VERSION}/dsc-darwin-x64" "s3://${R2_BUCKET_WASM}/latest/dsc-darwin-x64" --endpoint-url="${R2_ENDPOINT}"
-          aws s3 cp "release/${VERSION}/dsc-darwin-arm64" "s3://${R2_BUCKET_WASM}/latest/dsc-darwin-arm64" --endpoint-url="${R2_ENDPOINT}"
+          aws s3 cp "release/${VERSION}/release.json" "s3://${R2_BUCKET_RELEASES}/canary/release.json" --endpoint-url="${R2_ENDPOINT}"
+          for f in dsc.wasm dsc_diagnostics.wasm deka_compiler.wasm deka_diagnostics.wasm \
+            manifest.json release.json deka-compiler-artifact.json deka-diagnostics-artifact.json \
+            dsc-linux-x64 dsc-darwin-x64 dsc-darwin-arm64; do
+            aws s3 cp "release/${VERSION}/${f}" "s3://${R2_BUCKET_WASM}/canary/${f}" --endpoint-url="${R2_ENDPOINT}"
+          done
 
       - name: Summary
         run: |
-          echo "Published dsc ${{ github.ref_name }} to GitHub Releases."
-          echo "  wasm host: https://dsc-wasm.deka.gg/latest/dsc.wasm"
-          echo "  CLI: https://dsc-wasm.deka.gg/latest/dsc-darwin-arm64"
+          VERSION="${{ steps.prepare.outputs.version }}"
+          echo "Published dsc ${VERSION} (canary) to GitHub Releases."
+          echo "  wasm host: https://dsc-wasm.deka.gg/v${VERSION}/dsc.wasm"
+          echo "  canary pointer: https://dsc-wasm.deka.gg/canary/dsc.wasm"
+          echo "  CLI: https://dsc-wasm.deka.gg/v${VERSION}/dsc-darwin-arm64"
+          echo "  latest/ was NOT touched. Promote via Actions -> promote.yml."
 
   # ------------------------------------------------------------------
-  # create-deka-app republishes the released dsc binaries as the
+  # create-deka-app republishes released dsc binaries as the
   # @dekaruntime/dsc-* npm packages. It also checks hourly, so this only
   # removes latency and skips cleanly when the token is absent.
   # ------------------------------------------------------------------
@@ -399,4 +461,4 @@ jobs:
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             https://api.github.com/repos/dekaruntime/create-deka-app/dispatches \
-            -d "{\"event_type\":\"dsc-released\",\"client_payload\":{\"tag\":\"$TAG\"}}"
+            -d "{\"event_type\":\"dsc-released\",\"client_payload\":{\"tag\":\"$TAG\",\"channel\":\"canary\"}}"

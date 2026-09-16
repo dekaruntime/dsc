@@ -390,9 +390,8 @@ jobs:
           GH_TOKEN: ${{ secrets.CASCADE_DISPATCH_TOKEN }}
         run: |
           if [ -z "$GH_TOKEN" ]; then
-            echo "CASCADE_DISPATCH_TOKEN not set; skipping npm publish trigger."
-            echo "create-deka-app's hourly check will pick this release up within the hour."
-            exit 0
+            echo "::error::CASCADE_DISPATCH_TOKEN is not visible to this repo (org secret → Repository access). The npm publish for this release was NOT triggered; create-deka-app's hourly schedule will publish it within the hour, but fix the secret."
+            exit 1
           fi
           TAG="${GITHUB_REF_NAME}"
           curl -sSL --fail-with-body -X POST \

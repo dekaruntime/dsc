@@ -311,6 +311,7 @@ pub(crate) fn completion_for_import(
     file_path: &str,
     offset: usize,
     workspace_roots: &[PathBuf],
+    open_documents: &HashMap<PathBuf, String>,
 ) -> Option<Vec<CompletionItem>> {
     let line_index = LineIndex::new(source);
     let position = line_index.offset_to_position(offset);
@@ -330,9 +331,6 @@ pub(crate) fn completion_for_import(
         let close = line_text.find('}').unwrap_or(line_text.len());
         if rel > open && rel <= close {
             let module_spec = parse_module_path(line_text)?;
-            let root = find_php_modules_root(Path::new(file_path), workspace_roots)?;
-            let is_wasm = line_text.contains(" as wasm");
-            let exports = module_exports(&root, &module_spec, is_wasm)?;
             let prefix_start = line_text[..rel]
                 .rfind(',')
                 .map(|idx| idx + 1)
@@ -343,18 +341,26 @@ pub(crate) fn completion_for_import(
                 .last()
                 .unwrap_or(raw_prefix)
                 .trim();
-            let mut items = Vec::new();
-            for export in exports {
-                if !prefix.is_empty() && !export.name.starts_with(prefix) {
-                    continue;
-                }
-                items.push(CompletionItem {
-                    label: export.name,
-                    kind: export.kind,
-                    ..CompletionItem::default()
-                });
+            // Project-aware first: resolution and parsing shared with the
+            // graph check `dsc check` runs, with unsaved buffers overlaid.
+            if let Some(exports) =
+                project_module_exports(Path::new(file_path), &module_spec, open_documents)
+            {
+                return Some(exports_to_completion_items(exports, prefix));
             }
-            return Some(items);
+            // Then the pre-project ds_modules lookup; only when neither can
+            // resolve the specifier does a bare stdlib name (`io`, `db/…`)
+            // fall back to the stdlib catalog.
+            if let Some(root) = find_php_modules_root(Path::new(file_path), workspace_roots) {
+                let is_wasm = line_text.contains(" as wasm");
+                if let Some(exports) = module_exports(&root, &module_spec, is_wasm) {
+                    return Some(exports_to_completion_items(exports, prefix));
+                }
+            }
+            if deka_compile::is_stdlib_module_spec(&module_spec) {
+                return Some(filter_by_prefix(stdlib_completion_items(), prefix));
+            }
+            return None;
         }
     }
 
@@ -383,6 +389,23 @@ pub(crate) fn completion_for_import(
         });
     }
     Some(items)
+}
+fn exports_to_completion_items(
+    exports: Vec<ExportInfo>,
+    prefix: &str,
+) -> Vec<CompletionItem> {
+    let mut items = Vec::new();
+    for export in exports {
+        if !prefix.is_empty() && !export.name.starts_with(prefix) {
+            continue;
+        }
+        items.push(CompletionItem {
+            label: export.name,
+            kind: export.kind,
+            ..CompletionItem::default()
+        });
+    }
+    items
 }
 fn modules_dir_if_present(root: &Path) -> Option<PathBuf> {
     for name in ["ds_modules", "php_modules"] {

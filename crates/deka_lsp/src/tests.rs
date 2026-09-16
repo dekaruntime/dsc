@@ -237,6 +237,7 @@ fn completes_named_exports_for_import_clause() {
         file.to_str().expect("file"),
         offset,
         std::slice::from_ref(&workspace),
+        &HashMap::new(),
     )
     .expect("completion");
     let labels: Vec<String> = items.into_iter().map(|item| item.label).collect();
@@ -266,6 +267,7 @@ fn completes_named_exports_without_closing_brace() {
         file.to_str().expect("file"),
         offset,
         std::slice::from_ref(&workspace),
+        &HashMap::new(),
     )
     .expect("completion");
     let labels: Vec<String> = items.into_iter().map(|item| item.label).collect();
@@ -507,4 +509,267 @@ fn project_check_abstains_without_project_root() {
     let file = dir.join("main.ds");
     fs::write(&file, "const = ;\n").expect("write main.ds");
     assert!(project_file_diagnostics(&file, &HashMap::new()).is_none());
+}
+
+// ---------------------------------------------------------------------
+// dsc#265 part 2: scope-aware completion. Each test below maps to one
+// measured zero-item position in the issue (or the import-braces/JSX
+// positions called out with them) and fails when completion returns
+// nothing useful there.
+// ---------------------------------------------------------------------
+
+fn completion_labels(
+    documents: &HashMap<Url, String>,
+    workspace: &PathBuf,
+    text: &str,
+    file_path: &str,
+    offset: usize,
+) -> Vec<String> {
+    handlers::entry_completions(
+        documents,
+        std::slice::from_ref(workspace),
+        text,
+        file_path,
+        offset,
+    )
+    .into_iter()
+    .map(|item| item.label)
+    .collect()
+}
+
+fn project_workspace(prefix: &str) -> (PathBuf, PathBuf) {
+    let workspace = temp_dir(prefix);
+    fs::write(workspace.join("deka.json"), "{}\n").expect("write deka.json");
+    let app = workspace.join("app");
+    fs::create_dir_all(&app).expect("mkdir app");
+    (workspace, app)
+}
+
+/// Issue position: inside `import { │ } from "./Counter.dsx"` — the exports
+/// of that module, from the same resolve+parse path the graph check uses.
+/// Fixture syntax is `export fn`, which the old line-scanner never saw.
+#[test]
+fn completes_local_module_exports_inside_import_braces() {
+    let (workspace, app) = project_workspace("dekascript_lsp_completion_import_braces");
+    fs::write(
+        app.join("Counter.dsx"),
+        "export fn Counter() ReactNode { return <button /> }\nexport const COUNTER_LABEL = \"hi\"\nfn private_helper() {}\n",
+    )
+    .expect("write Counter.dsx");
+    let page = app.join("page.dsx");
+    let source = "import {  } from \"./Counter.dsx\"\n";
+    fs::write(&page, source).expect("write page.dsx");
+
+    let offset = source.find("{") .expect("brace") + 2;
+    let labels = completion_labels(
+        &HashMap::new(),
+        &workspace,
+        source,
+        page.to_str().expect("page path"),
+        offset,
+    );
+    assert!(labels.iter().any(|label| label == "Counter"), "labels={labels:?}");
+    assert!(
+        labels.iter().any(|label| label == "COUNTER_LABEL"),
+        "labels={labels:?}"
+    );
+    assert!(
+        !labels.iter().any(|label| label == "private_helper"),
+        "private names must not be offered: labels={labels:?}"
+    );
+}
+
+/// The same position, prefix-filtered by the partial identifier typed inside
+/// the braces.
+#[test]
+fn import_brace_completion_is_prefix_filtered() {
+    let (workspace, app) = project_workspace("dekascript_lsp_completion_import_prefix");
+    fs::write(
+        app.join("Counter.dsx"),
+        "export fn Counter() ReactNode { return <button /> }\nexport const COUNTER_LABEL = \"hi\"\n",
+    )
+    .expect("write Counter.dsx");
+    let page = app.join("page.dsx");
+    let source = "import { Counte } from \"./Counter.dsx\"\n";
+    fs::write(&page, source).expect("write page.dsx");
+
+    let offset = source.find("Counte").expect("prefix") + "Counte".len();
+    let labels = completion_labels(
+        &HashMap::new(),
+        &workspace,
+        source,
+        page.to_str().expect("page path"),
+        offset,
+    );
+    assert_eq!(labels, vec!["Counter".to_string()], "labels={labels:?}");
+}
+
+/// An open, unsaved buffer for the target module must win over disk, exactly
+/// like the diagnostics overlay.
+#[test]
+fn import_brace_completion_uses_unsaved_buffer_exports() {
+    let (workspace, app) = project_workspace("dekascript_lsp_completion_import_overlay");
+    let counter = app.join("Counter.dsx");
+    fs::write(&counter, "export fn Counter() ReactNode { return <button /> }\n")
+        .expect("write Counter.dsx");
+    let page = app.join("page.dsx");
+    let source = "import {  } from \"./Counter.dsx\"\n";
+    fs::write(&page, source).expect("write page.dsx");
+
+    let counter_uri = Url::from_file_path(&counter).expect("counter uri");
+    let unsaved = "export fn Counter() ReactNode { return <button /> }\nexport fn Extra() ReactNode { return <div /> }\n";
+    let documents = HashMap::from([(counter_uri, unsaved.to_string())]);
+
+    let offset = source.find("{").expect("brace") + 2;
+    let labels = completion_labels(
+        &documents,
+        &workspace,
+        source,
+        page.to_str().expect("page path"),
+        offset,
+    );
+    assert!(
+        labels.iter().any(|label| label == "Extra"),
+        "the unsaved export must be offered: labels={labels:?}"
+    );
+}
+
+/// Issue position: after `import { │ } from "io"` — stdlib items when the
+/// specifier is a bare stdlib module with no project package behind it.
+#[test]
+fn completes_stdlib_items_inside_import_braces() {
+    let (workspace, app) = project_workspace("dekascript_lsp_completion_stdlib");
+    let main = app.join("main.ds");
+    let source = "import { read } from \"io\"\n";
+    fs::write(&main, source).expect("write main.ds");
+
+    let offset = source.find("read").expect("prefix") + "read".len();
+    let labels = completion_labels(
+        &HashMap::new(),
+        &workspace,
+        source,
+        main.to_str().expect("main path"),
+        offset,
+    );
+    assert!(
+        labels.iter().any(|label| label == "readFile"),
+        "labels={labels:?}"
+    );
+    assert!(
+        labels.iter().all(|label| label.starts_with("read")),
+        "every item must match the prefix: labels={labels:?}"
+    );
+}
+
+/// Issue position: inside a function body — params, locals, top-level items
+/// and imports are all in scope.
+#[test]
+fn completes_locals_params_and_module_items_in_function_body() {
+    let (workspace, app) = project_workspace("dekascript_lsp_completion_scope");
+    let page = app.join("page.dsx");
+    let source = "import { Counter } from \"./Counter.dsx\"\n\
+fn helper() {}\n\
+fn greeting(name: string) string {\n\
+    const shout = name;\n\
+    return \n\
+}\n";
+    fs::write(&page, source).expect("write page.dsx");
+    fs::write(
+        app.join("Counter.dsx"),
+        "export fn Counter() ReactNode { return <button /> }\n",
+    )
+    .expect("write Counter.dsx");
+
+    let offset = source.find("return \n").expect("return") + "return ".len();
+    let labels = completion_labels(
+        &HashMap::new(),
+        &workspace,
+        source,
+        page.to_str().expect("page path"),
+        offset,
+    );
+    for expected in ["name", "shout", "greeting", "helper", "Counter"] {
+        assert!(
+            labels.iter().any(|label| label == expected),
+            "expected {expected} in scope: labels={labels:?}"
+        );
+    }
+}
+
+/// Issue position: before a JSX tag — component names in scope.
+#[test]
+fn completes_components_in_jsx_tag_position() {
+    let (workspace, app) = project_workspace("dekascript_lsp_completion_jsx");
+    fs::write(
+        app.join("Counter.dsx"),
+        "export fn Counter() ReactNode { return <button /> }\n",
+    )
+    .expect("write Counter.dsx");
+    let page = app.join("page.dsx");
+    let source = "import { Counter } from \"./Counter.dsx\"\n\
+fn greeting(name: string) string { return name }\n\
+export fn Page() ReactNode {\n\
+    return (\n\
+        <main>\n\
+            <Co />\n\
+        </main>)\n\
+}\n";
+    fs::write(&page, source).expect("write page.dsx");
+
+    let offset = source.find("<Co").expect("tag") + 3;
+    let labels = completion_labels(
+        &HashMap::new(),
+        &workspace,
+        source,
+        page.to_str().expect("page path"),
+        offset,
+    );
+    assert!(
+        labels.iter().any(|label| label == "Counter"),
+        "imported component must be offered: labels={labels:?}"
+    );
+    assert!(
+        !labels.iter().any(|label| label == "greeting"),
+        "lowercase names are not tags: labels={labels:?}"
+    );
+    assert!(
+        labels.iter().all(|label| label.starts_with("Co")),
+        "items must match the typed prefix: labels={labels:?}"
+    );
+}
+
+/// Issue position: after typing `const x = use` — prefix-filtered items,
+/// including the ambient hooks the emitter auto-imports in `.dsx` modules.
+#[test]
+fn completes_prefix_filtered_items_after_const_x_eq_use() {
+    let (workspace, app) = project_workspace("dekascript_lsp_completion_use");
+    let page = app.join("page.dsx");
+    let source = "import { Counter } from \"./Counter.dsx\"\n\nconst x = use\n";
+    fs::write(&page, source).expect("write page.dsx");
+    fs::write(
+        app.join("Counter.dsx"),
+        "export fn Counter() ReactNode { return <button /> }\n",
+    )
+    .expect("write Counter.dsx");
+
+    let offset = source.find("= use").expect("use") + "= use".len();
+    let labels = completion_labels(
+        &HashMap::new(),
+        &workspace,
+        source,
+        page.to_str().expect("page path"),
+        offset,
+    );
+    assert!(
+        labels.iter().any(|label| label == "useState"),
+        "labels={labels:?}"
+    );
+    assert!(
+        labels.iter().any(|label| label == "useEffect"),
+        "labels={labels:?}"
+    );
+    assert!(
+        labels.iter().all(|label| label.starts_with("use")),
+        "every item must match the prefix: labels={labels:?}"
+    );
 }

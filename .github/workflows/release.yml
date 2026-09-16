@@ -374,3 +374,30 @@ jobs:
           echo "Published dsc ${{ github.ref_name }} to GitHub Releases."
           echo "  wasm host: https://dsc-wasm.deka.gg/latest/dsc.wasm"
           echo "  CLI: https://dsc-wasm.deka.gg/latest/dsc-darwin-arm64"
+
+  # ------------------------------------------------------------------
+  # create-deka-app republishes the released dsc binaries as the
+  # @dekaruntime/dsc-* npm packages. It also checks hourly, so this only
+  # removes latency and skips cleanly when the token is absent.
+  # ------------------------------------------------------------------
+  notify:
+    name: Notify downstream
+    needs: [publish]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger npm package publish
+        env:
+          GH_TOKEN: ${{ secrets.CASCADE_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "CASCADE_DISPATCH_TOKEN not set; skipping npm publish trigger."
+            echo "create-deka-app's hourly check will pick this release up within the hour."
+            exit 0
+          fi
+          TAG="${GITHUB_REF_NAME}"
+          curl -sSL --fail-with-body -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/dekaruntime/create-deka-app/dispatches \
+            -d "{\"event_type\":\"dsc-released\",\"client_payload\":{\"tag\":\"$TAG\"}}"

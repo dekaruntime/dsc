@@ -340,6 +340,97 @@ impl ModuleGraphResult {
     }
 }
 
+/// A graph diagnostic attributed to the module that produced it.
+///
+/// `compile_module_graph_with_options` flattens these into the historical
+/// CLI strings via [`ModuleDiagnostic::into_legacy`]; hosts that route
+/// diagnostics per file (the LSP) consume the structured form through
+/// [`check_module_graph_with_options`].
+#[derive(Debug)]
+pub struct ModuleDiagnostic {
+    /// Module whose source `diagnostic.line` / `diagnostic.column` refer to.
+    /// `None` for graph-level errors (import cycles) with no single file.
+    pub path: Option<PathBuf>,
+    /// The diagnostic with a path-free message.
+    pub diagnostic: Diagnostic,
+    attribution: DiagnosticAttribution,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DiagnosticAttribution {
+    /// Legacy rendering `{path}: {message}`.
+    Prefix,
+    /// Legacy rendering `{message} (imported by '{path}').`
+    ImportedBy,
+    /// Message only; no module attribution in the legacy rendering.
+    Graph,
+}
+
+impl ModuleDiagnostic {
+    fn prefixed(path: PathBuf, diagnostic: Diagnostic) -> Self {
+        Self {
+            path: Some(path),
+            diagnostic,
+            attribution: DiagnosticAttribution::Prefix,
+        }
+    }
+
+    fn imported_by(path: PathBuf, diagnostic: Diagnostic) -> Self {
+        Self {
+            path: Some(path),
+            diagnostic,
+            attribution: DiagnosticAttribution::ImportedBy,
+        }
+    }
+
+    fn graph(diagnostic: Diagnostic) -> Self {
+        Self {
+            path: None,
+            diagnostic,
+            attribution: DiagnosticAttribution::Graph,
+        }
+    }
+
+    /// Historical CLI rendering: the module attribution folded back into the
+    /// message, byte-identical to `compile_module_graph_with_options` output.
+    pub fn into_legacy(self) -> Diagnostic {
+        let mut diagnostic = self.diagnostic;
+        let path = self.path.as_ref().map(|path| path.display().to_string());
+        diagnostic.message = match (self.attribution, path) {
+            (DiagnosticAttribution::Prefix, Some(path)) => {
+                format!("{path}: {}", diagnostic.message)
+            }
+            (DiagnosticAttribution::ImportedBy, Some(path)) => {
+                format!("{} (imported by '{path}').", diagnostic.message)
+            }
+            _ => diagnostic.message,
+        };
+        diagnostic
+    }
+}
+
+/// Walk up from `input` for the project markers (`deka.json` or `deka.lock`)
+/// every project-aware command roots at. `cwd` absolutizes a relative `input`.
+pub fn find_project_root(cwd: &Path, input: &Path) -> Option<PathBuf> {
+    let absolute_input = if input.is_absolute() {
+        input.to_path_buf()
+    } else {
+        cwd.join(input)
+    };
+    let start = if absolute_input.is_dir() {
+        absolute_input
+    } else {
+        absolute_input.parent()?.to_path_buf()
+    };
+
+    for dir in start.ancestors() {
+        if dir.join("deka.json").is_file() || dir.join("deka.lock").is_file() {
+            return Some(dir.to_path_buf());
+        }
+    }
+    None
+}
+
 /// Compile every reachable `.ds` module from `entry` and return the emitted
 /// JavaScript for each file.
 ///
@@ -361,11 +452,30 @@ pub fn compile_module_graph_with_options(
     loader: &dyn ModuleLoader,
     options: GraphCompileOptions,
 ) -> Result<ModuleGraphResult, Vec<Diagnostic>> {
+    check_module_graph_with_options(entry, loader, options).map_err(|diagnostics| {
+        diagnostics
+            .into_iter()
+            .map(ModuleDiagnostic::into_legacy)
+            .collect()
+    })
+}
+
+/// Run the full module-graph pipeline (resolve → parse → typecheck → emit)
+/// and return diagnostics attributed to the module that produced them.
+///
+/// This is the single project-aware check path shared by `dsc check <file>`
+/// and the language server; `compile_module_graph_with_options` is a thin
+/// wrapper that flattens the diagnostics for historical CLI output.
+pub fn check_module_graph_with_options(
+    entry: &Path,
+    loader: &dyn ModuleLoader,
+    options: GraphCompileOptions,
+) -> Result<ModuleGraphResult, Vec<ModuleDiagnostic>> {
     let entry = std::fs::canonicalize(entry).unwrap_or_else(|_| entry.to_path_buf());
     let arena = Bump::new();
 
     let mut modules: HashMap<PathBuf, GraphModule> = HashMap::new();
-    let mut errors: Vec<Diagnostic> = Vec::new();
+    let mut errors: Vec<ModuleDiagnostic> = Vec::new();
     let mut all_imports: BTreeSet<String> = BTreeSet::new();
 
     // ------------------------------------------------------------------
@@ -382,7 +492,7 @@ pub fn compile_module_graph_with_options(
         let source = match loader.load(&path) {
             Ok(src) => src,
             Err(msg) => {
-                errors.push(diag(0, 0, format!("{}: {}", path.display(), msg)));
+                errors.push(ModuleDiagnostic::prefixed(path.clone(), diag(0, 0, msg)));
                 continue;
             }
         };
@@ -432,13 +542,15 @@ pub fn compile_module_graph_with_options(
                     let from_ds = path.extension().and_then(|e| e.to_str()) == Some("ds");
                     let to_dsx = dep.extension().and_then(|e| e.to_str()) == Some("dsx");
                     if from_ds && to_dsx {
-                        errors.push(diag(
-                            0,
-                            0,
-                            format!(
-                                "{}: `.ds` files cannot import `.dsx` modules (`{}`)",
-                                path.display(),
-                                import.path
+                        errors.push(ModuleDiagnostic::prefixed(
+                            path.clone(),
+                            diag(
+                                0,
+                                0,
+                                format!(
+                                    "`.ds` files cannot import `.dsx` modules (`{}`)",
+                                    import.path
+                                ),
                             ),
                         ));
                     }
@@ -448,15 +560,9 @@ pub fn compile_module_graph_with_options(
                     }
                 }
                 Err(msg) => {
-                    errors.push(diag(
-                        0,
-                        0,
-                        format!(
-                            "{}: cannot resolve '{}': {}",
-                            path.display(),
-                            import.path,
-                            msg
-                        ),
+                    errors.push(ModuleDiagnostic::prefixed(
+                        path.clone(),
+                        diag(0, 0, format!("cannot resolve '{}': {}", import.path, msg)),
                     ));
                 }
             }
@@ -481,7 +587,7 @@ pub fn compile_module_graph_with_options(
     // Topological order (Kahn).  Cycles produce a diagnostic.
     // ------------------------------------------------------------------
     let order = topological_order(&modules).map_err(|cycle| {
-        vec![diag(
+        vec![ModuleDiagnostic::graph(diag(
             0,
             0,
             format!(
@@ -492,7 +598,7 @@ pub fn compile_module_graph_with_options(
                     .collect::<Vec<_>>()
                     .join(" -> ")
             ),
-        )]
+        ))]
     })?;
 
     // ------------------------------------------------------------------
@@ -514,11 +620,7 @@ pub fn compile_module_graph_with_options(
         // wasm project mode) funnels through.
         if !parse_result.errors.is_empty() {
             for d in &parse_result.errors {
-                errors.push(diag(
-                    d.line,
-                    d.column,
-                    format!("{}: {}", module.path.display(), d.message),
-                ));
+                errors.push(ModuleDiagnostic::prefixed(module.path.clone(), d.clone()));
             }
             continue;
         }
@@ -701,15 +803,14 @@ pub fn compile_module_graph_with_options(
                     || dep_exports.newtypes.contains_key(spec.imported)
                     || dep_exports.re_exports.contains(spec.imported);
                 if !known {
-                    errors.push(diag(
-                        spec.span.start.line,
-                        spec.span.start.column,
-                        format!(
-                            "Missing export '{}' in '{}' (imported by '{}').",
-                            spec.imported,
-                            source,
-                            module.path.display()
-                        ),
+                    errors.push(ModuleDiagnostic::imported_by(
+                        module.path.clone(),
+                        diag(
+                            spec.span.start.line,
+                            spec.span.start.column,
+                            format!("Missing export '{}' in '{}'", spec.imported, source),
+                        )
+                        .with_underline(spec.imported.len()),
                     ));
                 }
             }
@@ -764,10 +865,9 @@ pub fn compile_module_graph_with_options(
         .collect();
     let mut plan: ShakePlan = shake::shake_graph(&entry, &shake_modules, &programs);
     if options.client && plan.reaches_ui_server {
-        errors.push(diag(
-            0,
-            0,
-            format!("{}: client bundle cannot import ui/server", entry.display()),
+        errors.push(ModuleDiagnostic::prefixed(
+            entry.clone(),
+            diag(0, 0, "client bundle cannot import ui/server".to_string()),
         ));
         return Err(errors);
     }
@@ -1038,9 +1138,8 @@ pub fn compile_module_graph_with_options(
                 }
             }
             Err(diagnostics) => {
-                for mut diagnostic in diagnostics {
-                    diagnostic.message = format!("{}: {}", path.display(), diagnostic.message);
-                    errors.push(diagnostic);
+                for diagnostic in diagnostics {
+                    errors.push(ModuleDiagnostic::prefixed(path.clone(), diagnostic));
                 }
             }
         }

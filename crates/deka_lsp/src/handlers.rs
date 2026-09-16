@@ -1,10 +1,24 @@
 use super::*;
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+
+/// didChange validations are debounced so a keystroke burst runs the project
+/// graph check once, not per change notification. didOpen validates
+/// immediately — the first paint of a file should already carry squiggles.
+const VALIDATION_DEBOUNCE: Duration = Duration::from_millis(300);
 
 pub(crate) struct Backend {
-    _client: Client,
+    client: Client,
     documents: Arc<RwLock<HashMap<Url, String>>>,
     workspace_roots: Arc<RwLock<Vec<PathBuf>>>,
     target_mode: Arc<RwLock<TargetMode>>,
+    /// Monotonic counter bumped on every change; a debounced validation runs
+    /// only if it is still the latest.
+    validation_seq: Arc<AtomicU64>,
+    /// URIs the project-aware path last published diagnostics for, so files
+    /// that go clean get an empty publish instead of keeping stale squiggles.
+    project_published: Arc<RwLock<HashSet<Url>>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
@@ -42,55 +56,158 @@ impl Backend {
         text: &str,
         file_path: &str,
     ) -> Vec<Diagnostic> {
-        let core_diagnostics = analyze(text, &AnalysisContext::new(file_path));
+        let documents = self.documents.read().await.clone();
         let workspace_roots = self.workspace_roots.read().await.clone();
         let target_mode = *self.target_mode.read().await;
-        let unresolved_imports = unresolved_import_diagnostics(text, file_path, &workspace_roots);
-        let unresolved_ranges: std::collections::HashSet<(u32, u32, u32, u32)> = unresolved_imports
-            .iter()
-            .map(|diag| {
-                (
-                    diag.range.start.line,
-                    diag.range.start.character,
-                    diag.range.end.line,
-                    diag.range.end.character,
-                )
-            })
-            .collect();
-
-        let mut diagnostics = Vec::new();
-        for diagnostic in core_diagnostics {
-            let diagnostic = diagnostic_from_analysis(diagnostic);
-            if should_skip_unused_import_warning(&diagnostic, &unresolved_ranges) {
-                continue;
-            }
-            diagnostics.push(diagnostic);
-        }
-        diagnostics.extend(unresolved_imports);
-        diagnostics.extend(target_capability_diagnostics(text, target_mode));
-        diagnostics
-    }
-
-    pub(crate) async fn validate_document(&self, uri: Url, text: &str) {
-        if !is_dekascript_uri(&uri) {
-            return;
-        }
-        let file_path = uri
-            .to_file_path()
-            .ok()
-            .and_then(|path| path.to_str().map(|path| path.to_string()))
-            .unwrap_or_else(|| uri.to_string());
-        let diagnostics = self.diagnostics_for_text(text, &file_path).await;
-
-        self._client
-            .publish_diagnostics(uri, diagnostics, None)
-            .await;
+        entry_diagnostics(&documents, &workspace_roots, target_mode, text, file_path)
     }
 
     pub(crate) async fn get_document(&self, uri: &Url) -> Option<String> {
         let docs = self.documents.read().await;
         docs.get(uri).cloned()
     }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(client: Client, workspace_root: PathBuf) -> Self {
+        Self {
+            client,
+            documents: Arc::new(RwLock::new(HashMap::new())),
+            workspace_roots: Arc::new(RwLock::new(vec![workspace_root])),
+            target_mode: Arc::new(RwLock::new(TargetMode::default())),
+            validation_seq: Arc::new(AtomicU64::new(0)),
+            project_published: Arc::new(RwLock::new(HashSet::new())),
+        }
+    }
+}
+
+/// Diagnostics for one document. Inside a project (a `deka.json`/`deka.lock`
+/// marker up the tree) this is the project-aware graph check shared with
+/// `dsc check`; outside a project it is the legacy single-file analysis.
+pub(crate) fn entry_diagnostics(
+    documents: &HashMap<Url, String>,
+    workspace_roots: &[PathBuf],
+    target_mode: TargetMode,
+    text: &str,
+    file_path: &str,
+) -> Vec<Diagnostic> {
+    let path = Path::new(file_path);
+    if path.is_absolute() {
+        let open_documents = open_document_paths(documents);
+        if let Some(files) = project_file_diagnostics(path, &open_documents) {
+            let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+            let mut diagnostics = files
+                .into_iter()
+                .find(|(file, _)| *file == canonical)
+                .map(|(_, diagnostics)| diagnostics)
+                .unwrap_or_default();
+            diagnostics.extend(target_capability_diagnostics(text, target_mode));
+            return diagnostics;
+        }
+    }
+    legacy_diagnostics(text, file_path, workspace_roots, target_mode)
+}
+
+/// The pre-project single-file path: compiler front end on the one buffer,
+/// the hand-rolled import/export checker, and target capability gating.
+fn legacy_diagnostics(
+    text: &str,
+    file_path: &str,
+    workspace_roots: &[PathBuf],
+    target_mode: TargetMode,
+) -> Vec<Diagnostic> {
+    let core_diagnostics = analyze(text, &AnalysisContext::new(file_path));
+    let unresolved_imports = unresolved_import_diagnostics(text, file_path, workspace_roots);
+    let unresolved_ranges: std::collections::HashSet<(u32, u32, u32, u32)> = unresolved_imports
+        .iter()
+        .map(|diag| {
+            (
+                diag.range.start.line,
+                diag.range.start.character,
+                diag.range.end.line,
+                diag.range.end.character,
+            )
+        })
+        .collect();
+
+    let mut diagnostics = Vec::new();
+    for diagnostic in core_diagnostics {
+        let diagnostic = diagnostic_from_analysis(diagnostic);
+        if should_skip_unused_import_warning(&diagnostic, &unresolved_ranges) {
+            continue;
+        }
+        diagnostics.push(diagnostic);
+    }
+    diagnostics.extend(unresolved_imports);
+    diagnostics.extend(target_capability_diagnostics(text, target_mode));
+    diagnostics
+}
+
+/// Validate `uri` and publish. Inside a project, every file the graph check
+/// reports on gets its own publish (cross-file errors surface on the file
+/// that owns them), and previously published files that went clean get an
+/// empty publish. Outside a project only `uri` is published.
+pub(crate) async fn validate_document(
+    client: &Client,
+    documents: &Arc<RwLock<HashMap<Url, String>>>,
+    workspace_roots: &Arc<RwLock<Vec<PathBuf>>>,
+    target_mode: &Arc<RwLock<TargetMode>>,
+    project_published: &Arc<RwLock<HashSet<Url>>>,
+    uri: Url,
+) {
+    if !is_dekascript_uri(&uri) {
+        return;
+    }
+    let docs = documents.read().await.clone();
+    let Some(text) = docs.get(&uri).cloned() else {
+        return;
+    };
+    let Ok(file_path) = uri.to_file_path() else {
+        return;
+    };
+    let mode = *target_mode.read().await;
+
+    let open_documents = open_document_paths(&docs);
+    if let Some(files) = project_file_diagnostics(&file_path, &open_documents) {
+        let canonical_entry = std::fs::canonicalize(&file_path).unwrap_or(file_path);
+        let mut current: HashSet<Url> = HashSet::new();
+        let mut entry_published = false;
+        for (path, mut file_diagnostics) in files {
+            if path == canonical_entry {
+                file_diagnostics.extend(target_capability_diagnostics(&text, mode));
+            }
+            let Ok(file_uri) = Url::from_file_path(&path) else {
+                continue;
+            };
+            entry_published |= file_uri == uri;
+            current.insert(file_uri.clone());
+            client
+                .publish_diagnostics(file_uri, file_diagnostics, None)
+                .await;
+        }
+        if !entry_published {
+            // The entry is clean: publish (possibly only target-capability
+            // diagnostics, empty otherwise) so stale squiggles clear.
+            let diagnostics = target_capability_diagnostics(&text, mode);
+            client.publish_diagnostics(uri.clone(), diagnostics, None).await;
+            current.insert(uri.clone());
+        }
+        let mut published = project_published.write().await;
+        for stale in published.difference(&current) {
+            client
+                .publish_diagnostics(stale.clone(), Vec::new(), None)
+                .await;
+        }
+        *published = current;
+        return;
+    }
+
+    let roots = workspace_roots.read().await.clone();
+    let file_path_str = file_path
+        .to_str()
+        .map(str::to_string)
+        .unwrap_or_else(|| uri.to_string());
+    let diagnostics = legacy_diagnostics(&text, &file_path_str, &roots, mode);
+    client.publish_diagnostics(uri, diagnostics, None).await;
 }
 
 #[tower_lsp::async_trait]
@@ -151,7 +268,7 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _params: InitializedParams) {
-        self._client
+        self.client
             .log_message(MessageType::INFO, "DekaScript LSP initialized")
             .await;
     }
@@ -196,7 +313,7 @@ impl LanguageServer for Backend {
         if params.text_document.language_id != LANGUAGE_ID {
             return;
         }
-        self._client
+        self.client
             .log_message(
                 MessageType::INFO,
                 format!("Opened {}", params.text_document.uri),
@@ -208,15 +325,20 @@ impl LanguageServer for Backend {
             return;
         }
         let text = params.text_document.text;
-        self.documents
-            .write()
-            .await
-            .insert(uri.clone(), text.clone());
-        self.validate_document(uri, &text).await;
+        self.documents.write().await.insert(uri.clone(), text);
+        validate_document(
+            &self.client,
+            &self.documents,
+            &self.workspace_roots,
+            &self.target_mode,
+            &self.project_published,
+            uri,
+        )
+        .await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        self._client
+        self.client
             .log_message(
                 MessageType::INFO,
                 format!("Changed {}", params.text_document.uri),
@@ -237,7 +359,29 @@ impl LanguageServer for Backend {
             .write()
             .await
             .insert(uri.clone(), text.clone());
-        self.validate_document(uri, &text).await;
+
+        let seq = self.validation_seq.fetch_add(1, Ordering::SeqCst) + 1;
+        let client = self.client.clone();
+        let documents = self.documents.clone();
+        let workspace_roots = self.workspace_roots.clone();
+        let target_mode = self.target_mode.clone();
+        let project_published = self.project_published.clone();
+        let validation_seq = self.validation_seq.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(VALIDATION_DEBOUNCE).await;
+            if validation_seq.load(Ordering::SeqCst) != seq {
+                return;
+            }
+            validate_document(
+                &client,
+                &documents,
+                &workspace_roots,
+                &target_mode,
+                &project_published,
+                uri,
+            )
+            .await;
+        });
     }
 
     async fn hover(
@@ -432,10 +576,12 @@ fn empty_diagnostic_report() -> DocumentDiagnosticReportResult {
 
 pub async fn run_stdio() -> anyhow::Result<()> {
     let (service, socket) = LspService::new(|client| Backend {
-        _client: client,
+        client,
         documents: Arc::new(RwLock::new(HashMap::new())),
         workspace_roots: Arc::new(RwLock::new(Vec::new())),
         target_mode: Arc::new(RwLock::new(TargetMode::default())),
+        validation_seq: Arc::new(AtomicU64::new(0)),
+        project_published: Arc::new(RwLock::new(HashSet::new())),
     });
     Server::new(tokio::io::stdin(), tokio::io::stdout(), socket)
         .serve(service)

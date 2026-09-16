@@ -7,6 +7,7 @@ use deka_compile::module_graph::{self, GraphCompileOptions};
 use deka_compile::{compile_to_js_with_options, format_diagnostic, format_diagnostics};
 
 pub use deka_compile::SourceModuleMeta as ModuleMeta;
+pub use deka_compile::module_graph::find_project_root;
 
 pub struct CompileReport {
     pub js: String,
@@ -40,26 +41,6 @@ pub fn compile_or_report_with_options(
 
 pub fn compile_js_or_report(source: &str, input: &str) -> Result<String, String> {
     compile_or_report(source, input).map(|report| report.js)
-}
-
-pub fn find_project_root(cwd: &Path, input: &Path) -> Option<PathBuf> {
-    let absolute_input = if input.is_absolute() {
-        input.to_path_buf()
-    } else {
-        cwd.join(input)
-    };
-    let start = if absolute_input.is_dir() {
-        absolute_input
-    } else {
-        absolute_input.parent()?.to_path_buf()
-    };
-
-    for dir in start.ancestors() {
-        if dir.join("deka.json").is_file() || dir.join("deka.lock").is_file() {
-            return Some(dir.to_path_buf());
-        }
-    }
-    None
 }
 
 pub fn is_deka_source_path(path: &Path) -> bool {

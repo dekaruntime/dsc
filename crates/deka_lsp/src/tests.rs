@@ -381,3 +381,130 @@ fn keeps_non_unused_or_non_overlapping_warnings() {
     let unresolved = std::collections::HashSet::new();
     assert!(!should_skip_unused_import_warning(&warning, &unresolved));
 }
+
+fn test_backend(workspace: &std::path::Path) -> handlers::Backend {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let root = workspace.to_path_buf();
+    let (_service, _socket) = LspService::new(|client| {
+        let _ = tx.send(client.clone());
+        handlers::Backend::for_test(client, root)
+    });
+    let client = rx.recv().expect("LSP client");
+    handlers::Backend::for_test(client, workspace.to_path_buf())
+}
+
+#[test]
+fn dsx_files_are_dekascript() {
+    assert!(is_dekascript_path(std::path::Path::new("app/page.dsx")));
+    assert!(is_dekascript_path(std::path::Path::new("app/page.ds")));
+    assert!(!is_dekascript_path(std::path::Path::new("app/page.ts")));
+}
+
+/// The dsc#265 acceptance case: `import { Couter } from "./Counter.dsx"`
+/// where the export is `Counter` must surface the graph checker's
+/// missing-export diagnostic on the import specifier, with the range the
+/// CLI reports (`dsc check` says 1:10).
+#[tokio::test]
+async fn project_check_reports_missing_export_on_import_specifier() {
+    let workspace = temp_dir("dekascript_lsp_project_missing_export");
+    fs::write(workspace.join("deka.json"), "{}\n").expect("write deka.json");
+    let app = workspace.join("app");
+    fs::create_dir_all(&app).expect("mkdir app");
+    fs::write(app.join("Counter.dsx"), "export fn Counter() {}\n")
+        .expect("write Counter.dsx");
+    let page = app.join("page.dsx");
+    let source = "import { Couter } from \"./Counter.dsx\"\n";
+    fs::write(&page, source).expect("write page.dsx");
+
+    let backend = test_backend(&workspace);
+    let diagnostics = backend
+        .diagnostics_for_text(source, page.to_str().expect("page path"))
+        .await;
+
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("Missing export 'Couter' in './Counter.dsx'"))
+        .unwrap_or_else(|| {
+            panic!("expected the graph missing-export diagnostic, got: {diagnostics:?}")
+        });
+    assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::ERROR));
+    assert_eq!(
+        diagnostic.range,
+        Range::new(Position::new(0, 9), Position::new(0, 15)),
+        "the squiggle must cover `Couter` (CLI: 1:10, underline the whole name)"
+    );
+}
+
+/// Open, unsaved buffers must win over disk: disk holds the correct import,
+/// the editor buffer renames it to `Couter`, and the diagnostic still fires.
+#[tokio::test]
+async fn project_check_uses_unsaved_buffer_text() {
+    let workspace = temp_dir("dekascript_lsp_project_overlay");
+    fs::write(workspace.join("deka.json"), "{}\n").expect("write deka.json");
+    let app = workspace.join("app");
+    fs::create_dir_all(&app).expect("mkdir app");
+    fs::write(app.join("Counter.dsx"), "export fn Counter() {}\n")
+        .expect("write Counter.dsx");
+    let page = app.join("page.dsx");
+    fs::write(&page, "import { Counter } from \"./Counter.dsx\"\n").expect("write page.dsx");
+    let unsaved = "import { Couter } from \"./Counter.dsx\"\n";
+
+    let uri = Url::from_file_path(&page).expect("page uri");
+    let documents = HashMap::from([(uri, unsaved.to_string())]);
+    let diagnostics = handlers::entry_diagnostics(
+        &documents,
+        std::slice::from_ref(&workspace),
+        TargetMode::Server,
+        unsaved,
+        page.to_str().expect("page path"),
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("Missing export 'Couter'")),
+        "the unsaved buffer must be what gets checked, got: {diagnostics:?}"
+    );
+}
+
+/// A broken dependency is reported on the dependency's own file, not on the
+/// file being edited.
+#[tokio::test]
+async fn project_check_attributes_errors_to_the_module_that_owns_them() {
+    let workspace = temp_dir("dekascript_lsp_project_cross_file");
+    fs::write(workspace.join("deka.json"), "{}\n").expect("write deka.json");
+    let app = workspace.join("app");
+    fs::create_dir_all(&app).expect("mkdir app");
+    let counter = app.join("Counter.dsx");
+    fs::write(&counter, "export fn Counter( {}\n").expect("write Counter.dsx");
+    let page = app.join("page.dsx");
+    fs::write(&page, "import { Counter } from \"./Counter.dsx\"\n").expect("write page.dsx");
+
+    let files = project_file_diagnostics(&page, &HashMap::new())
+        .expect("project file diagnostics");
+    let canonical_counter = fs::canonicalize(&counter).expect("canonical Counter.dsx");
+    let canonical_page = fs::canonicalize(&page).expect("canonical page.dsx");
+    let counter_diagnostics = files
+        .iter()
+        .find(|(path, _)| *path == canonical_counter)
+        .map(|(_, diagnostics)| diagnostics);
+    assert!(
+        counter_diagnostics.is_some_and(|diagnostics| !diagnostics.is_empty()),
+        "the parse error belongs to Counter.dsx, got: {files:?}"
+    );
+    assert!(
+        files
+            .iter()
+            .all(|(path, _)| *path != canonical_page),
+        "page.dsx is not the broken file, got: {files:?}"
+    );
+}
+
+/// Without a project marker the project path abstains and callers fall back
+/// to single-file analysis.
+#[test]
+fn project_check_abstains_without_project_root() {
+    let dir = temp_dir("dekascript_lsp_no_project");
+    let file = dir.join("main.ds");
+    fs::write(&file, "const = ;\n").expect("write main.ds");
+    assert!(project_file_diagnostics(&file, &HashMap::new()).is_none());
+}

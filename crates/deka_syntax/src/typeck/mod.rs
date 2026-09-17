@@ -27,6 +27,8 @@ mod arrow_tests;
 #[cfg(test)]
 mod bridge_tests;
 #[cfg(test)]
+mod console_tests;
+#[cfg(test)]
 mod contextual_tests;
 mod hooks;
 #[cfg(test)]

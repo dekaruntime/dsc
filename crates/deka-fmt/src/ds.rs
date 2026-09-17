@@ -2378,6 +2378,28 @@ mod tests {
     }
 
     #[test]
+    fn console_log_call_is_left_alone() {
+        // `console` is a global (rfd#44's console addition); it is an
+        // ordinary call/field-access AST shape to the formatter, so it needs
+        // no special-casing — this pins that down and guards idempotence.
+        let input = "console.log(x)";
+        let output = format_ds(input).unwrap();
+        assert_eq!(output, "console.log(x)\n");
+        let twice = format_ds(&output).unwrap();
+        assert_eq!(output, twice);
+    }
+
+    #[test]
+    fn console_methods_with_multiple_arguments_are_left_alone() {
+        let input = "console.error(\"failed\", 1, true)\nconsole.assert(x == 1, \"not one\")";
+        let output = format_ds(input).unwrap();
+        assert_eq!(
+            output,
+            "console.error(\"failed\", 1, true)\nconsole.assert(x == 1, \"not one\")\n"
+        );
+    }
+
+    #[test]
     fn preserves_line_comments() {
         // deka#484: the parser discards comment tokens; the formatter
         // re-lexes and reattaches them by position.

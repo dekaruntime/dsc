@@ -28,5 +28,6 @@ pub use typeck::{
     AMBIENT_REACT_BUILTINS, EnumInfo, MethodInfo, ModuleExports, StructInfo, TypeError,
 };
 
+pub mod console;
 pub mod deka_catalog;
 pub mod visit;

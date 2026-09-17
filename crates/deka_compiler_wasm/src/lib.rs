@@ -657,6 +657,30 @@ const labels: Array<string> = build {
     }
 
     #[test]
+    fn console_global_compiles_and_emits_verbatim_on_the_wasm_target() {
+        // rfd#44's console addition: `console` needs no import and the
+        // wasm (browser) compiler target must emit the same verbatim call
+        // the native CLI does — both go through `deka_compile::compile_to_js_with_options`,
+        // but this pins the wasm ABI response itself so a future split
+        // cannot silently diverge.
+        let response: Value = serde_json::from_str(&compile_request(
+            r#"console.log("hello", 1);"#,
+            "lesson.ds",
+            r#"{"mode":"deka"}"#,
+        ))
+        .expect("response JSON");
+
+        assert_eq!(response["ok"], true, "{response}");
+        let code = response["output"]["code"]
+            .as_str()
+            .expect("compiled code should be present");
+        assert!(
+            code.contains(r#"console.log("hello", 1);"#),
+            "expected verbatim console.log emission, got:\n{code}"
+        );
+    }
+
+    #[test]
     fn module_base_rewrites_documented_bare_stdlib_imports() {
         let response: Value = serde_json::from_str(&compile_request(
             r#"import { echo } from "io"; echo("hello");"#,

@@ -1295,6 +1295,11 @@ impl<'a> Parser<'a> {
                             return_type,
                             body,
                             is_async: false,
+                            // `export fn name() {}` (declaration-file
+                            // signature form, rfd#39) has no `default`
+                            // spelling — only `export default fn` does
+                            // (rfd#12 ESM alignment amendment).
+                            is_default: false,
                         },
                         span,
                     })

@@ -106,7 +106,7 @@ jobs:
           echo "sccache enabled for dsc-sccache-linux-x64"
 
       - name: Run lockstep unit tests
-        run: cargo test -p xtask --locked lockstep::
+        run: "cargo test -p xtask --locked lockstep::"
 
       - name: Check lockstep pins
         run: cargo run -p xtask --locked -- check-lockstep

@@ -291,6 +291,7 @@ impl LanguageServer for Backend {
                     TextDocumentSyncKind::FULL,
                 )),
                 hover_provider: Some(true.into()),
+                definition_provider: Some(OneOf::Left(true)),
                 completion_provider: Some(CompletionOptions {
                     trigger_characters: Some(vec![
                         "'".to_string(),
@@ -475,10 +476,12 @@ impl LanguageServer for Backend {
         }))
     }
 
-    /// Currently only serves `bridge kind.action(...)` calls (dsc#272 item
-    /// 7): the location is a `Location` inside the read-only, materialized
-    /// `deka-host.d.ds` (see `hover::host_decl_document_path`). Every other
-    /// name returns `None` — dsc has no other go-to-definition source yet.
+    /// Tries `bridge kind.action(...)` calls first (dsc#272 item 7): the
+    /// location is a `Location` inside the read-only, materialized
+    /// `deka-host.d.ds` (see `hover::host_decl_document_path`). Otherwise
+    /// falls back to resolving the identifier as an imported name, which for
+    /// a `.mjs` import lands in its sibling `.d.ds` declaration file
+    /// (rfd#39, dsc#274/#277). `None` when neither source resolves.
     async fn goto_definition(
         &self,
         params: GotoDefinitionParams,
@@ -491,18 +494,27 @@ impl LanguageServer for Backend {
         let Some(text) = self.get_document(&uri).await else {
             return Ok(None);
         };
+        let file_path = uri
+            .to_file_path()
+            .ok()
+            .and_then(|path| path.to_str().map(|path| path.to_string()))
+            .unwrap_or_else(|| uri.to_string());
+
         let line_index = LineIndex::new(&text);
         let Some(offset) = line_index.position_to_offset(position) else {
             return Ok(None);
         };
+
         let arena = bumpalo::Bump::new();
-        let Some(program) = deka_syntax::parse_recovering(&text, &arena).program else {
-            return Ok(None);
-        };
-        let Some(location) = bridge_call_definition(&program, offset) else {
-            return Ok(None);
-        };
-        Ok(Some(GotoDefinitionResponse::Scalar(location)))
+        if let Some(program) = deka_syntax::parse_recovering(&text, &arena).program {
+            if let Some(location) = bridge_call_definition(&program, offset) {
+                return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+            }
+        }
+
+        let documents = self.documents.read().await.clone();
+        let location = entry_definition(&documents, &text, &file_path, offset);
+        Ok(location.map(GotoDefinitionResponse::Scalar))
     }
 
     async fn completion(

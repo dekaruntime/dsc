@@ -567,7 +567,11 @@ fn summarize_stmt<'a>(
         | ast::Stmt::Continue { .. }
         | ast::Stmt::Empty { .. }
         | ast::Stmt::Export {
-            decl: ast::ExportDecl::NamedGroup { .. },
+            decl: ast::ExportDecl::NamedGroup { .. } | ast::ExportDecl::Opaque { .. },
+            ..
+        }
+        | ast::Stmt::Export {
+            decl: ast::ExportDecl::Declare(_),
             ..
         } => {}
     }
@@ -1127,12 +1131,132 @@ pub fn build_module_build_fragments<'a>(
 /// The returned `ModuleExports` references AST nodes allocated in `arena` (and
 /// in the source strings), so `arena` must outlive any importer that consumes
 /// these exports.
+/// Replace a bare `Type::Named` naming a locally declared opaque type with
+/// its identity-carrying `Type::Opaque`, recursively through the composite
+/// shapes a declared signature can nest one in. `ast_type_to_export_type` has
+/// no opaque awareness (an existing gap shared by ordinary exported functions
+/// that take an opaque parameter); this is a narrow, additive fix scoped to
+/// `.d.ds` declared functions so `sceneAdd(s: Scene, m: Mesh) void` resolves
+/// `Scene`/`Mesh` correctly instead of falling back to a bare named type.
+fn substitute_opaques<'a>(ty: Type<'a>, opaques: &HashMap<&'a str, Type<'a>>) -> Type<'a> {
+    match ty {
+        Type::Named { name } => opaques.get(name).cloned().unwrap_or(Type::Named { name }),
+        Type::Option { inner } => Type::Option {
+            inner: Box::new(substitute_opaques(*inner, opaques)),
+        },
+        Type::Array { elem } => Type::Array {
+            elem: Box::new(substitute_opaques(*elem, opaques)),
+        },
+        Type::Tuple { elements } => Type::Tuple {
+            elements: elements
+                .into_iter()
+                .map(|t| substitute_opaques(t, opaques))
+                .collect(),
+        },
+        Type::Object { fields } => Type::Object {
+            fields: fields
+                .into_iter()
+                .map(|(name, t)| (name, substitute_opaques(t, opaques)))
+                .collect(),
+        },
+        Type::Union { members } => Type::Union {
+            members: members
+                .into_iter()
+                .map(|t| substitute_opaques(t, opaques))
+                .collect(),
+        },
+        Type::Generic { base, args } => Type::Generic {
+            base,
+            args: args
+                .into_iter()
+                .map(|t| substitute_opaques(t, opaques))
+                .collect(),
+        },
+        Type::Function {
+            params,
+            ret,
+            optional,
+        } => Type::Function {
+            params: params
+                .into_iter()
+                .map(|t| substitute_opaques(t, opaques))
+                .collect(),
+            ret: Box::new(substitute_opaques(*ret, opaques)),
+            optional,
+        },
+        other => other,
+    }
+}
+
+/// A declaration-file (`.d.ds`) return type without the explicit `total`
+/// marker is `Exception<T, JsError>` unless `T` is already Exception-shaped
+/// (a declaration narrowing the error type) — rfd#39's 2026-09-16 amendment,
+/// "same rules as summon" applied to the surface `T` a `.d.ds` author writes
+/// (summon's own inline `{ }` grammar keeps requiring the explicit spelling;
+/// this default is specific to declaration-file signatures). `total` is the
+/// author's claim the function cannot throw, so it is returned unchanged.
+fn exception_default<'a>(ty: Type<'a>, total: bool) -> Type<'a> {
+    fn is_exception(ty: &Type<'_>) -> bool {
+        matches!(ty, Type::Generic { base: "Exception", .. })
+    }
+    if total {
+        return ty;
+    }
+    match ty {
+        Type::Generic { base: "Promise", args } if args.len() == 1 && !is_exception(&args[0]) => {
+            Type::Generic {
+                base: "Promise",
+                args: vec![Type::Generic {
+                    base: "Exception",
+                    args: vec![args.into_iter().next().unwrap(), Type::Named { name: "JsError" }],
+                }],
+            }
+        }
+        ty if is_exception(&ty) => ty,
+        other => Type::Generic {
+            base: "Exception",
+            args: vec![other, Type::Named { name: "JsError" }],
+        },
+    }
+}
+
 pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) -> ModuleExports<'a> {
     let mut declared_structs: HashMap<&'a str, StructInfo<'a>> = HashMap::new();
     let mut declared_enums: HashMap<&'a str, EnumInfo<'a>> = HashMap::new();
     let mut declared_aliases: HashMap<&'a str, ast::Type<'a>> = HashMap::new();
     let mut declared_newtypes: HashMap<&'a str, NewtypeInfo> = HashMap::new();
     let mut receiver_methods: HashMap<(&'a str, &'a str), MethodInfo<'a>> = HashMap::new();
+    // Nominal identity is the declaring AST node (mirrors the `export { X }`
+    // opaque lookup below), collected once so a `.d.ds` declared function's
+    // own signature can name a sibling opaque declared in the same file
+    // (rfd#39 2026-09-16 amendment).
+    let mut declared_opaques: HashMap<&'a str, Type<'a>> = HashMap::new();
+    for stmt in program.statements.iter() {
+        match stmt {
+            ast::Stmt::Opaque { name, .. } => {
+                declared_opaques.insert(
+                    *name,
+                    Type::Opaque {
+                        name,
+                        identity: stmt as *const _ as usize,
+                    },
+                );
+            }
+            ast::Stmt::Export {
+                decl: ast::ExportDecl::Opaque { name },
+                ..
+            } => {
+                declared_opaques.insert(
+                    *name,
+                    Type::Opaque {
+                        name,
+                        identity: stmt as *const _ as usize,
+                    },
+                );
+            }
+            _ => {}
+        }
+    }
 
     for stmt in program.statements.iter() {
         match stmt {
@@ -1628,6 +1752,60 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
                 } else {
                     exports.values.insert(*name, Type::Infer);
                 }
+            }
+            // `export opaque type Name` / `export fn` / `export total fn`
+            // (rfd#39 2026-09-16 amendment, `.d.ds` declaration files). The
+            // module graph desugars these into the same graph-node shape an
+            // ordinary `.ds` export gets (dsc#274): the sibling `.mjs`'s
+            // structural shape is checked separately (`crate::summon`'s
+            // reused machinery, invoked once per `.d.ds` module), so here we
+            // only need the declared type surface, not the JS itself.
+            ast::ExportDecl::Opaque { name } => {
+                if let Some(ty) = declared_opaques.get(name) {
+                    exports.opaques.insert(name, ty.clone());
+                }
+            }
+            ast::ExportDecl::Declare(function) => {
+                let param_types: Vec<Type<'a>> = function
+                    .params
+                    .iter()
+                    .map(|p| match &p.ty {
+                        Some(t) => substitute_opaques(
+                            ast_type_to_export_type(
+                                t,
+                                &declared_structs,
+                                &declared_enums,
+                                &declared_aliases,
+                                &declared_newtypes,
+                                &mut HashSet::new(),
+                            ),
+                            &declared_opaques,
+                        ),
+                        None => Type::Infer,
+                    })
+                    .collect();
+                let ret = exception_default(
+                    substitute_opaques(
+                        ast_type_to_export_type(
+                            &function.return_type,
+                            &declared_structs,
+                            &declared_enums,
+                            &declared_aliases,
+                            &declared_newtypes,
+                            &mut HashSet::new(),
+                        ),
+                        &declared_opaques,
+                    ),
+                    function.total,
+                );
+                exports.values.insert(
+                    function.name,
+                    Type::Function {
+                        params: param_types,
+                        ret: Box::new(ret),
+                        optional: 0,
+                    },
+                );
             }
             ast::ExportDecl::NamedGroup { names, .. } => {
                 for export_name in names.iter() {

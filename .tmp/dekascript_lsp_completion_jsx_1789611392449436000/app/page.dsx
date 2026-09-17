@@ -1,0 +1,8 @@
+import { Counter } from "./Counter.dsx"
+fn greeting(name: string) string { return name }
+export fn Page() ReactNode {
+return (
+<main>
+<Co />
+</main>)
+}

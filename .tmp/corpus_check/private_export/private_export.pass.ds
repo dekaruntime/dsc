@@ -1,0 +1,4 @@
+opaque type Handle
+summon { total handle() Handle, total read(h: Handle) number } from "./foreign.mjs"
+export { handle }
+if (read(handle()) != 42) { panic("handle identity"); }

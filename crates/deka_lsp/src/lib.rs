@@ -29,6 +29,8 @@ mod analysis;
 #[cfg(feature = "native")]
 mod completion;
 #[cfg(feature = "native")]
+mod definition;
+#[cfg(feature = "native")]
 mod diagnostics;
 #[cfg(feature = "native")]
 mod documents;
@@ -51,6 +53,8 @@ pub use handlers::run_stdio;
 
 #[cfg(feature = "native")]
 pub(crate) use completion::*;
+#[cfg(feature = "native")]
+pub(crate) use definition::*;
 #[cfg(feature = "native")]
 pub(crate) use diagnostics::*;
 #[cfg(feature = "native")]

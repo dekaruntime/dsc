@@ -1,0 +1,2 @@
+import { greeting } from './greet'
+const msg = greeting('sami');

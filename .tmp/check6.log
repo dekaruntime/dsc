@@ -1,0 +1,140 @@
+    Checking deka_emit v0.53.6 (/Volumes/Projects/claude/dsc/crates/deka_emit)
+    Checking swc_ecma_ast v19.0.0
+    Checking swc_ecma_visit v19.0.0
+    Checking swc_ecma_parser v31.0.0
+    Checking deka_compile v0.53.6 (/Volumes/Projects/claude/dsc/crates/deka_compile)
+error[E0507]: cannot move out of `*function` which is behind a shared reference
+   --> crates/deka_compile/src/decl_file.rs:120:23
+    |
+120 |             } => Some(*function),
+    |                       ^^^^^^^^^ move occurs because `*function` has type `SummonedFunction<'_>`, which does not implement the `Copy` trait
+    |
+help: consider cloning the value if the performance cost is acceptable
+    |
+120 -             } => Some(*function),
+120 +             } => Some(function.clone()),
+    |
+
+error[E0004]: non-exhaustive patterns: `&deka_syntax::ExportDecl::Opaque { .. }` and `&deka_syntax::ExportDecl::Declare(_)` not covered
+   --> crates/deka_compile/src/shake.rs:252:44
+    |
+252 |         Stmt::Export { decl, .. } => match decl {
+    |                                            ^^^^ patterns `&deka_syntax::ExportDecl::Opaque { .. }` and `&deka_syntax::ExportDecl::Declare(_)` not covered
+    |
+note: `deka_syntax::ExportDecl<'_>` defined here
+   --> crates/deka_syntax/src/ast.rs:235:1
+    |
+235 | pub enum ExportDecl<'a> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^
+...
+258 |     Opaque { name: &'a str },
+    |     ------ not covered
+...
+264 |     Declare(SummonedFunction<'a>),
+    |     ------- not covered
+    = note: the matched value is of type `&deka_syntax::ExportDecl<'_>`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern, a match arm with multiple or-patterns as shown, or multiple match arms
+    |
+256 ~             },
+257 +             &deka_syntax::ExportDecl::Opaque { .. } | &deka_syntax::ExportDecl::Declare(_) => todo!()
+    |
+
+error[E0004]: non-exhaustive patterns: `&deka_syntax::ExportDecl::Opaque { .. }` and `&deka_syntax::ExportDecl::Declare(_)` not covered
+   --> crates/deka_compile/src/shake.rs:287:44
+    |
+287 |         Stmt::Export { decl, .. } => match decl {
+    |                                            ^^^^ patterns `&deka_syntax::ExportDecl::Opaque { .. }` and `&deka_syntax::ExportDecl::Declare(_)` not covered
+    |
+note: `deka_syntax::ExportDecl<'_>` defined here
+   --> crates/deka_syntax/src/ast.rs:235:1
+    |
+235 | pub enum ExportDecl<'a> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^
+...
+258 |     Opaque { name: &'a str },
+    |     ------ not covered
+...
+264 |     Declare(SummonedFunction<'a>),
+    |     ------- not covered
+    = note: the matched value is of type `&deka_syntax::ExportDecl<'_>`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern, a match arm with multiple or-patterns as shown, or multiple match arms
+    |
+295 ~                 .collect(),
+296 ~             &deka_syntax::ExportDecl::Opaque { .. } | &deka_syntax::ExportDecl::Declare(_) => todo!(),
+    |
+
+error[E0004]: non-exhaustive patterns: `&deka_syntax::ExportDecl::Opaque { .. }` and `&deka_syntax::ExportDecl::Declare(_)` not covered
+   --> crates/deka_compile/src/shake.rs:373:44
+    |
+373 |         Stmt::Export { decl, .. } => match decl {
+    |                                            ^^^^ patterns `&deka_syntax::ExportDecl::Opaque { .. }` and `&deka_syntax::ExportDecl::Declare(_)` not covered
+    |
+note: `deka_syntax::ExportDecl<'_>` defined here
+   --> crates/deka_syntax/src/ast.rs:235:1
+    |
+235 | pub enum ExportDecl<'a> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^
+...
+258 |     Opaque { name: &'a str },
+    |     ------ not covered
+...
+264 |     Declare(SummonedFunction<'a>),
+    |     ------- not covered
+    = note: the matched value is of type `&deka_syntax::ExportDecl<'_>`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern, a match arm with multiple or-patterns as shown, or multiple match arms
+    |
+385 ~             ExportDecl::NamedGroup { .. } => {},
+386 +             &deka_syntax::ExportDecl::Opaque { .. } | &deka_syntax::ExportDecl::Declare(_) => todo!()
+    |
+
+error[E0004]: non-exhaustive patterns: `&deka_syntax::ExportDecl::Opaque { .. }` and `&deka_syntax::ExportDecl::Declare(_)` not covered
+   --> crates/deka_compile/src/lib.rs:128:48
+    |
+128 |             Stmt::Export { decl, .. } => match decl {
+    |                                                ^^^^ patterns `&deka_syntax::ExportDecl::Opaque { .. }` and `&deka_syntax::ExportDecl::Declare(_)` not covered
+    |
+note: `deka_syntax::ExportDecl<'_>` defined here
+   --> crates/deka_syntax/src/ast.rs:235:1
+    |
+235 | pub enum ExportDecl<'a> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^
+...
+258 |     Opaque { name: &'a str },
+    |     ------ not covered
+...
+264 |     Declare(SummonedFunction<'a>),
+    |     ------- not covered
+    = note: the matched value is of type `&deka_syntax::ExportDecl<'_>`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern, a match arm with multiple or-patterns as shown, or multiple match arms
+    |
+131 ~                 deka_syntax::ExportDecl::NamedGroup { .. } => false,
+132 ~                 &deka_syntax::ExportDecl::Opaque { .. } | &deka_syntax::ExportDecl::Declare(_) => todo!(),
+    |
+
+error[E0004]: non-exhaustive patterns: `&deka_syntax::ExportDecl::Opaque { .. }` and `&deka_syntax::ExportDecl::Declare(_)` not covered
+   --> crates/deka_compile/src/lib.rs:298:61
+    |
+298 |             deka_syntax::Stmt::Export { decl, .. } => match decl {
+    |                                                             ^^^^ patterns `&deka_syntax::ExportDecl::Opaque { .. }` and `&deka_syntax::ExportDecl::Declare(_)` not covered
+    |
+note: `deka_syntax::ExportDecl<'_>` defined here
+   --> crates/deka_syntax/src/ast.rs:235:1
+    |
+235 | pub enum ExportDecl<'a> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^
+...
+258 |     Opaque { name: &'a str },
+    |     ------ not covered
+...
+264 |     Declare(SummonedFunction<'a>),
+    |     ------- not covered
+    = note: the matched value is of type `&deka_syntax::ExportDecl<'_>`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern, a match arm with multiple or-patterns as shown, or multiple match arms
+    |
+327 ~                 },
+328 +                 &deka_syntax::ExportDecl::Opaque { .. } | &deka_syntax::ExportDecl::Declare(_) => todo!()
+    |
+
+Some errors have detailed explanations: E0004, E0507.
+For more information about an error, try `rustc --explain E0004`.
+error: could not compile `deka_compile` (lib) due to 6 previous errors

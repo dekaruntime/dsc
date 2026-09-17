@@ -403,6 +403,21 @@ fn collect_module_item<'a>(stmt: &'a Stmt<'a>, collector: &mut Collector<'a>) {
             // already collected); `export { a } from "./m"` names live in the
             // other module.
             ExportDecl::NamedGroup { .. } => {}
+            ExportDecl::Opaque { name } => {
+                collector.push(name, ScopeItemKind::Type, *span, format!("opaque {name}"))
+            }
+            ExportDecl::Declare(function) => collector.push(
+                function.name,
+                ScopeItemKind::Function,
+                *span,
+                function_signature(
+                    function.name,
+                    &[],
+                    function.params,
+                    Some(&function.return_type),
+                    false,
+                ),
+            ),
         },
         Stmt::Struct {
             name,
@@ -509,34 +524,7 @@ fn descend_stmts<'a>(stmts: &'a [Stmt<'a>], offset: usize, collector: &mut Colle
 }
 
 fn stmt_span(stmt: &Stmt<'_>) -> crate::ast::Span {
-    match stmt {
-        Stmt::Opaque { span, .. }
-        | Stmt::Summon { span, .. }
-        | Stmt::BridgeDecl { span, .. }
-        | Stmt::Export { span, .. }
-        | Stmt::Import { span, .. }
-        | Stmt::Const { span, .. }
-        | Stmt::TupleBinding { span, .. }
-        | Stmt::Let { span, .. }
-        | Stmt::UnwrapLet { span, .. }
-        | Stmt::Function { span, .. }
-        | Stmt::ReceiverMethod { span, .. }
-        | Stmt::Struct { span, .. }
-        | Stmt::Enum { span, .. }
-        | Stmt::TypeAlias { span, .. }
-        | Stmt::Newtype { span, .. }
-        | Stmt::Interface { span, .. }
-        | Stmt::Expr { span, .. }
-        | Stmt::Return { span, .. }
-        | Stmt::If { span, .. }
-        | Stmt::Try { span, .. }
-        | Stmt::Block { span, .. }
-        | Stmt::Empty { span }
-        | Stmt::For { span, .. }
-        | Stmt::ForOf { span, .. }
-        | Stmt::Break { span }
-        | Stmt::Continue { span } => *span,
-    }
+    stmt.span()
 }
 
 fn descend_stmt<'a>(stmt: &'a Stmt<'a>, offset: usize, collector: &mut Collector<'a>) {
@@ -581,7 +569,9 @@ fn descend_stmt<'a>(stmt: &'a Stmt<'a>, offset: usize, collector: &mut Collector
                 descend_stmts(body, offset, collector);
             }
             ExportDecl::Const { value, .. } => descend_expr(value, offset, collector),
-            ExportDecl::NamedGroup { .. } => {}
+            ExportDecl::NamedGroup { .. }
+            | ExportDecl::Opaque { .. }
+            | ExportDecl::Declare(_) => {}
         },
         Stmt::Block { body, .. } => descend_stmts(body, offset, collector),
         Stmt::If {

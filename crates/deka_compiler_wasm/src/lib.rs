@@ -972,11 +972,14 @@ const origin = Point { x: 3, y: 4 };
     }
 
     #[test]
-    fn summon_private_export_verdict_matches_native() {
+    fn summon_export_verdict_matches_native() {
+        // rfd#39 2026-09-16 amendment removes the file-private summoned-name
+        // rule (dsc#274): exporting a summoned binding is an ordinary export
+        // now, on both hosts.
         assert_identical_verdict(
             "opaque type Handle\nsummon { total handle() Handle, total read(h: Handle) number } from \"./foreign.mjs\"\nexport { handle }\n",
-            false,
-            Some("file-private"),
+            true,
+            None,
         );
     }
 

@@ -48,7 +48,7 @@ pub fn walk_stmt(stmt: &Stmt<'_>, visit: &mut dyn FnMut(&Expr<'_>)) {
                     walk_stmt(s, visit);
                 }
             }
-            ExportDecl::NamedGroup { .. } => {}
+            ExportDecl::NamedGroup { .. } | ExportDecl::Opaque { .. } | ExportDecl::Declare(_) => {}
         },
         Stmt::Function { body, params, .. } | Stmt::ReceiverMethod { body, params, .. } => {
             for param in params.iter() {

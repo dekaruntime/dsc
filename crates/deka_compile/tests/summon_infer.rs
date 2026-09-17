@@ -6,24 +6,23 @@ fn draft(fixture: &str) -> String {
         env!("CARGO_MANIFEST_DIR")
     );
     let source = std::fs::read_to_string(&path).unwrap();
-    infer_draft(&source, &format!("./{fixture}")).unwrap()
+    infer_draft(&source).unwrap()
 }
 
 fn signature<'a>(draft: &'a str, name: &str) -> &'a str {
     draft
         .lines()
         .map(str::trim)
-        .map(|line| line.trim_end_matches(','))
         .find(|line| {
-            line.strip_prefix("total ")
-                .unwrap_or(line)
-                .starts_with(&format!("{name}("))
+            line.strip_prefix("export total fn ")
+                .or_else(|| line.strip_prefix("export fn "))
+                .is_some_and(|rest| rest.starts_with(&format!("{name}(")))
         })
         .unwrap_or_else(|| panic!("draft is missing export `{name}`:\n{draft}"))
 }
 
 fn is_total(draft: &str, name: &str) -> bool {
-    signature(draft, name).starts_with("total ")
+    signature(draft, name).starts_with("export total ")
 }
 
 #[test]
@@ -61,19 +60,18 @@ fn throwing_fixture_never_drafts_total() {
 }
 
 #[test]
-fn infer_draft_from_path_uses_file_name_specifier() {
+fn infer_draft_from_path_reads_the_vendored_module() {
     let path = format!(
         "{}/tests/fixtures/summon/infer_throw.mjs",
         env!("CARGO_MANIFEST_DIR")
     );
     let got = deka_compile::summon::infer_draft_from_path(std::path::Path::new(&path)).unwrap();
-    assert!(got.contains("from \"./infer_throw.mjs\""), "{got}");
     assert!(!is_total(&got, "boom"), "{}", signature(&got, "boom"));
 }
 
 #[test]
 fn rejects_unparseable_javascript() {
-    let err = infer_draft("export function broken( {", "./broken.mjs").unwrap_err();
+    let err = infer_draft("export function broken( {").unwrap_err();
     assert!(!err.is_empty(), "{err}");
 }
 

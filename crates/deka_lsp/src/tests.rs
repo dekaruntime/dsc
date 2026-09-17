@@ -908,6 +908,66 @@ fn hover_returns_none_for_unbound_words() {
     assert!(hover_at(&HashMap::new(), source, "main.ds", "return").is_none());
 }
 
+/// rfd#39 2026-09-16 amendment, dsc#274: `import { scene } from "./three.mjs"`
+/// resolves the sibling `.d.ds` beside it — hover shows the *declared*
+/// signature, not a dead end, because `FsModuleLoader::resolve` is the one
+/// place that resolution happens and every project-aware caller shares it.
+#[test]
+fn hover_on_javascript_import_shows_the_declaration_file_signature() {
+    let (workspace, app) = project_workspace("dekascript_lsp_hover_d_ds");
+    fs::write(app.join("three.mjs"), "export function scene() { return \"s\"; }\n")
+        .expect("write three.mjs");
+    fs::write(app.join("three.d.ds"), "export total fn scene() string\n")
+        .expect("write three.d.ds");
+    let main = app.join("main.ds");
+    let source = "import { scene } from \"./three.mjs\"\nconst s = scene();\n";
+    fs::write(&main, source).expect("write main.ds");
+
+    let hover = hover_at(
+        &HashMap::new(),
+        source,
+        main.to_str().expect("main path"),
+        "scene(",
+    )
+    .expect("hover on a name declared only in a .d.ds");
+    assert!(
+        hover.contains("scene"),
+        "hover must show the declared signature: {hover}"
+    );
+    assert!(
+        hover.contains("./three.mjs"),
+        "hover must name the module the import came from: {hover}"
+    );
+    let _ = workspace;
+}
+
+/// Same resolution, for go-to-definition: `Ctrl+click` on a name declared
+/// only in a `.d.ds` lands in that file, not a "no definition" dead end.
+#[test]
+fn goto_definition_on_javascript_import_lands_in_the_declaration_file() {
+    let (workspace, app) = project_workspace("dekascript_lsp_definition_d_ds");
+    fs::write(app.join("three.mjs"), "export function scene() { return \"s\"; }\n")
+        .expect("write three.mjs");
+    let decl_path = app.join("three.d.ds");
+    fs::write(&decl_path, "export total fn scene() string\n").expect("write three.d.ds");
+    let main = app.join("main.ds");
+    let source = "import { scene } from \"./three.mjs\"\nconst s = scene();\n";
+    fs::write(&main, source).expect("write main.ds");
+
+    let offset = source.rfind("scene(").expect("needle present") + 1;
+    let location = entry_definition(
+        &HashMap::new(),
+        source,
+        main.to_str().expect("main path"),
+        offset,
+    )
+    .expect("definition of a name declared only in a .d.ds");
+    let expected_uri = Url::from_file_path(&decl_path).expect("decl uri");
+    assert_eq!(location.uri, expected_uri);
+    assert_eq!(location.range.start.line, 0);
+    let _ = workspace;
+}
+
 /// The scope query must see mid-edit source: `parse_recovering` keeps the
 /// declarations around a half-typed statement, so hover works while the file
 /// does not fully parse.

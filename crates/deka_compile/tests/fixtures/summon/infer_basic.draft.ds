@@ -17,20 +17,18 @@
 //
 // skipped (not a statically verifiable function): scalar
 
-opaque type A
-opaque type Add
-opaque type B
-opaque type Handle
-opaque type Scene
-opaque type Secret
-opaque type Values
+export opaque type A
+export opaque type Add
+export opaque type B
+export opaque type Handle
+export opaque type Scene
+export opaque type Secret
+export opaque type Values
 
-summon {
-  total add(a: A, b: B) Add,
-  total noop() void,
-  total secret(handle: Handle) Secret,
-  total scene() Scene,
-  total count(values: Array<Values>) number,
-  total withDefault(n: number) number,
-  total later() Promise<number>
-} from "./infer_basic.mjs"
+export total fn add(a: A, b: B) Add
+export total fn noop() void
+export total fn secret(handle: Handle) Secret
+export total fn scene() Scene
+export total fn count(values: Array<Values>) number
+export total fn withDefault(n: number) number
+export total fn later() Promise<number>

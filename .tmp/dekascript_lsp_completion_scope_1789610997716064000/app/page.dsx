@@ -1,0 +1,6 @@
+import { Counter } from "./Counter.dsx"
+fn helper() {}
+fn greeting(name: string) string {
+const shout = name;
+return 
+}

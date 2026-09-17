@@ -12,16 +12,14 @@
 //   S — parameter `s` of parses has no visible JS type
 //   UsesHelper — return of usesHelper has no visible JS type
 
-opaque type CallsUnknown
-opaque type Parses
-opaque type S
-opaque type UsesHelper
+export opaque type CallsUnknown
+export opaque type Parses
+export opaque type S
+export opaque type UsesHelper
 
-summon {
-  boom() Exception<void, JsError>,
-  total ok() number,
-  parses(s: S) Exception<Parses, JsError>,
-  callsUnknown() Exception<CallsUnknown, JsError>,
-  usesHelper() Exception<UsesHelper, JsError>,
-  total caught() number
-} from "./infer_throw.mjs"
+export fn boom() Exception<void, JsError>
+export total fn ok() number
+export fn parses(s: S) Exception<Parses, JsError>
+export fn callsUnknown() Exception<CallsUnknown, JsError>
+export fn usesHelper() Exception<UsesHelper, JsError>
+export total fn caught() number

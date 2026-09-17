@@ -1,0 +1,55 @@
+warning: function `type_toString_is_builtin_method` should have a snake case name
+    --> crates/deka_syntax/src/typeck/mod.rs:4345:8
+     |
+4345 |     fn type_toString_is_builtin_method() {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `type_to_string_is_builtin_method`
+     |
+     = note: `#[warn(non_snake_case)]` (part of `#[warn(nonstandard_style)]`) on by default
+
+warning: function `gettype_toString_chaining_passes` should have a snake case name
+    --> crates/deka_syntax/src/typeck/mod.rs:4997:8
+     |
+4997 |     fn gettype_toString_chaining_passes() {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `gettype_to_string_chaining_passes`
+
+warning: function `compile_toNumber_widens_boolean` should have a snake case name
+    --> crates/deka_compile/src/lib.rs:2023:8
+     |
+2023 |     fn compile_toNumber_widens_boolean() {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `compile_to_number_widens_boolean`
+     |
+     = note: `#[warn(non_snake_case)]` (part of `#[warn(nonstandard_style)]`) on by default
+
+warning: function `compile_toNumber_rejects_newtype` should have a snake case name
+    --> crates/deka_compile/src/lib.rs:2034:8
+     |
+2034 |     fn compile_toNumber_rejects_newtype() {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `compile_to_number_rejects_newtype`
+
+warning: function `emit_gettype_toString_chaining` should have a snake case name
+    --> crates/deka_emit/src/lib.rs:2033:8
+     |
+2033 |     fn emit_gettype_toString_chaining() {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `emit_gettype_to_string_chaining`
+     |
+     = note: `#[warn(non_snake_case)]` (part of `#[warn(nonstandard_style)]`) on by default
+
+warning: `deka_syntax` (lib test) generated 2 warnings
+warning: `deka_compile` (lib test) generated 2 warnings
+warning: `deka_emit` (lib test) generated 1 warning
+    Checking dekascript_lsp v0.53.6 (/Volumes/Projects/claude/dsc/crates/deka_lsp)
+warning: field `expect_error` is never read
+   --> crates/deka_compiler_wasm/src/lib.rs:518:9
+    |
+514 |     struct TourLesson {
+    |            ---------- field in this struct
+...
+518 |         expect_error: Option<String>,
+    |         ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `deka_compiler_wasm` (lib test) generated 1 warning
+    Checking cli v0.53.6 (/Volumes/Projects/claude/dsc/crates/cli)
+    Checking dekascript_lsp_wasm v0.53.6 (/Volumes/Projects/claude/dsc/crates/deka_lsp_wasm)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.66s

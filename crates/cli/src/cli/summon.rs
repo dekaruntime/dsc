@@ -1,6 +1,5 @@
 use std::fs;
-use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use core::{CommandSpec, Context, Registry, SubcommandSpec};
 
@@ -76,67 +75,38 @@ fn run_infer(context: &Context) -> Result<(), String> {
     }
     let source = fs::read_to_string(&input)
         .map_err(|err| format!("cannot read {}: {err}", input.display()))?;
-    let out = context.args.params.get("--out").map(PathBuf::from);
-    let spec = specifier_for(&input, out.as_deref(), &context.env.cwd)?;
-    let draft = deka_compile::summon::infer_draft(&source, &spec)?;
-    if let Some(out) = out {
-        if let Some(parent) = out.parent() {
-            if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent)
-                    .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
-            }
-        }
-        fs::write(&out, &draft)
-            .map_err(|err| format!("failed to write {}: {err}", out.display()))?;
-        stdio::success(&format!("wrote {}", out.display()));
-        return Ok(());
-    }
-    let mut stdout = io::stdout().lock();
-    stdout
-        .write_all(draft.as_bytes())
-        .map_err(|err| format!("failed to write stdout: {err}"))?;
-    Ok(())
-}
-
-fn specifier_for(module: &Path, out: Option<&Path>, cwd: &Path) -> Result<String, String> {
-    let from_dir = match out.and_then(Path::parent) {
-        Some(parent) if !parent.as_os_str().is_empty() => {
-            if parent.is_absolute() {
-                parent.to_path_buf()
+    let draft = deka_compile::summon::infer_draft(&source)?;
+    let out = match context.args.params.get("--out") {
+        Some(out) => {
+            let out = PathBuf::from(out);
+            if out.is_absolute() {
+                out
             } else {
-                cwd.join(parent)
+                context.env.cwd.join(out)
             }
         }
-        _ => cwd.to_path_buf(),
+        // The declaration sits beside the module by default (rfd#39
+        // 2026-09-16 amendment, dsc#274): `three.mjs` -> `three.d.ds`.
+        None => deka_compile::decl_file::sibling_declaration_path(&input)
+            .ok_or_else(|| format!("cannot derive a .d.ds path for {}", input.display()))?,
     };
-    let module = if module.is_absolute() {
-        module.to_path_buf()
-    } else {
-        cwd.join(module)
-    };
-    let from_dir = fs::canonicalize(&from_dir).unwrap_or(from_dir);
-    let module = fs::canonicalize(&module).unwrap_or(module);
-    let spec = match module.strip_prefix(&from_dir) {
-        Ok(rel) => {
-            let rel = rel.to_string_lossy().replace('\\', "/");
-            format!("./{rel}")
+    if let Some(parent) = out.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
         }
-        Err(_) => {
-            let name = module
-                .file_name()
-                .and_then(|n| n.to_str())
-                .ok_or_else(|| format!("module path is not valid UTF-8: {}", module.display()))?;
-            format!("./{name}")
-        }
-    };
-    deka_compile::summon::module_spec(&spec)
+    }
+    fs::write(&out, &draft).map_err(|err| format!("failed to write {}: {err}", out.display()))?;
+    stdio::success(&format!("wrote {}", out.display()));
+    Ok(())
 }
 
 fn usage() -> &'static str {
     "usage: dsc summon infer <module.mjs> [--out <file.d.ds>]\n\n\
-     Scaffold a DRAFT summon block from a vendored .mjs module (rfd#39).\n\
-     Writes to stdout unless --out names a file. Review the draft before committing:\n\
-     `total` is emitted only where visible analysis proves there are no throw sites."
+     Scaffold a DRAFT .d.ds declaration file from a vendored .mjs module\n\
+     (rfd#39). Writes <module>.d.ds beside the module unless --out names a\n\
+     different file. Review the draft before committing: `total` is emitted\n\
+     only where visible analysis proves there are no throw sites."
 }
 
 #[cfg(test)]

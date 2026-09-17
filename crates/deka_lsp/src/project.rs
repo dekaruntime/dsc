@@ -109,6 +109,21 @@ pub(crate) fn project_module_source(
     module_spec: &str,
     open_documents: &HashMap<PathBuf, String>,
 ) -> Option<String> {
+    project_module_location(entry, module_spec, open_documents).map(|(_, source)| source)
+}
+
+/// Like [`project_module_source`], but also returns the resolved file path —
+/// for a `.mjs`/`.js` specifier this is its sibling `.d.ds` (rfd#39
+/// 2026-09-16 amendment, dsc#274), since `FsModuleLoader::resolve` is the one
+/// place that resolution happens; every project-aware caller (hover,
+/// go-to-definition, completion) shares it rather than re-deriving it.
+/// Go-to-definition needs the path to build the target `Location`'s URI;
+/// hover only needs the text.
+pub(crate) fn project_module_location(
+    entry: &Path,
+    module_spec: &str,
+    open_documents: &HashMap<PathBuf, String>,
+) -> Option<(PathBuf, String)> {
     let project_root = module_graph::find_project_root(entry, entry)?;
     let loader = OverlayLoader {
         inner: FsModuleLoader::new(project_root),
@@ -116,7 +131,8 @@ pub(crate) fn project_module_source(
     };
     let canonical_entry = std::fs::canonicalize(entry).unwrap_or_else(|_| entry.to_path_buf());
     let path = loader.resolve(module_spec, &canonical_entry).ok()?;
-    loader.load(&path).ok()
+    let source = loader.load(&path).ok()?;
+    Some((path, source))
 }
 
 /// The importable names of `module_spec` as imported from `entry`, resolved

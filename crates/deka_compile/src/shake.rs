@@ -251,6 +251,8 @@ fn exported_names<'a>(stmt: &'a Stmt<'a>) -> Vec<&'a str> {
     match stmt {
         Stmt::Export { decl, .. } => match decl {
             ExportDecl::Const { name, .. } | ExportDecl::Function { name, .. } => vec![*name],
+            ExportDecl::Opaque { name } => vec![*name],
+            ExportDecl::Declare(function) => vec![function.name],
             ExportDecl::NamedGroup { names, .. } => {
                 names.iter().map(|n| n.alias.unwrap_or(n.name)).collect()
             }
@@ -288,6 +290,8 @@ fn declared_names<'a>(stmt: &'a Stmt<'a>) -> Vec<Cow<'a, str>> {
             ExportDecl::Const { name, .. } | ExportDecl::Function { name, .. } => {
                 vec![Cow::Borrowed(*name)]
             }
+            ExportDecl::Opaque { name } => vec![Cow::Borrowed(*name)],
+            ExportDecl::Declare(function) => vec![Cow::Borrowed(function.name)],
             ExportDecl::NamedGroup { names, .. } => names
                 .iter()
                 .flat_map(|n| [n.name, n.alias.unwrap_or(n.name)])
@@ -382,7 +386,7 @@ fn walk_stmt(stmt: &Stmt<'_>, visit: &mut dyn FnMut(&Expr<'_>)) {
                     walk_stmt(s, visit);
                 }
             }
-            ExportDecl::NamedGroup { .. } => {}
+            ExportDecl::NamedGroup { .. } | ExportDecl::Opaque { .. } | ExportDecl::Declare(_) => {}
         },
         Stmt::Function { body, params, .. } | Stmt::ReceiverMethod { body, params, .. } => {
             for param in params.iter() {

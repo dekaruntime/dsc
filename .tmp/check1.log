@@ -1,0 +1,250 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling serde_core v1.0.229
+   Compiling serde v1.0.229
+    Checking bumpalo v3.20.3
+   Compiling syn v3.0.5
+   Compiling serde_derive v1.0.229
+    Checking deka_syntax v0.53.6 (/Volumes/Projects/claude/dsc/crates/deka_syntax)
+error[E0004]: non-exhaustive patterns: `&ast::ExportDecl::Opaque { .. }` and `&ast::ExportDecl::Declare(_)` not covered
+   --> crates/deka_syntax/src/canonicalize.rs:178:34
+    |
+178 |             let new_decl = match decl {
+    |                                  ^^^^ patterns `&ast::ExportDecl::Opaque { .. }` and `&ast::ExportDecl::Declare(_)` not covered
+    |
+note: `ast::ExportDecl<'_>` defined here
+   --> crates/deka_syntax/src/ast.rs:235:10
+    |
+235 | pub enum ExportDecl<'a> {
+    |          ^^^^^^^^^^
+...
+258 |     Opaque { name: &'a str },
+    |     ------ not covered
+...
+264 |     Declare(SummonedFunction<'a>),
+    |     ------- not covered
+    = note: the matched value is of type `&ast::ExportDecl<'_>`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern, a match arm with multiple or-patterns as shown, or multiple match arms
+    |
+208 ~                 ast::ExportDecl::NamedGroup { .. } => decl.clone(),
+209 ~                 &ast::ExportDecl::Opaque { .. } | &ast::ExportDecl::Declare(_) => todo!(),
+    |
+
+error[E0004]: non-exhaustive patterns: `&ast::ExportDecl::Opaque { .. }` and `&ast::ExportDecl::Declare(_)` not covered
+   --> crates/deka_syntax/src/canonicalize.rs:901:34
+    |
+901 |             let new_decl = match decl {
+    |                                  ^^^^ patterns `&ast::ExportDecl::Opaque { .. }` and `&ast::ExportDecl::Declare(_)` not covered
+    |
+note: `ast::ExportDecl<'_>` defined here
+   --> crates/deka_syntax/src/ast.rs:235:10
+    |
+235 | pub enum ExportDecl<'a> {
+    |          ^^^^^^^^^^
+...
+258 |     Opaque { name: &'a str },
+    |     ------ not covered
+...
+264 |     Declare(SummonedFunction<'a>),
+    |     ------- not covered
+    = note: the matched value is of type `&ast::ExportDecl<'_>`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern, a match arm with multiple or-patterns as shown, or multiple match arms
+    |
+928 ~                 ast::ExportDecl::NamedGroup { .. } => decl.clone(),
+929 ~                 &ast::ExportDecl::Opaque { .. } | &ast::ExportDecl::Declare(_) => todo!(),
+    |
+
+error[E0004]: non-exhaustive patterns: `&ast::ExportDecl::Opaque { .. }` and `&ast::ExportDecl::Declare(_)` not covered
+    --> crates/deka_syntax/src/parse/stmt.rs:1545:44
+     |
+1545 |         Stmt::Export { decl, .. } => match decl {
+     |                                            ^^^^ patterns `&ast::ExportDecl::Opaque { .. }` and `&ast::ExportDecl::Declare(_)` not covered
+     |
+note: `ast::ExportDecl<'_>` defined here
+    --> crates/deka_syntax/src/ast.rs:235:10
+     |
+ 235 | pub enum ExportDecl<'a> {
+     |          ^^^^^^^^^^
+...
+ 258 |     Opaque { name: &'a str },
+     |     ------ not covered
+...
+ 264 |     Declare(SummonedFunction<'a>),
+     |     ------- not covered
+     = note: the matched value is of type `&ast::ExportDecl<'_>`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern, a match arm with multiple or-patterns as shown, or multiple match arms
+     |
+1547 ~             ExportDecl::Function { .. } | ExportDecl::NamedGroup { .. } => false,
+1548 ~             &ast::ExportDecl::Opaque { .. } | &ast::ExportDecl::Declare(_) => todo!(),
+     |
+
+error[E0004]: non-exhaustive patterns: `&ast::ExportDecl::Opaque { .. }` and `&ast::ExportDecl::Declare(_)` not covered
+   --> crates/deka_syntax/src/scope.rs:381:46
+    |
+381 |         Stmt::Export { decl, span } => match decl {
+    |                                              ^^^^ patterns `&ast::ExportDecl::Opaque { .. }` and `&ast::ExportDecl::Declare(_)` not covered
+    |
+note: `ast::ExportDecl<'_>` defined here
+   --> crates/deka_syntax/src/ast.rs:235:10
+    |
+235 | pub enum ExportDecl<'a> {
+    |          ^^^^^^^^^^
+...
+258 |     Opaque { name: &'a str },
+    |     ------ not covered
+...
+264 |     Declare(SummonedFunction<'a>),
+    |     ------- not covered
+    = note: the matched value is of type `&ast::ExportDecl<'_>`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern, a match arm with multiple or-patterns as shown, or multiple match arms
+    |
+404 ~             ExportDecl::NamedGroup { .. } => {},
+405 +             &ast::ExportDecl::Opaque { .. } | &ast::ExportDecl::Declare(_) => todo!()
+    |
+
+error[E0004]: non-exhaustive patterns: `&ast::ExportDecl::Opaque { .. }` and `&ast::ExportDecl::Declare(_)` not covered
+   --> crates/deka_syntax/src/scope.rs:576:44
+    |
+576 |         Stmt::Export { decl, .. } => match decl {
+    |                                            ^^^^ patterns `&ast::ExportDecl::Opaque { .. }` and `&ast::ExportDecl::Declare(_)` not covered
+    |
+note: `ast::ExportDecl<'_>` defined here
+   --> crates/deka_syntax/src/ast.rs:235:10
+    |
+235 | pub enum ExportDecl<'a> {
+    |          ^^^^^^^^^^
+...
+258 |     Opaque { name: &'a str },
+    |     ------ not covered
+...
+264 |     Declare(SummonedFunction<'a>),
+    |     ------- not covered
+    = note: the matched value is of type `&ast::ExportDecl<'_>`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern, a match arm with multiple or-patterns as shown, or multiple match arms
+    |
+582 ~             ExportDecl::NamedGroup { .. } => {},
+583 +             &ast::ExportDecl::Opaque { .. } | &ast::ExportDecl::Declare(_) => todo!()
+    |
+
+error[E0004]: non-exhaustive patterns: `&ast::ExportDecl::Opaque { .. }` and `&ast::ExportDecl::Declare(_)` not covered
+    --> crates/deka_syntax/src/typeck/hooks.rs:2186:53
+     |
+2186 |             ast::Stmt::Export { decl, .. } => match decl {
+     |                                                     ^^^^ patterns `&ast::ExportDecl::Opaque { .. }` and `&ast::ExportDecl::Declare(_)` not covered
+     |
+note: `ast::ExportDecl<'_>` defined here
+    --> crates/deka_syntax/src/ast.rs:235:10
+     |
+ 235 | pub enum ExportDecl<'a> {
+     |          ^^^^^^^^^^
+...
+ 258 |     Opaque { name: &'a str },
+     |     ------ not covered
+...
+ 264 |     Declare(SummonedFunction<'a>),
+     |     ------- not covered
+     = note: the matched value is of type `&ast::ExportDecl<'_>`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern, a match arm with multiple or-patterns as shown, or multiple match arms
+     |
+2207 ~                 ast::ExportDecl::NamedGroup { .. } => {},
+2208 +                 &ast::ExportDecl::Opaque { .. } | &ast::ExportDecl::Declare(_) => todo!()
+     |
+
+error[E0004]: non-exhaustive patterns: `&ast::ExportDecl::Opaque { .. }` and `&ast::ExportDecl::Declare(_)` not covered
+    --> crates/deka_syntax/src/typeck/stmt.rs:1360:53
+     |
+1360 |             ast::Stmt::Export { decl, .. } => match decl {
+     |                                                     ^^^^ patterns `&ast::ExportDecl::Opaque { .. }` and `&ast::ExportDecl::Declare(_)` not covered
+     |
+note: `ast::ExportDecl<'_>` defined here
+    --> crates/deka_syntax/src/ast.rs:235:10
+     |
+ 235 | pub enum ExportDecl<'a> {
+     |          ^^^^^^^^^^
+...
+ 258 |     Opaque { name: &'a str },
+     |     ------ not covered
+...
+ 264 |     Declare(SummonedFunction<'a>),
+     |     ------- not covered
+     = note: the matched value is of type `&ast::ExportDecl<'_>`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern, a match arm with multiple or-patterns as shown, or multiple match arms
+     |
+1384 ~                 },
+1385 +                 &ast::ExportDecl::Opaque { .. } | &ast::ExportDecl::Declare(_) => todo!()
+     |
+
+error[E0004]: non-exhaustive patterns: `&ast::Stmt::Export { decl: ast::ExportDecl::Opaque { .. }, .. }` and `&ast::Stmt::Export { decl: ast::ExportDecl::Declare(_), .. }` not covered
+   --> crates/deka_syntax/src/typeck/mod.rs:465:11
+    |
+465 |     match stmt {
+    |           ^^^^ patterns `&ast::Stmt::Export { decl: ast::ExportDecl::Opaque { .. }, .. }` and `&ast::Stmt::Export { decl: ast::ExportDecl::Declare(_), .. }` not covered
+    |
+note: `ast::Stmt<'_>` defined here
+   --> crates/deka_syntax/src/ast.rs:49:10
+    |
+ 49 | pub enum Stmt<'a> {
+    |          ^^^^
+...
+ 59 |     Export { decl: ExportDecl<'a>, span: Span },
+    |     ------
+    |     |
+    |     not covered
+    |     not covered
+    = note: the matched value is of type `&ast::Stmt<'_>`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern, a match arm with multiple or-patterns as shown, or multiple match arms
+    |
+567 ~         } => {},
+568 +         &ast::Stmt::Export { decl: ast::ExportDecl::Opaque { .. }, .. } | &ast::Stmt::Export { decl: ast::ExportDecl::Declare(_), .. } => todo!()
+    |
+
+error[E0004]: non-exhaustive patterns: `&ast::ExportDecl::Opaque { .. }` and `&ast::ExportDecl::Declare(_)` not covered
+    --> crates/deka_syntax/src/typeck/mod.rs:1556:15
+     |
+1556 |         match decl {
+     |               ^^^^ patterns `&ast::ExportDecl::Opaque { .. }` and `&ast::ExportDecl::Declare(_)` not covered
+     |
+note: `ast::ExportDecl<'_>` defined here
+    --> crates/deka_syntax/src/ast.rs:235:10
+     |
+ 235 | pub enum ExportDecl<'a> {
+     |          ^^^^^^^^^^
+...
+ 258 |     Opaque { name: &'a str },
+     |     ------ not covered
+...
+ 264 |     Declare(SummonedFunction<'a>),
+     |     ------- not covered
+     = note: the matched value is of type `&ast::ExportDecl<'_>`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern, a match arm with multiple or-patterns as shown, or multiple match arms
+     |
+1716 ~             },
+1717 +             &ast::ExportDecl::Opaque { .. } | &ast::ExportDecl::Declare(_) => todo!()
+     |
+
+error[E0004]: non-exhaustive patterns: `&ast::ExportDecl::Opaque { .. }` and `&ast::ExportDecl::Declare(_)` not covered
+   --> crates/deka_syntax/src/visit.rs:39:44
+    |
+ 39 |         Stmt::Export { decl, .. } => match decl {
+    |                                            ^^^^ patterns `&ast::ExportDecl::Opaque { .. }` and `&ast::ExportDecl::Declare(_)` not covered
+    |
+note: `ast::ExportDecl<'_>` defined here
+   --> crates/deka_syntax/src/ast.rs:235:10
+    |
+235 | pub enum ExportDecl<'a> {
+    |          ^^^^^^^^^^
+...
+258 |     Opaque { name: &'a str },
+    |     ------ not covered
+...
+264 |     Declare(SummonedFunction<'a>),
+    |     ------- not covered
+    = note: the matched value is of type `&ast::ExportDecl<'_>`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern, a match arm with multiple or-patterns as shown, or multiple match arms
+    |
+ 51 ~             ExportDecl::NamedGroup { .. } => {},
+ 52 +             &ast::ExportDecl::Opaque { .. } | &ast::ExportDecl::Declare(_) => todo!()
+    |
+
+For more information about this error, try `rustc --explain E0004`.
+error: could not compile `deka_syntax` (lib) due to 10 previous errors

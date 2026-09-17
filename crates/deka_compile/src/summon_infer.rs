@@ -5,7 +5,7 @@
 //! into unseen code. Otherwise the pessimistic default is
 //! `Exception<T, JsError>`. The draft never emits `total` silently: even a
 //! proved-total signature is a claim the author must own before committing.
-use super::{collect, module_spec, Callable, ExportFunction};
+use super::{collect, Callable, ExportFunction};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use swc_ecma_ast as js;
@@ -21,22 +21,18 @@ const DRAFT_HEADER: &str = "\
 // `total` is a claim the author must own; the draft never emits it silently.
 ";
 
-/// Scaffold a DRAFT summon declaration from vendored `.mjs` source.
-///
-/// `module_spec` is the `from "..."` path written into the block and must be a
-/// literal relative `.mjs` specifier. Parameter types that cannot be named
-/// without `JsValue` become opaque-candidate placeholders listed in the header.
-pub fn infer_draft(source: &str, module_spec_str: &str) -> Result<String, String> {
-    let spec = module_spec(module_spec_str)?;
+/// Scaffold a DRAFT `.d.ds` declaration file from vendored `.mjs` source, in
+/// the export form (rfd#39 2026-09-16 amendment): `export opaque type Name`
+/// and `export (total)? fn name(params) Return`, with no `from` clause — the
+/// declaration sits beside the module it describes, so the pairing is
+/// positional (dsc#274). Parameter types that cannot be named without
+/// `JsValue` become opaque-candidate placeholders listed in the header.
+pub fn infer_draft(source: &str) -> Result<String, String> {
     let module = crate::catalog::parse_js(source)?;
-    Ok(render_draft(&module, &spec))
+    Ok(render_draft(&module))
 }
 
-/// Read a vendored `.mjs` path and scaffold a DRAFT summon declaration.
-///
-/// The `from` specifier is `./` plus the file name, so the draft is ready to
-/// sit beside the module as `summon.d.ds`. Pass [`infer_draft`] a different
-/// specifier when the caller has a better relative path.
+/// Read a vendored `.mjs` path and scaffold a DRAFT `.d.ds` declaration.
 pub fn infer_draft_from_path(path: &Path) -> Result<String, String> {
     let source = std::fs::read_to_string(path)
         .map_err(|err| format!("cannot read {}: {err}", path.display()))?;
@@ -50,10 +46,10 @@ pub fn infer_draft_from_path(path: &Path) -> Result<String, String> {
             path.display()
         ));
     }
-    infer_draft(&source, &format!("./{name}"))
+    infer_draft(&source)
 }
 
-fn render_draft(module: &js::Module, spec: &str) -> String {
+fn render_draft(module: &js::Module) -> String {
     let collected = collect(module);
     let mut opaques: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut skipped = Vec::new();
@@ -94,25 +90,17 @@ fn render_draft(module: &js::Module, spec: &str) -> String {
     }
     out.push('\n');
     for ty in opaques.keys() {
-        out.push_str("opaque type ");
+        out.push_str("export opaque type ");
         out.push_str(ty);
         out.push('\n');
     }
     if !opaques.is_empty() {
         out.push('\n');
     }
-    out.push_str("summon {\n");
-    for (i, signature) in signatures.iter().enumerate() {
-        out.push_str("  ");
+    for signature in &signatures {
         out.push_str(signature);
-        if i + 1 < signatures.len() {
-            out.push(',');
-        }
         out.push('\n');
     }
-    out.push_str("} from \"");
-    out.push_str(spec);
-    out.push_str("\"\n");
     out
 }
 
@@ -124,10 +112,11 @@ fn render_signature(
     total: bool,
     opaques: &mut BTreeMap<String, Vec<String>>,
 ) -> String {
-    let mut sig = String::new();
+    let mut sig = String::from("export ");
     if total {
         sig.push_str("total ");
     }
+    sig.push_str("fn ");
     sig.push_str(name);
     sig.push('(');
     for (i, param) in params.iter().enumerate() {

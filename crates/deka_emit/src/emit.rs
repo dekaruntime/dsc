@@ -1891,6 +1891,12 @@ impl<'a> Emitter<'a> {
                     !self.is_erased_binding(n.name)
                         && (self.is_live(n.alias.unwrap_or(n.name)) || self.is_live(n.name))
                 }),
+                // `.d.ds` declaration files (rfd#39 2026-09-16 amendment) never
+                // reach JS emission — the module graph consumes them for
+                // their declared types only (dsc#274) — but the grammar is
+                // legal in any `.ds` file, so this stays exhaustive.
+                ExportDecl::Opaque { name } => self.is_live(name),
+                ExportDecl::Declare(function) => self.is_live(function.name),
             },
             Stmt::Const { name, .. }
             | Stmt::Let { name, .. }
@@ -3100,6 +3106,20 @@ impl<'a> Emitter<'a> {
                         return Ok(());
                     }
                 }
+                // `export opaque type` erases completely, like a bare
+                // `opaque type` (rfd#39). `export fn` / `export total fn`
+                // with no body (a `.d.ds` declaration, 2026-09-16 amendment)
+                // never reaches emission for real: the module graph consumes
+                // `.d.ds` files for their declared types only and never
+                // compiles them to JS (dsc#274). Both erase here rather than
+                // emitting invalid bodyless JS, in case either is ever
+                // reached directly (e.g. a single-file compile of a `.d.ds`).
+                if matches!(
+                    decl,
+                    ExportDecl::Opaque { .. } | ExportDecl::Declare(_)
+                ) {
+                    return Ok(());
+                }
                 write_indent(&mut self.out, 0);
                 self.out.push_str("export ");
                 match decl {
@@ -3174,6 +3194,9 @@ impl<'a> Emitter<'a> {
                             self.out.push('"');
                         }
                         self.out.push(';');
+                    }
+                    ExportDecl::Opaque { .. } | ExportDecl::Declare(_) => {
+                        unreachable!("erased above before `export ` is written")
                     }
                 }
             }

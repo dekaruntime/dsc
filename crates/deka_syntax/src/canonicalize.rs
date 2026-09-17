@@ -205,7 +205,9 @@ fn transform_stmt<'a>(
                         is_async: *is_async,
                     }
                 }
-                ast::ExportDecl::NamedGroup { .. } => decl.clone(),
+                ast::ExportDecl::NamedGroup { .. }
+                | ast::ExportDecl::Opaque { .. }
+                | ast::ExportDecl::Declare(_) => decl.clone(),
             };
             Stmt::Export {
                 decl: new_decl,
@@ -926,7 +928,9 @@ fn lower_stmt<'a>(
                         is_async: *is_async,
                     }
                 }
-                ast::ExportDecl::NamedGroup { .. } => decl.clone(),
+                ast::ExportDecl::NamedGroup { .. }
+                | ast::ExportDecl::Opaque { .. }
+                | ast::ExportDecl::Declare(_) => decl.clone(),
             };
             Stmt::Export {
                 decl: new_decl,

@@ -835,50 +835,11 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        // Only direct calls may reference the binding. Wrapping it in an ordinary
-        // DS function creates the authored, checked public boundary.
-        let mut calls = HashSet::new();
-        let mut references = Vec::new();
-        for stmt in self.program.statements {
-            crate::visit::walk_stmt(stmt, &mut |expr| match expr {
-                ast::Expr::Call {
-                    callee: ast::Expr::Identifier { name, span },
-                    ..
-                } if names.contains(name) => {
-                    calls.insert(span.byte_start);
-                }
-                ast::Expr::Identifier { name, span } if names.contains(name) => {
-                    references.push((name.to_string(), *span))
-                }
-                _ => {}
-            });
-            if let ast::Stmt::Export {
-                decl:
-                    ast::ExportDecl::NamedGroup {
-                        names: exports,
-                        source: None,
-                    },
-                ..
-            } = stmt
-            {
-                for export in *exports {
-                    if names.contains(export.name) {
-                        self.error_span(
-                            export.span,
-                            format!(
-                                "summoned function `{}` is file-private and cannot be exported",
-                                export.name
-                            ),
-                        );
-                    }
-                }
-            }
-        }
-        for (name, span) in references {
-            if !calls.contains(&span.byte_start) {
-                self.error_span(span, format!("summoned function `{name}` cannot escape its file; use a direct call inside a DekaScript function"));
-            }
-        }
+        // A summoned binding is an ordinary DekaScript value once declared:
+        // it may be called directly, passed, captured, or exported like any
+        // other name (rfd#39 2026-09-16 amendment removes the file-private
+        // rule — every crossing still carries its declared type and failure
+        // channel, which is the invariant that rule was protecting).
     }
 
     fn collect_function_signatures(&mut self) {
@@ -1357,7 +1318,7 @@ impl<'a> Checker<'a> {
                     *span,
                 );
             }
-            ast::Stmt::Export { decl, .. } => match decl {
+            ast::Stmt::Export { decl, span } => match decl {
                 ast::ExportDecl::Const { name, ty, value } => {
                     self.check_binding(name, ty.as_ref(), value, false, value.span());
                     if ty.is_none()
@@ -1381,6 +1342,25 @@ impl<'a> Checker<'a> {
                 ast::ExportDecl::NamedGroup { .. } => {
                     // Named re-exports refer to already-checked top-level
                     // declarations; nothing to validate at this scope.
+                }
+                // `export opaque type` / `export (total) fn` (no body) are
+                // grammar-legal anywhere so a `declare module { }` block
+                // (dsc#275) can share the parser, but a declaration is only
+                // meaningful in a `.d.ds` file — `dsc`'s module graph desugars
+                // those into `opaque type` / `summon { }` before typeck ever
+                // sees this program, so reaching this arm means the statement
+                // is misplaced in an ordinary `.ds` file.
+                ast::ExportDecl::Opaque { .. } => {
+                    self.error_span(
+                        *span,
+                        "`export opaque type` is only valid in a `.d.ds` declaration file",
+                    );
+                }
+                ast::ExportDecl::Declare(function) => {
+                    self.error_span(
+                        function.span,
+                        "a declared function (no body) is only valid in a `.d.ds` declaration file",
+                    );
                 }
             },
             ast::Stmt::Expr { expr, .. } => {

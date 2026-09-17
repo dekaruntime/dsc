@@ -1,0 +1,3 @@
+export fn Counter() ReactNode { return <button /> }
+export const COUNTER_LABEL = "hi"
+fn private_helper() {}

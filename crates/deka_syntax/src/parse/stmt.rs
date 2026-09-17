@@ -81,22 +81,7 @@ impl<'a> Parser<'a> {
                 if total {
                     self.advance();
                 }
-                // Keep the RFD's import-shaped signature; `fn` is accepted explicitly too.
-                self.eat(TokenKind::Fn);
-                let name = self.expect_identifier()?;
-                self.expect(TokenKind::LParen)?;
-                self.skip_newlines();
-                let params = self.parse_params()?;
-                self.expect(TokenKind::RParen)?;
-                self.reject_return_type_colon();
-                let return_type = self.parse_type()?;
-                functions.push(crate::ast::SummonedFunction {
-                    name,
-                    params,
-                    return_type,
-                    total,
-                    span: self.span_from(fs, fb),
-                });
+                functions.push(self.parse_summoned_signature(total, fs, fb)?);
                 self.skip_newlines();
                 if !self.eat(TokenKind::Comma) {
                     break;
@@ -127,6 +112,10 @@ impl<'a> Parser<'a> {
         }
         if self.current_kind() == TokenKind::Identifier && self.current_text() == "throw" {
             self.error("there is no lowercase `throw` statement; use `Throw(e)` to raise into the exception channel");
+            return None;
+        }
+        if self.current_kind() == TokenKind::Function {
+            self.reject_retired_function_keyword(in_block);
             return None;
         }
         if self.current_kind() == TokenKind::Identifier && self.current_text() == "try" {
@@ -415,6 +404,36 @@ impl<'a> Parser<'a> {
             return;
         }
         self.error_at(span.start, message);
+    }
+
+    /// `name(params) ReturnType` — the colon-free signature grammar shared by
+    /// a `summon { … }` block entry and a `.d.ds` declaration-file export
+    /// (`export fn …` / `export total fn …`). `total` and the signature's
+    /// start position are supplied by the caller, which parses them
+    /// differently (a bare identifier inside the block vs. a leading
+    /// `export total` keyword pair).
+    fn parse_summoned_signature(
+        &mut self,
+        total: bool,
+        fs: Pos,
+        fb: usize,
+    ) -> Option<crate::ast::SummonedFunction<'a>> {
+        // Keep the RFD's import-shaped signature; `fn` is accepted explicitly too.
+        self.eat(TokenKind::Fn);
+        let name = self.expect_identifier()?;
+        self.expect(TokenKind::LParen)?;
+        self.skip_newlines();
+        let params = self.parse_params()?;
+        self.expect(TokenKind::RParen)?;
+        self.reject_return_type_colon();
+        let return_type = self.parse_type()?;
+        Some(crate::ast::SummonedFunction {
+            name,
+            params,
+            return_type,
+            total,
+            span: self.span_from(fs, fb),
+        })
     }
 
     fn parse_fn_statement(&mut self, start: Pos, start_byte: usize) -> Option<Stmt<'a>> {
@@ -1087,35 +1106,45 @@ impl<'a> Parser<'a> {
         // this form.
         let all_type_only =
             self.at(TokenKind::Type) && self.peek_kind(1) == Some(TokenKind::LBrace);
+
+        let mut specs = Vec::new();
         if all_type_only {
             self.advance(); // `type`
-        }
-
-        self.expect(TokenKind::LBrace)?;
-        let mut specs = Vec::new();
-        if !self.at(TokenKind::RBrace) {
-            loop {
-                let (spec_start, spec_start_byte) = self.span_start();
-                // Inline per-specifier form: `import { type A, b } from "…"`.
-                let is_type_only = all_type_only || self.eat(TokenKind::Type);
-                let imported = self.expect_identifier()?;
-                let local = if self.eat(TokenKind::As) {
-                    self.expect_identifier()?
-                } else {
-                    imported
-                };
-                specs.push(crate::ast::ImportSpec {
-                    imported,
-                    local,
-                    span: self.span_from(spec_start, spec_start_byte),
-                    is_type_only,
-                });
-                if !self.eat(TokenKind::Comma) {
-                    break;
-                }
+            self.expect(TokenKind::LBrace)?;
+            self.parse_named_import_specs(&mut specs, true)?;
+            self.expect(TokenKind::RBrace)?;
+        } else if self.at(TokenKind::Identifier) || self.at(TokenKind::Type) {
+            // Default import sugar: `import X from "…"` and the mixed
+            // `import X, { a } from "…"` (rfd#12 ESM alignment amendment).
+            // `X` binds this module's default export under the key
+            // `"default"`, exactly like the explicit
+            // `import { default as X }` spelling. `type` itself is a legal
+            // default binding name here — the `import type { … }` group
+            // form was already ruled out above (dsc#280).
+            let (default_start, default_start_byte) = self.span_start();
+            let local = if self.at(TokenKind::Type) {
+                let text = self.bump_str(self.current_text());
+                self.advance();
+                text
+            } else {
+                self.expect_identifier()?
+            };
+            specs.push(crate::ast::ImportSpec {
+                imported: "default",
+                local,
+                span: self.span_from(default_start, default_start_byte),
+                is_type_only: false,
+            });
+            if self.eat(TokenKind::Comma) {
+                self.expect(TokenKind::LBrace)?;
+                self.parse_named_import_specs(&mut specs, false)?;
+                self.expect(TokenKind::RBrace)?;
             }
+        } else {
+            self.expect(TokenKind::LBrace)?;
+            self.parse_named_import_specs(&mut specs, false)?;
+            self.expect(TokenKind::RBrace)?;
         }
-        self.expect(TokenKind::RBrace)?;
         self.expect(TokenKind::From)?;
 
         if !self.at(TokenKind::String) {
@@ -1134,6 +1163,40 @@ impl<'a> Parser<'a> {
             source,
             span: self.span_from(start, start_byte),
         })
+    }
+
+    /// The comma-separated `imported [as local]` body of a `{ … }` named
+    /// import clause, appended to `specs`. Shared between the bare `import {
+    /// … }` form and the mixed `import Default, { … }` form.
+    fn parse_named_import_specs(
+        &mut self,
+        specs: &mut Vec<crate::ast::ImportSpec<'a>>,
+        all_type_only: bool,
+    ) -> Option<()> {
+        if self.at(TokenKind::RBrace) {
+            return Some(());
+        }
+        loop {
+            let (spec_start, spec_start_byte) = self.span_start();
+            // Inline per-specifier form: `import { type A, b } from "…"`.
+            let is_type_only = all_type_only || self.eat(TokenKind::Type);
+            let imported = self.expect_identifier()?;
+            let local = if self.eat(TokenKind::As) {
+                self.expect_identifier()?
+            } else {
+                imported
+            };
+            specs.push(crate::ast::ImportSpec {
+                imported,
+                local,
+                span: self.span_from(spec_start, spec_start_byte),
+                is_type_only,
+            });
+            if !self.eat(TokenKind::Comma) {
+                break;
+            }
+        }
+        Some(())
     }
 
     fn parse_export_statement(&mut self, start: Pos, start_byte: usize) -> Option<Stmt<'a>> {
@@ -1157,18 +1220,16 @@ impl<'a> Parser<'a> {
                 let decl = crate::ast::ExportDecl::Const { name, ty, value };
                 Some(Stmt::Export { decl, span })
             }
-            // `parse_fn_statement` already consumes an optional `async`, so the
-            // async form needs no separate parse — only a way to reach it from
-            // here. `export async fn` was rejected outright before (deka#410);
-            // `@deka/fs` is written that way and could not be compiled at all.
-            TokenKind::Fn | TokenKind::Async => {
-                if self.current_kind() == TokenKind::Async {
-                    let next_is_fn =
-                        self.tokens.get(self.pos + 1).map(|t| t.kind) == Some(TokenKind::Fn);
-                    if !next_is_fn {
-                        self.error("expected `fn` after `async`");
-                        return None;
-                    }
+            // `export async fn …` always has a body — `async` is not part of
+            // the declaration-file grammar (rfd#39's `.d.ds` signatures, like
+            // `summon`, have no `async` keyword; asynchronicity is read off a
+            // `Promise<T>` return type instead), so this arm is unambiguous.
+            TokenKind::Async => {
+                let next_is_fn =
+                    self.tokens.get(self.pos + 1).map(|t| t.kind) == Some(TokenKind::Fn);
+                if !next_is_fn {
+                    self.error("expected `fn` after `async`");
+                    return None;
                 }
                 let fn_stmt = self.parse_fn_statement(start, start_byte)?;
                 let span = self.span_from(start, start_byte);
@@ -1188,6 +1249,7 @@ impl<'a> Parser<'a> {
                         return_type,
                         body,
                         is_async,
+                        is_default: false,
                     },
                     Stmt::ReceiverMethod { .. } => {
                         self.error("cannot export a receiver method");
@@ -1197,8 +1259,100 @@ impl<'a> Parser<'a> {
                 };
                 Some(Stmt::Export { decl, span })
             }
+            // `export fn name(params) Return` either has a body (an ordinary
+            // exported function) or does not (a `.d.ds` declaration-file
+            // signature, rfd#39 2026-09-16 amendment — bodies are an error
+            // there, enforced downstream where the file kind is known).
+            TokenKind::Fn => {
+                self.advance(); // `fn`
+                let name = self.expect_identifier()?;
+                let type_params = if self.at(TokenKind::Lt) {
+                    self.parse_type_params()?
+                } else {
+                    &[]
+                };
+                self.expect(TokenKind::LParen)?;
+                let params = self.parse_params()?;
+                self.expect(TokenKind::RParen)?;
+                // The return type is omittable exactly like a plain `fn`
+                // statement's (inferred from the body) only when a body
+                // actually follows; a `.d.ds` declaration has no body to
+                // infer from, so its return type is never optional.
+                let return_type = if self.at(TokenKind::LBrace) {
+                    None
+                } else {
+                    self.reject_return_type_colon();
+                    Some(self.parse_type()?)
+                };
+                let span = self.span_from(start, start_byte);
+                if self.at(TokenKind::LBrace) {
+                    let body = self.parse_block()?;
+                    Some(Stmt::Export {
+                        decl: crate::ast::ExportDecl::Function {
+                            name,
+                            type_params,
+                            params,
+                            return_type,
+                            body,
+                            is_async: false,
+                            // `export fn name() {}` (declaration-file
+                            // signature form, rfd#39) has no `default`
+                            // spelling — only `export default fn` does
+                            // (rfd#12 ESM alignment amendment).
+                            is_default: false,
+                        },
+                        span,
+                    })
+                } else {
+                    if !type_params.is_empty() {
+                        self.error("a declared function cannot have type parameters");
+                        return None;
+                    }
+                    let Some(return_type) = return_type else {
+                        unreachable!("return_type is only None when at `{{`, handled above")
+                    };
+                    Some(Stmt::Export {
+                        decl: crate::ast::ExportDecl::Declare(crate::ast::SummonedFunction {
+                            name,
+                            params,
+                            return_type,
+                            total: false,
+                            span,
+                        }),
+                        span,
+                    })
+                }
+            }
+            // `export total fn name(params) Return` — always bodyless; `total`
+            // is the author's claim that the declared function cannot throw
+            // (rfd#39 2026-09-16 amendment).
+            TokenKind::Identifier if self.current_text() == "total" => {
+                self.advance();
+                self.expect(TokenKind::Fn)?;
+                let function = self.parse_summoned_signature(true, start, start_byte)?;
+                self.expect_statement_end(false)?;
+                Some(Stmt::Export {
+                    decl: crate::ast::ExportDecl::Declare(function),
+                    span: self.span_from(start, start_byte),
+                })
+            }
+            // `export opaque type Name` (rfd#39 2026-09-16 amendment).
+            TokenKind::Identifier if self.current_text() == "opaque" => {
+                self.advance();
+                self.expect(TokenKind::Type)?;
+                let name = self.expect_identifier()?;
+                self.expect_statement_end(false)?;
+                Some(Stmt::Export {
+                    decl: crate::ast::ExportDecl::Opaque { name },
+                    span: self.span_from(start, start_byte),
+                })
+            }
             TokenKind::Identifier if self.current_text() == "default" => {
-                self.error("unsupported export syntax: default exports are not allowed");
+                self.advance(); // `default`
+                self.parse_export_default(start, start_byte)
+            }
+            TokenKind::Function => {
+                self.reject_retired_function_keyword(false);
                 None
             }
             TokenKind::LBrace => {
@@ -1249,9 +1403,89 @@ impl<'a> Parser<'a> {
             }
             _ => {
                 self.error(format!(
-                    "expected `const`, `fn`, `async fn`, `{{` or `default` after `export`, found `{}`",
+                    "expected `const`, `fn`, `total fn`, `async fn`, `opaque type`, `{{` or `default` after `export`, found `{}`",
                     token_name(self.current_kind())
                 ));
+                None
+            }
+        }
+    }
+
+    /// `export default <named fn declaration>` or `export default <identifier>`
+    /// (rfd#12 ESM alignment amendment). Anonymous forms (`export default
+    /// fn () { … }`, `export default { … }`) are rejected: a default export
+    /// must be a named declaration or a named binding, so every import site
+    /// still has a real name to grep for.
+    fn parse_export_default(&mut self, start: Pos, start_byte: usize) -> Option<Stmt<'a>> {
+        match self.current_kind() {
+            TokenKind::Fn | TokenKind::Async => {
+                let fn_offset = if self.current_kind() == TokenKind::Async {
+                    if self.peek_kind(1) != Some(TokenKind::Fn) {
+                        self.error("expected `fn` after `async`");
+                        return None;
+                    }
+                    1
+                } else {
+                    0
+                };
+                if self.peek_kind(fn_offset + 1) == Some(TokenKind::LParen) {
+                    self.error(
+                        "anonymous default export: give the function a name, e.g. `export default fn Page() { ... }`",
+                    );
+                    return None;
+                }
+                let fn_stmt = self.parse_fn_statement(start, start_byte)?;
+                let span = self.span_from(start, start_byte);
+                let decl = match fn_stmt {
+                    Stmt::Function {
+                        name,
+                        type_params,
+                        params,
+                        return_type,
+                        body,
+                        is_async,
+                        ..
+                    } => crate::ast::ExportDecl::Function {
+                        name,
+                        type_params,
+                        params,
+                        return_type,
+                        body,
+                        is_async,
+                        is_default: true,
+                    },
+                    Stmt::ReceiverMethod { .. } => {
+                        self.error("cannot export a receiver method");
+                        return None;
+                    }
+                    _ => unreachable!(),
+                };
+                Some(Stmt::Export { decl, span })
+            }
+            TokenKind::Identifier => {
+                // `export default app` — a named binding, re-exported as the
+                // module's default. Equivalent to `export { app as default }`.
+                let (name_start, name_start_byte) = self.span_start();
+                let name = self.expect_identifier()?;
+                self.expect_statement_end(false)?;
+                let span = self.span_from(start, start_byte);
+                let names = vec![crate::ast::ExportName {
+                    name,
+                    alias: Some("default"),
+                    span: self.span_from(name_start, name_start_byte),
+                }];
+                Some(Stmt::Export {
+                    decl: crate::ast::ExportDecl::NamedGroup {
+                        names: alloc_slice(self.arena, names),
+                        source: None,
+                    },
+                    span,
+                })
+            }
+            _ => {
+                self.error(
+                    "default export must be a named declaration (`export default fn Page() { ... }`) or a named binding (`export default app`)",
+                );
                 None
             }
         }
@@ -1540,7 +1774,10 @@ fn stmt_has_top_level_await(stmt: &Stmt<'_>) -> bool {
         Stmt::Function { .. } | Stmt::ReceiverMethod { .. } => false,
         Stmt::Export { decl, .. } => match decl {
             ExportDecl::Const { value, .. } => expr_has_top_level_await(value),
-            ExportDecl::Function { .. } | ExportDecl::NamedGroup { .. } => false,
+            ExportDecl::Function { .. }
+            | ExportDecl::NamedGroup { .. }
+            | ExportDecl::Opaque { .. }
+            | ExportDecl::Declare(_) => false,
         },
         Stmt::If {
             condition,

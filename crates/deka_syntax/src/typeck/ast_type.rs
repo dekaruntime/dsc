@@ -49,6 +49,61 @@ impl<'a> Checker<'a> {
         self.resolve_ast_type_rec(ty, &mut HashSet::new())
     }
 
+    /// Seed one struct/enum/interface declared in the host file (dsc#288)
+    /// into this checker's own declaration tables, the same way an ordinary
+    /// top-level declaration would have been, then resolve `name` as that
+    /// kind. Idempotent: a name already registered (from an earlier bridge
+    /// signature in the same check) is not re-inserted.
+    fn register_host_type(&mut self, name: &'a str, decl: crate::bridge::HostTypeDecl) -> Type<'a> {
+        match decl {
+            crate::bridge::HostTypeDecl::Struct(stmt) => {
+                let ast::Stmt::Struct { fields, embeds, type_params, is_super, .. } = stmt else {
+                    unreachable!("host_type only returns the variant it was built from")
+                };
+                self.structs.entry(name).or_insert(super::StructInfo {
+                    fields: *fields,
+                    embeds: *embeds,
+                    type_params: *type_params,
+                    is_super: *is_super,
+                });
+                Type::Struct { name }
+            }
+            crate::bridge::HostTypeDecl::Enum(stmt) => {
+                let ast::Stmt::Enum { cases, type_params, is_super, .. } = stmt else {
+                    unreachable!("host_type only returns the variant it was built from")
+                };
+                if !self.enums.contains_key(name) {
+                    self.enums.insert(name, super::EnumInfo {
+                        cases: *cases,
+                        type_params: *type_params,
+                        is_super: *is_super,
+                    });
+                    for case in cases.iter() {
+                        self.case_to_enum.entry(case.name).or_insert(name);
+                    }
+                }
+                Type::Named { name }
+            }
+            crate::bridge::HostTypeDecl::Interface(stmt) => {
+                let ast::Stmt::Interface { members, type_params, span, .. } = stmt else {
+                    unreachable!("host_type only returns the variant it was built from")
+                };
+                let info = self
+                    .interfaces
+                    .entry(name)
+                    .or_insert(super::InterfaceInfo {
+                        members: *members,
+                        type_params: *type_params,
+                        span: *span,
+                    });
+                Type::Interface {
+                    name,
+                    identity: info.members.as_ptr() as usize,
+                }
+            }
+        }
+    }
+
     fn resolve_ast_type_rec(
         &mut self,
         ty: &ast::Type<'a>,
@@ -131,6 +186,14 @@ impl<'a> Checker<'a> {
                         // has no local declaration to check against, so the
                         // kind from the declaring module stands in.
                         kind.to_type(name)
+                    } else if let Some(decl) = crate::bridge::host_type(name) {
+                        // A struct/enum/interface declared alongside the
+                        // host file's `bridge` blocks (dsc#288): not found
+                        // among this module's own declarations because
+                        // nothing here declared it — seed it the first time
+                        // a signature (this one) actually names it, exactly
+                        // like an ordinary declaration would have been.
+                        self.register_host_type(name, decl)
                     } else {
                         self.error_span(*span, format!("unknown type `{name}`"));
                         Type::Error
@@ -384,6 +447,17 @@ impl<'a> Checker<'a> {
             return;
         }
         self.errors.push(Diagnostic::error(
+            span.start.line,
+            span.start.column,
+            message,
+        ));
+    }
+
+    pub(super) fn warning_span(&mut self, span: ast::Span, message: impl Into<String>) {
+        if self.infer_only {
+            return;
+        }
+        self.warnings.push(Diagnostic::warning(
             span.start.line,
             span.start.column,
             message,

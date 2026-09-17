@@ -2667,6 +2667,24 @@ assert.equal(threw, true, `expected throw, got ${uncovered}`);
     }
 
     #[test]
+    fn emit_console_call_is_verbatim() {
+        // rfd#44's console addition: the runtime's console prints via type
+        // descriptors, so the emitter must not stringify or rewrite the
+        // call — `console.log(a, b)` in DekaScript source is `console.log(a,
+        // b)` in the emitted JS, byte for byte, same as any other bare
+        // `object.method(args)` call the checker leaves unrewritten.
+        let out = parse_check_and_emit(
+            "console.log(\"hi\", 1);\nconsole.error(\"boom\");\nconsole.assert(1 == 2, \"unreachable\");",
+        );
+        assert!(out.contains("console.log(\"hi\", 1);"), "got: {out}");
+        assert!(out.contains("console.error(\"boom\");"), "got: {out}");
+        assert!(
+            out.contains("console.assert(1 == 2, \"unreachable\");"),
+            "got: {out}"
+        );
+    }
+
+    #[test]
     fn react_module_specifier_follows_jsx_runtime_family() {
         assert_eq!(react_module_specifier("@js/react/jsx-runtime"), "@js/react");
         assert_eq!(react_module_specifier("react/jsx-runtime"), "react");

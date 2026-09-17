@@ -791,8 +791,12 @@ impl<'src> Formatter<'src> {
                 return_type,
                 body,
                 is_async,
+                is_default,
             } => {
                 self.write("export ");
+                if *is_default {
+                    self.write("default ");
+                }
                 self.fmt_fn_sig(
                     *is_async,
                     Some(name),
@@ -814,6 +818,23 @@ impl<'src> Formatter<'src> {
                     self.write(source);
                     self.write("\"");
                 }
+            }
+            // `.d.ds` declaration files (rfd#39 2026-09-16 amendment).
+            ExportDecl::Opaque { name } => {
+                self.write("export opaque type ");
+                self.write(name);
+            }
+            ExportDecl::Declare(function) => {
+                self.write("export ");
+                if function.total {
+                    self.write("total ");
+                }
+                self.write("fn ");
+                self.write(function.name);
+                self.write("(");
+                self.fmt_param_list(function.params);
+                self.write(") ");
+                self.fmt_type(&function.return_type);
             }
         }
     }
@@ -1645,10 +1666,26 @@ fn import_to_string(stmt: &Stmt<'_>) -> String {
     };
 
     if specifiers.is_empty() {
-        format!("import \"{source}\"")
-    } else {
-        let parts: Vec<String> = specifiers.iter().map(import_spec_to_string).collect();
-        format!("import {{ {} }} from \"{source}\"", parts.join(", "))
+        return format!("import \"{source}\"");
+    }
+    // `import Name from "…"` / `import Name, { a } from "…"` (rfd#12 ESM
+    // alignment amendment): render the specifier importing the module's
+    // `"default"` key as a default binding, not inside `{ … }`.
+    let default_local = specifiers
+        .iter()
+        .find(|spec| spec.imported == "default")
+        .map(|spec| spec.local);
+    let named: Vec<String> = specifiers
+        .iter()
+        .filter(|spec| spec.imported != "default")
+        .map(import_spec_to_string)
+        .collect();
+    match (default_local, named.is_empty()) {
+        (Some(local), true) => format!("import {local} from \"{source}\""),
+        (Some(local), false) => {
+            format!("import {local}, {{ {} }} from \"{source}\"", named.join(", "))
+        }
+        (None, _) => format!("import {{ {} }} from \"{source}\"", named.join(", ")),
     }
 }
 
@@ -2375,6 +2412,28 @@ mod tests {
         let once = format_ds(input).unwrap();
         let twice = format_ds(&once).unwrap();
         assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn console_log_call_is_left_alone() {
+        // `console` is a global (rfd#44's console addition); it is an
+        // ordinary call/field-access AST shape to the formatter, so it needs
+        // no special-casing — this pins that down and guards idempotence.
+        let input = "console.log(x)";
+        let output = format_ds(input).unwrap();
+        assert_eq!(output, "console.log(x)\n");
+        let twice = format_ds(&output).unwrap();
+        assert_eq!(output, twice);
+    }
+
+    #[test]
+    fn console_methods_with_multiple_arguments_are_left_alone() {
+        let input = "console.error(\"failed\", 1, true)\nconsole.assert(x == 1, \"not one\")";
+        let output = format_ds(input).unwrap();
+        assert_eq!(
+            output,
+            "console.error(\"failed\", 1, true)\nconsole.assert(x == 1, \"not one\")\n"
+        );
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use super::*;
+use deka_syntax::parse::FUNCTION_KEYWORD_ERROR;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -291,6 +292,7 @@ impl LanguageServer for Backend {
                     TextDocumentSyncKind::FULL,
                 )),
                 hover_provider: Some(true.into()),
+                definition_provider: Some(OneOf::Left(true)),
                 completion_provider: Some(CompletionOptions {
                     trigger_characters: Some(vec![
                         "'".to_string(),
@@ -299,6 +301,7 @@ impl LanguageServer for Backend {
                     ]),
                     ..CompletionOptions::default()
                 }),
+                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 diagnostic_provider: Some(DiagnosticServerCapabilities::Options(
                     DiagnosticOptions {
                         identifier: Some(LANGUAGE_ID.to_string()),
@@ -309,7 +312,6 @@ impl LanguageServer for Backend {
                 )),
                 references_provider: Some(OneOf::Left(true)),
                 rename_provider: Some(OneOf::Left(true)),
-                definition_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
             server_info: None,
@@ -356,6 +358,47 @@ impl LanguageServer for Backend {
                 },
             }),
         ))
+    }
+
+    async fn code_action(
+        &self,
+        params: CodeActionParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<CodeActionResponse>> {
+        let uri = params.text_document.uri;
+        if !is_dekascript_uri(&uri) {
+            return Ok(None);
+        }
+
+        let mut actions = Vec::new();
+        for diagnostic in &params.context.diagnostics {
+            if !diagnostic.message.contains(FUNCTION_KEYWORD_ERROR) {
+                continue;
+            }
+            let mut changes = HashMap::new();
+            changes.insert(
+                uri.clone(),
+                vec![TextEdit {
+                    range: diagnostic.range,
+                    new_text: "fn".to_string(),
+                }],
+            );
+            actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                title: "Replace `function` with `fn`".to_string(),
+                kind: Some(CodeActionKind::QUICKFIX),
+                diagnostics: Some(vec![diagnostic.clone()]),
+                edit: Some(WorkspaceEdit {
+                    changes: Some(changes),
+                    document_changes: None,
+                    change_annotations: None,
+                }),
+                command: None,
+                is_preferred: Some(true),
+                disabled: None,
+                data: None,
+            }));
+        }
+
+        Ok(if actions.is_empty() { None } else { Some(actions) })
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
@@ -475,10 +518,12 @@ impl LanguageServer for Backend {
         }))
     }
 
-    /// Currently only serves `bridge kind.action(...)` calls (dsc#272 item
-    /// 7): the location is a `Location` inside the read-only, materialized
-    /// `deka-host.d.ds` (see `hover::host_decl_document_path`). Every other
-    /// name returns `None` — dsc has no other go-to-definition source yet.
+    /// Tries `bridge kind.action(...)` calls first (dsc#272 item 7): the
+    /// location is a `Location` inside the read-only, materialized
+    /// `deka-host.d.ds` (see `hover::host_decl_document_path`). Otherwise
+    /// falls back to resolving the identifier as an imported name, which for
+    /// a `.mjs` import lands in its sibling `.d.ds` declaration file
+    /// (rfd#39, dsc#274/#277). `None` when neither source resolves.
     async fn goto_definition(
         &self,
         params: GotoDefinitionParams,
@@ -491,18 +536,27 @@ impl LanguageServer for Backend {
         let Some(text) = self.get_document(&uri).await else {
             return Ok(None);
         };
+        let file_path = uri
+            .to_file_path()
+            .ok()
+            .and_then(|path| path.to_str().map(|path| path.to_string()))
+            .unwrap_or_else(|| uri.to_string());
+
         let line_index = LineIndex::new(&text);
         let Some(offset) = line_index.position_to_offset(position) else {
             return Ok(None);
         };
+
         let arena = bumpalo::Bump::new();
-        let Some(program) = deka_syntax::parse_recovering(&text, &arena).program else {
-            return Ok(None);
-        };
-        let Some(location) = bridge_call_definition(&program, offset) else {
-            return Ok(None);
-        };
-        Ok(Some(GotoDefinitionResponse::Scalar(location)))
+        if let Some(program) = deka_syntax::parse_recovering(&text, &arena).program {
+            if let Some(location) = bridge_call_definition(&program, offset) {
+                return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+            }
+        }
+
+        let documents = self.documents.read().await.clone();
+        let location = entry_definition(&documents, &text, &file_path, offset);
+        Ok(location.map(GotoDefinitionResponse::Scalar))
     }
 
     async fn completion(

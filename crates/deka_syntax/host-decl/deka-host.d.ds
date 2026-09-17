@@ -1,5 +1,23 @@
 // deka-host.d.ds — generated from the deka host catalog. Do not edit.
 
+interface DirEntry {
+  name: string
+  is_dir: boolean
+  is_file: boolean
+}
+
+struct FsPermission {
+  capability: string
+  target: string
+}
+
+enum FsError {
+  PermissionDenied(FsPermission),
+  UnsupportedHost,
+  InvalidPayload,
+  Failed(string),
+}
+
 bridge crypto {
   fn random_bytes(len: number) Result<bytes, string>
   fn digest(algorithm: string, data: bytes) Result<bytes, string>
@@ -11,18 +29,18 @@ bridge crypto {
 }
 
 bridge fs {
-  async fn read_file(path: string) Result<bytes, string>
-  async fn write_file(path: string, data: bytes) Result<number, string>
-  async fn read_dir(path: string) Result<Array<string>, string>
-  async fn mkdirs(path: string) Result<void, string>
-  fn read_file_sync(path: string) Result<bytes, string>
-  fn write_file_sync(path: string, data: bytes) Result<number, string>
-  fn read_dir_sync(path: string) Result<Array<string>, string>
-  fn mkdirs_sync(path: string) Result<void, string>
-  fn open(path: string, write: boolean) Result<number, string>
-  fn read(handle: number, max_bytes: number) Result<bytes, string>
-  fn write(handle: number, data: bytes) Result<number, string>
-  fn close(handle: number) Result<void, string>
+  async fn read_file(path: string) Result<bytes, FsError>
+  async fn write_file(path: string, data: bytes) Result<number, FsError>
+  async fn read_dir(path: string) Result<Array<DirEntry>, FsError>
+  async fn mkdirs(path: string) Result<boolean, FsError>
+  fn read_file_sync(path: string) Result<bytes, FsError>
+  fn write_file_sync(path: string, data: bytes) Result<number, FsError>
+  fn read_dir_sync(path: string) Result<Array<DirEntry>, FsError>
+  fn mkdirs_sync(path: string) Result<boolean, FsError>
+  fn open(path: string, write: boolean) Result<number, FsError>
+  fn read(handle: number, max_bytes: number) Result<bytes, FsError>
+  fn write(handle: number, data: bytes) Result<number, FsError>
+  fn close(handle: number) Result<boolean, FsError>
 }
 
 bridge net {
@@ -31,8 +49,8 @@ bridge net {
   fn accept(handle: number) Result<number, string>
   fn read(handle: number, max_bytes: number) Result<bytes, string>
   fn write(handle: number, data: bytes) Result<number, string>
-  fn close(handle: number) Result<void, string>
-  fn set_deadline(handle: number, millis: number) Result<void, string>
+  fn close(handle: number) Result<boolean, string>
+  fn set_deadline(handle: number, millis: number) Result<boolean, string>
 }
 
 bridge tls {
@@ -45,8 +63,8 @@ bridge time {
 
 bridge db {
   fn open(url: string) Result<number, string>
-  fn query(handle: number, sql: string, params: JsValue) Result<Array<string>, string>
+  fn query(handle: number, sql: string, params: JsValue) Result<Array<JsValue>, string>
   fn exec(handle: number, sql: string, params: JsValue) Result<number, string>
-  fn close(handle: number) Result<void, string>
+  fn close(handle: number) Result<boolean, string>
   fn stats(handle: number) Result<JsValue, string>
 }

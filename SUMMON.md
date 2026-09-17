@@ -22,7 +22,11 @@ structure, or reflection surface. They may be held, passed, returned, and stored
 An opaque declaration erases completely; its foreign object is untouched.
 Local receiver methods lower to free functions without modifying that object.
 Export ordinary DS wrapper functions to expose a foreign operation to consumers.
-Summoned bindings cannot be exported, captured, passed as values, or shadowed.
+As of the rfd#39 2026-09-16 declaration-files amendment (dsc#274), a summoned
+binding is an ordinary value once declared: it may be exported, captured, and
+passed like any other name — every crossing still carries its declared type
+and failure channel, which is the invariant the earlier file-private rule
+protected. Shadowing a summoned name is still a duplicate-binding error.
 
 A summoned return requires `Exception<T, E>` unless explicitly marked `total`.
 Existing asynchronous typing applies: `Promise<Exception<T, E>>` is fallible at
@@ -71,15 +75,49 @@ of this change.
 
 **Draft scaffolder (`dsc summon infer`, rfd#39 authoring tier-3):** point the
 tier-1 SWC walk at generation. The command takes a vendored `.mjs` path and
-emits a `.d.ds`-style summon block to stdout or `--out`, marked
-`DRAFT — review before committing`. Unknown parameter types become
-opaque-candidate placeholders (never `JsValue`). Returns use the pessimistic
-`Exception<T, JsError>` default. `total` is emitted only where visible analysis
-of that module proves there are no throw sites: no uncaught `throw`, no
-known-throwing intrinsics (`JSON.parse`, `decodeURI*`), and no calls into
-unseen code. Same-module callees are followed. A contained `throw` inside
-`try`/`catch` does not count. `total` is still a claim the author must own;
-the draft never emits it silently. The summon fetch door remains a later stage.
+writes `<module>.d.ds` beside it (in the export form below) unless `--out`
+names a different file, marked `DRAFT — review before committing`. Unknown
+parameter types become opaque-candidate placeholders (never `JsValue`).
+Returns use the pessimistic `Exception<T, JsError>` default. `total` is
+emitted only where visible analysis of that module proves there are no throw
+sites: no uncaught `throw`, no known-throwing intrinsics (`JSON.parse`,
+`decodeURI*`), and no calls into unseen code. Same-module callees are
+followed. A contained `throw` inside `try`/`catch` does not count. `total` is
+still a claim the author must own; the draft never emits it silently. The
+summon fetch door remains a later stage.
 
 Paired conformance corpus: dekaruntime/testsuite#84. Its release owner must merge
 and tag the corpus before this PR's compiler pin can be bumped and verified.
+
+## Declaration files — `.d.ds` (rfd#39, 2026-09-16 amendment, dsc#274)
+
+A `.d.ds` file holds declarations only, in export form, and sits beside the
+JavaScript module it describes — no `from` clause; the pairing is positional:
+
+```ds
+// three.d.ds, beside three.mjs
+export opaque type Scene
+export opaque type Mesh
+
+export fn scene() Scene
+export fn sceneAdd(s: Scene, m: Mesh) void
+export total fn revision() string
+```
+
+`import { scene } from "./three.mjs"` resolves `./three.d.ds` beside it and
+type-checks the import against its declared signature — exactly the summon
+rules above, with one difference: a bare (non-`total`) return `T` here means
+`Exception<T, JsError>` (an inline `summon { }` block still requires spelling
+that out); a declaration may narrow the error type (`Exception<void,
+SceneError>`) instead. `total` and colon-free returns are unchanged. Declared
+names import, re-export, and travel like any other name (see above). A body
+is a hard error. Importing a `.mjs`/`.js` module with no sibling `.d.ds` is a
+resolve-time error naming both fixes: write one, or run `dsc summon infer`.
+The tier-1 structural checks above run against the real module for every
+declared function, on every compile — this reuses `crate::summon`'s existing
+walk (`crate::decl_file` wraps declared functions in a synthetic `summon { }`
+statement and hands it to the same `validate`), not a second implementation.
+
+`.d.ts` resolution (reading a package's own TypeScript declarations directly)
+and `declare module { }` blocks / project overrides are separate stages
+(dsc#276, dsc#275); `.d.ds` resolution is the seam both build on.

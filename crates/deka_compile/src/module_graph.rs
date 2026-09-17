@@ -83,6 +83,32 @@ impl FsModuleLoader {
         deka_project::module_spec::resolve_ds_source_file(base)
     }
 
+    /// Resolve a literal `.mjs`/`.js` specifier to its sibling `.d.ds`
+    /// declaration file (rfd#39 2026-09-16 amendment, dsc#274): `js_path` is
+    /// the real module path (must exist on disk), and the graph treats the
+    /// returned `.d.ds` path as an ordinary node — parsed and typechecked
+    /// like a `.ds` dependency (so cross-module opaque identity, re-export
+    /// chains and missing-export validation apply unchanged), but never
+    /// compiled to JS, since every importer's own `import { … } from
+    /// "<spec>"` already emits a direct import of the real module verbatim
+    /// (`Stmt::Import` passes an `.mjs`/`.js` source straight through
+    /// unresolved — see `deka_emit::resolve_module_source`) — "zero glue, no
+    /// wrapper, no membrane" per the amendment.
+    fn resolve_foreign_module(&self, js_path: &Path, specifier: &str) -> Result<PathBuf, String> {
+        if !js_path.is_file() {
+            return Err(format!("cannot resolve relative import '{specifier}'"));
+        }
+        let decl_path = crate::decl_file::sibling_declaration_path(js_path)
+            .ok_or_else(|| format!("cannot resolve relative import '{specifier}'"))?;
+        if !decl_path.is_file() {
+            // TODO(dsc#276): also accept a sibling `.d.ts` here before erroring.
+            return Err(crate::decl_file::missing_declaration_message(
+                specifier, &decl_path,
+            ));
+        }
+        self.guard_project_root(&decl_path)
+    }
+
     fn guard_project_root(&self, path: &Path) -> Result<PathBuf, String> {
         let canon_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         let canon_root =
@@ -205,6 +231,14 @@ impl ModuleLoader for FsModuleLoader {
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
                 .join(trimmed);
+            // `import { … } from "./m.mjs"` names a JavaScript module
+            // directly rather than a `.ds` dependency: it resolves to the
+            // `.d.ds` declaration file beside it (rfd#39 2026-09-16
+            // amendment, dsc#274). `.d.ts` resolution (dsc#276) is the next
+            // fallback this seam is built for.
+            if trimmed.ends_with(".mjs") || trimmed.ends_with(".js") {
+                return self.resolve_foreign_module(&base, trimmed);
+            }
             let resolved = self
                 .resolve_ds_file(&base)
                 .ok_or_else(|| format!("cannot resolve relative import '{}'", trimmed))?;
@@ -633,6 +667,31 @@ pub fn check_module_graph_with_options(
                 continue;
             }
             programs.insert(module.path.clone(), program);
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+    // `.d.ds` declaration files (rfd#39 2026-09-16 amendment, dsc#274):
+    // grammar restricted to declarations (item 1, "bodies are an error"), and
+    // checked against the real sibling module on every compile (item 5) —
+    // reusing `summon`'s existing tier-1 structural walk rather than a second
+    // "does this export exist" implementation.
+    for (path, program) in programs.iter() {
+        if !crate::decl_file::is_declaration_file(path) {
+            continue;
+        }
+        for d in crate::decl_file::validate_shape(program) {
+            errors.push(ModuleDiagnostic::prefixed(path.clone(), d));
+        }
+        for d in crate::decl_file::verify_structure(
+            path,
+            program,
+            &arena,
+            &HashMap::new(),
+            options.skip_summon_fs,
+        ) {
+            errors.push(ModuleDiagnostic::prefixed(path.clone(), d));
         }
     }
     if !errors.is_empty() {
@@ -1115,6 +1174,16 @@ pub fn check_module_graph_with_options(
     let mut entry_prerender: Option<bool> = None;
     for path in order {
         if !plan.keep.contains(&path) && !dev_keep.contains(&path) {
+            continue;
+        }
+        // A `.d.ds` declaration file (rfd#39 2026-09-16 amendment, dsc#274)
+        // is a graph node purely for its declared types: every importer's
+        // own `import { … } from "<mjs path>"` already emits a direct import
+        // of the real module (see `resolve_foreign_module`), so the
+        // declaration file itself never needs — and never gets — compiled
+        // JS output. Its tier-1 structural check (`crate::decl_file`) already
+        // ran once, earlier, right after parsing.
+        if crate::decl_file::is_declaration_file(&path) {
             continue;
         }
         let module = modules.get(&path).expect("module in graph");
@@ -3057,11 +3126,11 @@ mod tests {
         let mut files = HashMap::new();
         files.insert(
             host_pkg.clone(),
-            "export fn random_bytes(len: number) Result<bytes, string> {\n  return bridge crypto.random_bytes(len)\n}\nexport async fn read_file(path: string) Promise<Result<bytes, string>> {\n  return await bridge fs.read_file(path)\n}".to_string(),
+            "export fn random_bytes(len: number) Result<bytes, string> {\n  return bridge crypto.random_bytes(len)\n}\nexport async fn read_file(path: string) Promise<Result<bytes, FsError>> {\n  return await bridge fs.read_file(path)\n}".to_string(),
         );
         files.insert(
             main.clone(),
-            "import { random_bytes, read_file } from \"fs\";\nexport fn sync_entry(len: number) Result<bytes, string> { return random_bytes(len) }\nexport async fn async_entry(path: string) Promise<Result<bytes, string>> { return await read_file(path) }".to_string(),
+            "import { random_bytes, read_file } from \"fs\";\nexport fn sync_entry(len: number) Result<bytes, string> { return random_bytes(len) }\nexport async fn async_entry(path: string) Promise<Result<bytes, FsError>> { return await read_file(path) }".to_string(),
         );
 
         let mut aliases = HashMap::new();

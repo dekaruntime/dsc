@@ -1,6 +1,7 @@
 //! DekaScript compiler orchestrator (Compiler v2).
 
 pub mod catalog;
+pub mod decl_file;
 pub mod module_graph;
 pub mod shake;
 pub mod summon;
@@ -166,7 +167,9 @@ fn program_contains_jsx(program: &Program<'_>) -> bool {
             Stmt::Export { decl, .. } => match decl {
                 deka_syntax::ExportDecl::Const { value, .. } => expr_has_jsx(value),
                 deka_syntax::ExportDecl::Function { body, .. } => body.iter().any(stmt_has_jsx),
-                deka_syntax::ExportDecl::NamedGroup { .. } => false,
+                deka_syntax::ExportDecl::NamedGroup { .. }
+                | deka_syntax::ExportDecl::Opaque { .. }
+                | deka_syntax::ExportDecl::Declare(_) => false,
             },
             Stmt::If {
                 condition,
@@ -342,6 +345,16 @@ pub fn parse_source_module_meta(source: &str) -> SourceModuleMeta {
                 deka_syntax::ExportDecl::Function { name, .. } => {
                     exports.push(ExportDecl {
                         name: name.to_string(),
+                    });
+                }
+                deka_syntax::ExportDecl::Opaque { name } => {
+                    exports.push(ExportDecl {
+                        name: name.to_string(),
+                    });
+                }
+                deka_syntax::ExportDecl::Declare(function) => {
+                    exports.push(ExportDecl {
+                        name: function.name.to_string(),
                     });
                 }
                 deka_syntax::ExportDecl::NamedGroup { names, source } => {

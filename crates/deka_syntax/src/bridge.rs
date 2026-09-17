@@ -62,10 +62,17 @@ fn catalog() -> &'static HostCatalog {
             )
         });
         for stmt in program.statements {
-            if !matches!(stmt, ast::Stmt::BridgeDecl { .. }) {
+            if !matches!(
+                stmt,
+                ast::Stmt::BridgeDecl { .. }
+                    | ast::Stmt::Struct { .. }
+                    | ast::Stmt::Enum { .. }
+                    | ast::Stmt::Interface { .. }
+            ) {
                 panic!(
-                    "deka-host.d.ds contains a non-`bridge` top-level statement; the embedded \
-                     catalog must only declare `bridge <kind> {{ ... }}` blocks"
+                    "deka-host.d.ds contains a top-level statement that is neither `bridge`, \
+                     `struct`, `enum` nor `interface` — the embedded catalog only declares \
+                     `bridge <kind> {{ ... }}` blocks and the types (dsc#288) their signatures use"
                 );
             }
         }
@@ -111,6 +118,31 @@ pub fn kind_exists(kind: &str) -> bool {
         .statements
         .iter()
         .any(|stmt| matches!(stmt, ast::Stmt::BridgeDecl { kind: k, .. } if *k == kind))
+}
+
+/// A struct, enum, or interface declared in the host file itself, alongside
+/// its `bridge` blocks (dsc#288, deka#1146): the runtime builds some values
+/// itself (`read_dir` entries, fs errors) and the host file names their shape
+/// so a bridge signature can use them, e.g. `Result<bytes, FsError>`.
+pub enum HostTypeDecl {
+    Struct(&'static ast::Stmt<'static>),
+    Enum(&'static ast::Stmt<'static>),
+    Interface(&'static ast::Stmt<'static>),
+}
+
+/// Look up a struct/enum/interface declared in the host file by name. This is
+/// host-file only — application code still cannot declare one of these
+/// ambiently — and it is not the `from "host"` package import (rfd#27
+/// decision 7, dsc#288 item 4): the typechecker consults this only while
+/// resolving a type a bridge signature already names (`resolve_ast_type`),
+/// never as a standalone import surface.
+pub fn host_type(name: &str) -> Option<HostTypeDecl> {
+    catalog().program.statements.iter().find_map(|stmt| match stmt {
+        ast::Stmt::Struct { name: n, .. } if *n == name => Some(HostTypeDecl::Struct(stmt)),
+        ast::Stmt::Enum { name: n, .. } if *n == name => Some(HostTypeDecl::Enum(stmt)),
+        ast::Stmt::Interface { name: n, .. } if *n == name => Some(HostTypeDecl::Interface(stmt)),
+        _ => None,
+    })
 }
 
 /// Whether the host dispatches `kind.action` asynchronously, i.e. the bridge
@@ -173,10 +205,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn embedded_catalog_parses_and_only_declares_bridge_blocks() {
+    fn embedded_catalog_parses() {
         // Forces the lazy parse; panics (failing the test) if the checked-in
-        // file is malformed or was hand-edited into something else.
+        // file is malformed, or contains a top-level statement that is
+        // neither `bridge`, `struct`, `enum` nor `interface` (dsc#288).
         assert!(kind_exists("crypto"));
+    }
+
+    /// dsc#288 / deka#1146: the host file declares `FsError`/`FsPermission`/
+    /// `DirEntry` alongside its `bridge` blocks, and `host_type` finds each
+    /// by name and kind.
+    #[test]
+    fn host_type_finds_declared_struct_enum_and_interface() {
+        assert!(matches!(host_type("FsError"), Some(HostTypeDecl::Enum(_))));
+        assert!(matches!(host_type("FsPermission"), Some(HostTypeDecl::Struct(_))));
+        assert!(matches!(host_type("DirEntry"), Some(HostTypeDecl::Interface(_))));
+        assert!(host_type("NotAHostType").is_none());
     }
 
     #[test]

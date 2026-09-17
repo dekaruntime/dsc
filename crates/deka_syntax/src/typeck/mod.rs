@@ -27,6 +27,8 @@ mod arrow_tests;
 #[cfg(test)]
 mod bridge_tests;
 #[cfg(test)]
+mod console_tests;
+#[cfg(test)]
 mod contextual_tests;
 mod hooks;
 #[cfg(test)]
@@ -259,6 +261,14 @@ pub struct ModuleExports<'a> {
     pub receiver_methods: HashMap<(&'a str, &'a str), MethodInfo<'a>>,
     /// Value bindings (functions / constants) exported by the module.
     pub values: HashMap<&'a str, Type<'a>>,
+    /// The declared name behind this module's default export, when it has
+    /// one (rfd#12 ESM alignment amendment) — the function name in
+    /// `export default fn Page() { … }`, or the identifier in
+    /// `export default app` / `export { app as default }`. Used only to
+    /// warn an importer whose local name differs from it (the greppability
+    /// rule); the export itself is always looked up under the key
+    /// `"default"` in the maps above, like any other renamed export.
+    pub default_export_declared_name: Option<&'a str>,
     /// Names exported via `export { name }` that are not locally declared
     /// (i.e. re-exports of imports). These pass through to importers.
     pub re_exports: HashSet<&'a str>,
@@ -294,6 +304,7 @@ impl<'a> Default for ModuleExports<'a> {
             newtypes: HashMap::new(),
             receiver_methods: HashMap::new(),
             values: HashMap::new(),
+            default_export_declared_name: None,
             re_exports: HashSet::new(),
             build_fragments: HashMap::new(),
             build_receiver_methods: HashMap::new(),
@@ -565,7 +576,11 @@ fn summarize_stmt<'a>(
         | ast::Stmt::Continue { .. }
         | ast::Stmt::Empty { .. }
         | ast::Stmt::Export {
-            decl: ast::ExportDecl::NamedGroup { .. },
+            decl: ast::ExportDecl::NamedGroup { .. } | ast::ExportDecl::Opaque { .. },
+            ..
+        }
+        | ast::Stmt::Export {
+            decl: ast::ExportDecl::Declare(_),
             ..
         } => {}
     }
@@ -980,9 +995,9 @@ pub fn refresh_module_export_values<'a>(
     for stmt in program.statements.iter() {
         let names: Vec<_> = match stmt {
             ast::Stmt::Export {
-                decl: ast::ExportDecl::Function { name, .. },
+                decl: ast::ExportDecl::Function { name, is_default, .. },
                 ..
-            } => vec![(*name, *name)],
+            } => vec![(*name, if *is_default { "default" } else { *name })],
             ast::Stmt::Export {
                 decl:
                     ast::ExportDecl::NamedGroup {
@@ -1125,12 +1140,132 @@ pub fn build_module_build_fragments<'a>(
 /// The returned `ModuleExports` references AST nodes allocated in `arena` (and
 /// in the source strings), so `arena` must outlive any importer that consumes
 /// these exports.
+/// Replace a bare `Type::Named` naming a locally declared opaque type with
+/// its identity-carrying `Type::Opaque`, recursively through the composite
+/// shapes a declared signature can nest one in. `ast_type_to_export_type` has
+/// no opaque awareness (an existing gap shared by ordinary exported functions
+/// that take an opaque parameter); this is a narrow, additive fix scoped to
+/// `.d.ds` declared functions so `sceneAdd(s: Scene, m: Mesh) void` resolves
+/// `Scene`/`Mesh` correctly instead of falling back to a bare named type.
+fn substitute_opaques<'a>(ty: Type<'a>, opaques: &HashMap<&'a str, Type<'a>>) -> Type<'a> {
+    match ty {
+        Type::Named { name } => opaques.get(name).cloned().unwrap_or(Type::Named { name }),
+        Type::Option { inner } => Type::Option {
+            inner: Box::new(substitute_opaques(*inner, opaques)),
+        },
+        Type::Array { elem } => Type::Array {
+            elem: Box::new(substitute_opaques(*elem, opaques)),
+        },
+        Type::Tuple { elements } => Type::Tuple {
+            elements: elements
+                .into_iter()
+                .map(|t| substitute_opaques(t, opaques))
+                .collect(),
+        },
+        Type::Object { fields } => Type::Object {
+            fields: fields
+                .into_iter()
+                .map(|(name, t)| (name, substitute_opaques(t, opaques)))
+                .collect(),
+        },
+        Type::Union { members } => Type::Union {
+            members: members
+                .into_iter()
+                .map(|t| substitute_opaques(t, opaques))
+                .collect(),
+        },
+        Type::Generic { base, args } => Type::Generic {
+            base,
+            args: args
+                .into_iter()
+                .map(|t| substitute_opaques(t, opaques))
+                .collect(),
+        },
+        Type::Function {
+            params,
+            ret,
+            optional,
+        } => Type::Function {
+            params: params
+                .into_iter()
+                .map(|t| substitute_opaques(t, opaques))
+                .collect(),
+            ret: Box::new(substitute_opaques(*ret, opaques)),
+            optional,
+        },
+        other => other,
+    }
+}
+
+/// A declaration-file (`.d.ds`) return type without the explicit `total`
+/// marker is `Exception<T, JsError>` unless `T` is already Exception-shaped
+/// (a declaration narrowing the error type) — rfd#39's 2026-09-16 amendment,
+/// "same rules as summon" applied to the surface `T` a `.d.ds` author writes
+/// (summon's own inline `{ }` grammar keeps requiring the explicit spelling;
+/// this default is specific to declaration-file signatures). `total` is the
+/// author's claim the function cannot throw, so it is returned unchanged.
+fn exception_default<'a>(ty: Type<'a>, total: bool) -> Type<'a> {
+    fn is_exception(ty: &Type<'_>) -> bool {
+        matches!(ty, Type::Generic { base: "Exception", .. })
+    }
+    if total {
+        return ty;
+    }
+    match ty {
+        Type::Generic { base: "Promise", args } if args.len() == 1 && !is_exception(&args[0]) => {
+            Type::Generic {
+                base: "Promise",
+                args: vec![Type::Generic {
+                    base: "Exception",
+                    args: vec![args.into_iter().next().unwrap(), Type::Named { name: "JsError" }],
+                }],
+            }
+        }
+        ty if is_exception(&ty) => ty,
+        other => Type::Generic {
+            base: "Exception",
+            args: vec![other, Type::Named { name: "JsError" }],
+        },
+    }
+}
+
 pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) -> ModuleExports<'a> {
     let mut declared_structs: HashMap<&'a str, StructInfo<'a>> = HashMap::new();
     let mut declared_enums: HashMap<&'a str, EnumInfo<'a>> = HashMap::new();
     let mut declared_aliases: HashMap<&'a str, ast::Type<'a>> = HashMap::new();
     let mut declared_newtypes: HashMap<&'a str, NewtypeInfo> = HashMap::new();
     let mut receiver_methods: HashMap<(&'a str, &'a str), MethodInfo<'a>> = HashMap::new();
+    // Nominal identity is the declaring AST node (mirrors the `export { X }`
+    // opaque lookup below), collected once so a `.d.ds` declared function's
+    // own signature can name a sibling opaque declared in the same file
+    // (rfd#39 2026-09-16 amendment).
+    let mut declared_opaques: HashMap<&'a str, Type<'a>> = HashMap::new();
+    for stmt in program.statements.iter() {
+        match stmt {
+            ast::Stmt::Opaque { name, .. } => {
+                declared_opaques.insert(
+                    *name,
+                    Type::Opaque {
+                        name,
+                        identity: stmt as *const _ as usize,
+                    },
+                );
+            }
+            ast::Stmt::Export {
+                decl: ast::ExportDecl::Opaque { name },
+                ..
+            } => {
+                declared_opaques.insert(
+                    *name,
+                    Type::Opaque {
+                        name,
+                        identity: stmt as *const _ as usize,
+                    },
+                );
+            }
+            _ => {}
+        }
+    }
 
     for stmt in program.statements.iter() {
         match stmt {
@@ -1580,10 +1715,22 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
                 type_params,
                 params,
                 return_type,
+                is_default,
                 ..
             } => {
+                // `export default fn Page() { … }` exports under the key
+                // `"default"`; the local binding stays `Page` (rfd#12 ESM
+                // alignment amendment). Record the declared name so an
+                // importer whose local name differs from it gets a warning
+                // (the greppability rule).
+                let external = if *is_default {
+                    exports.default_export_declared_name = Some(*name);
+                    "default"
+                } else {
+                    *name
+                };
                 if let Some(ty) = inferred_globals.get(name) {
-                    exports.values.insert(*name, ty.clone());
+                    exports.values.insert(external, ty.clone());
                 } else if type_params.is_empty() {
                     let param_types: Vec<Type<'a>> = params
                         .iter()
@@ -1616,7 +1763,7 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
                         })
                         .unwrap_or(Type::Infer);
                     exports.values.insert(
-                        *name,
+                        external,
                         Type::Function {
                             params: param_types,
                             ret: Box::new(ret),
@@ -1624,13 +1771,75 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
                         },
                     );
                 } else {
-                    exports.values.insert(*name, Type::Infer);
+                    exports.values.insert(external, Type::Infer);
                 }
+            }
+            // `export opaque type Name` / `export fn` / `export total fn`
+            // (rfd#39 2026-09-16 amendment, `.d.ds` declaration files). The
+            // module graph desugars these into the same graph-node shape an
+            // ordinary `.ds` export gets (dsc#274): the sibling `.mjs`'s
+            // structural shape is checked separately (`crate::summon`'s
+            // reused machinery, invoked once per `.d.ds` module), so here we
+            // only need the declared type surface, not the JS itself.
+            ast::ExportDecl::Opaque { name } => {
+                if let Some(ty) = declared_opaques.get(name) {
+                    exports.opaques.insert(name, ty.clone());
+                }
+            }
+            ast::ExportDecl::Declare(function) => {
+                let param_types: Vec<Type<'a>> = function
+                    .params
+                    .iter()
+                    .map(|p| match &p.ty {
+                        Some(t) => substitute_opaques(
+                            ast_type_to_export_type(
+                                t,
+                                &declared_structs,
+                                &declared_enums,
+                                &declared_aliases,
+                                &declared_newtypes,
+                                &mut HashSet::new(),
+                            ),
+                            &declared_opaques,
+                        ),
+                        None => Type::Infer,
+                    })
+                    .collect();
+                let ret = exception_default(
+                    substitute_opaques(
+                        ast_type_to_export_type(
+                            &function.return_type,
+                            &declared_structs,
+                            &declared_enums,
+                            &declared_aliases,
+                            &declared_newtypes,
+                            &mut HashSet::new(),
+                        ),
+                        &declared_opaques,
+                    ),
+                    function.total,
+                );
+                exports.values.insert(
+                    function.name,
+                    Type::Function {
+                        params: param_types,
+                        ret: Box::new(ret),
+                        optional: 0,
+                    },
+                );
             }
             ast::ExportDecl::NamedGroup { names, .. } => {
                 for export_name in names.iter() {
                     let local = export_name.name;
                     let external = export_name.alias.unwrap_or(local);
+                    // `export default app` (desugared here) and the explicit
+                    // `export { app as default }` spelling both name this
+                    // module's default export declaration (rfd#12 ESM
+                    // alignment amendment); record it for the importer
+                    // rename warning.
+                    if external == "default" {
+                        exports.default_export_declared_name = Some(local);
+                    }
 
                     if let Some((members, type_params, span)) =
                         program.statements.iter().find_map(|stmt| match stmt {
@@ -2148,6 +2357,24 @@ impl<'a> Checker<'a> {
 
                 if spec.is_type_only {
                     self.type_only_imports.insert(local);
+                }
+
+                // Greppability rule (rfd#12 ESM alignment amendment): a
+                // default import may rename freely, since `default` has no
+                // name of its own to grep for, but a local name that
+                // disagrees with the declaration it names is a footgun for
+                // anyone reading the exporting module — warn, don't block.
+                if imported == "default" {
+                    if let Some(declared) = exports.default_export_declared_name {
+                        if declared != local {
+                            self.warning_span(
+                                spec.span,
+                                format!(
+                                    "default import `{local}` renames the exported declaration `{declared}`; import it as `{declared}` for greppability"
+                                ),
+                            );
+                        }
+                    }
                 }
 
                 if let Some(info) = exports.interfaces.get(imported) {
@@ -5241,6 +5468,55 @@ mod tests {
             "{}",
             errors[0].message
         );
+    }
+
+    #[test]
+    fn default_import_renamed_from_declaration_warns_for_greppability() {
+        // rfd#12 ESM alignment amendment (dsc#280): an import's local name
+        // may differ from the exported declaration's name; it is a warning,
+        // not an error, and the message names the declared name.
+        let arena = Bump::new();
+        let lib_source = "export default fn Page() number { return 1; }";
+        let lib_result = parse(lib_source, &arena);
+        assert!(lib_result.errors.is_empty(), "{:?}", lib_result.errors);
+        let lib_program = lib_result.program.expect("library parse produced no program");
+        let exports = collect_module_exports(&lib_program, &arena);
+        assert_eq!(exports.default_export_declared_name, Some("Page"));
+
+        let main_source = "import Component from \"./page.ds\"; const n: number = Component();";
+        let main_result = parse(main_source, &arena);
+        assert!(main_result.errors.is_empty(), "{:?}", main_result.errors);
+        let main_program = main_result.program.expect("main parse produced no program");
+        let mut imports = HashMap::new();
+        imports.insert("./page.ds", &exports);
+        let result = check_program_with_imports(&main_program, main_source, &imports);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.message.contains("Component") && w.message.contains("Page")),
+            "{:?}",
+            result.warnings
+        );
+    }
+
+    #[test]
+    fn default_import_matching_declared_name_has_no_warning() {
+        let arena = Bump::new();
+        let lib_source = "export default fn Page() number { return 1; }";
+        let lib_result = parse(lib_source, &arena);
+        let lib_program = lib_result.program.expect("library parse produced no program");
+        let exports = collect_module_exports(&lib_program, &arena);
+
+        let main_source = "import Page from \"./page.ds\"; const n: number = Page();";
+        let main_result = parse(main_source, &arena);
+        let main_program = main_result.program.expect("main parse produced no program");
+        let mut imports = HashMap::new();
+        imports.insert("./page.ds", &exports);
+        let result = check_program_with_imports(&main_program, main_source, &imports);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
     }
 
     #[test]

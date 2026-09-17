@@ -5,6 +5,13 @@ use serde_json::json;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tower_lsp::lsp_types::{
+    CodeActionContext, CodeActionKind, CodeActionOrCommand, CodeActionParams, Diagnostic,
+    DiagnosticSeverity, Position, Range, TextDocumentIdentifier, Url,
+};
+use tower_lsp::LanguageServer;
+
+use crate::handlers::Backend;
 
 fn temp_dir(prefix: &str) -> PathBuf {
     let nonce = SystemTime::now()
@@ -186,6 +193,20 @@ fn provides_annotation_hover_docs() {
     let hover = hover_for_annotation(src, offset).expect("annotation hover");
     assert!(hover.contains("@autoIncrement"));
     assert!(hover.contains("Requires an `int` field"));
+}
+
+#[test]
+fn builtin_completion_lists_every_console_method() {
+    // `console` is a global (rfd#44's console addition); its method names
+    // must appear in the flat builtin list this server always returns,
+    // reading the same `deka_syntax::console::METHODS` the checker enforces.
+    let items = builtin_completion_items();
+    for method in deka_syntax::console::METHODS {
+        assert!(
+            items.iter().any(|item| item.label == *method),
+            "completion is missing console method `{method}`"
+        );
+    }
 }
 
 #[test]
@@ -894,6 +915,66 @@ fn hover_returns_none_for_unbound_words() {
     assert!(hover_at(&HashMap::new(), source, "main.ds", "return").is_none());
 }
 
+/// rfd#39 2026-09-16 amendment, dsc#274: `import { scene } from "./three.mjs"`
+/// resolves the sibling `.d.ds` beside it — hover shows the *declared*
+/// signature, not a dead end, because `FsModuleLoader::resolve` is the one
+/// place that resolution happens and every project-aware caller shares it.
+#[test]
+fn hover_on_javascript_import_shows_the_declaration_file_signature() {
+    let (workspace, app) = project_workspace("dekascript_lsp_hover_d_ds");
+    fs::write(app.join("three.mjs"), "export function scene() { return \"s\"; }\n")
+        .expect("write three.mjs");
+    fs::write(app.join("three.d.ds"), "export total fn scene() string\n")
+        .expect("write three.d.ds");
+    let main = app.join("main.ds");
+    let source = "import { scene } from \"./three.mjs\"\nconst s = scene();\n";
+    fs::write(&main, source).expect("write main.ds");
+
+    let hover = hover_at(
+        &HashMap::new(),
+        source,
+        main.to_str().expect("main path"),
+        "scene(",
+    )
+    .expect("hover on a name declared only in a .d.ds");
+    assert!(
+        hover.contains("scene"),
+        "hover must show the declared signature: {hover}"
+    );
+    assert!(
+        hover.contains("./three.mjs"),
+        "hover must name the module the import came from: {hover}"
+    );
+    let _ = workspace;
+}
+
+/// Same resolution, for go-to-definition: `Ctrl+click` on a name declared
+/// only in a `.d.ds` lands in that file, not a "no definition" dead end.
+#[test]
+fn goto_definition_on_javascript_import_lands_in_the_declaration_file() {
+    let (workspace, app) = project_workspace("dekascript_lsp_definition_d_ds");
+    fs::write(app.join("three.mjs"), "export function scene() { return \"s\"; }\n")
+        .expect("write three.mjs");
+    let decl_path = app.join("three.d.ds");
+    fs::write(&decl_path, "export total fn scene() string\n").expect("write three.d.ds");
+    let main = app.join("main.ds");
+    let source = "import { scene } from \"./three.mjs\"\nconst s = scene();\n";
+    fs::write(&main, source).expect("write main.ds");
+
+    let offset = source.rfind("scene(").expect("needle present") + 1;
+    let location = entry_definition(
+        &HashMap::new(),
+        source,
+        main.to_str().expect("main path"),
+        offset,
+    )
+    .expect("definition of a name declared only in a .d.ds");
+    let expected_uri = Url::from_file_path(&decl_path).expect("decl uri");
+    assert_eq!(location.uri, expected_uri);
+    assert_eq!(location.range.start.line, 0);
+    let _ = workspace;
+}
+
 /// The scope query must see mid-edit source: `parse_recovering` keeps the
 /// declarations around a half-typed statement, so hover works while the file
 /// does not fully parse.
@@ -1089,4 +1170,51 @@ fn bridge_call_definition_points_into_the_materialized_host_decl_file() {
     let line_start = location.range.start.line as usize;
     let declared_line = contents.lines().nth(line_start).unwrap_or("");
     assert!(declared_line.contains("read_file"), "{declared_line}");
+}
+
+#[tokio::test]
+async fn code_action_replaces_retired_function_keyword_with_fn() {
+    let workspace = temp_dir("dekascript_lsp_function_keyword_quickfix");
+    fs::write(workspace.join("deka.json"), "{}\n").expect("write deka.json");
+    let file = workspace.join("main.ds");
+    fs::write(&file, "function hello() {}\n").expect("write main.ds");
+
+    let backend = test_backend(&workspace);
+    let uri = Url::from_file_path(&file).expect("file uri");
+    let range = Range::new(Position::new(0, 0), Position::new(0, 8));
+    let params = CodeActionParams {
+        text_document: TextDocumentIdentifier { uri: uri.clone() },
+        range,
+        context: CodeActionContext {
+            diagnostics: vec![Diagnostic {
+                range,
+                severity: Some(DiagnosticSeverity::ERROR),
+                message: deka_syntax::parse::FUNCTION_KEYWORD_ERROR.to_string(),
+                ..Diagnostic::default()
+            }],
+            only: Some(vec![CodeActionKind::QUICKFIX]),
+            trigger_kind: None,
+        },
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+    };
+
+    let response = Backend::code_action(&backend, params)
+        .await
+        .expect("code_action should succeed");
+    let actions = response.expect("expected a quick fix for the retired keyword");
+    assert_eq!(actions.len(), 1, "expected one quick fix, got {actions:?}");
+
+    let CodeActionOrCommand::CodeAction(action) = &actions[0] else {
+        panic!("expected a code action, got {actions:?}");
+    };
+    assert_eq!(action.title, "Replace `function` with `fn`");
+    assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+
+    let edit = action.edit.as_ref().expect("action should carry an edit");
+    let changes = edit.changes.as_ref().expect("edit should have changes");
+    let edits = changes.get(&uri).expect("expected edits for the request uri");
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].range, range);
+    assert_eq!(edits[0].new_text, "fn");
 }

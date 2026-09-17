@@ -3145,8 +3145,8 @@ mod tests {
         let result = compile_module_graph(&page, &InMemoryLoader { files, aliases })
             .expect("client:load is the island root for the whole component subtree");
         assert!(
-            result.modules[&page].contains("\"client:load\": true"),
-            "client directive must reach emitted island code:\n{}",
+            !result.modules[&page].contains("client:load"),
+            "client directives are consumed by the runtime and must not leak into emitted props:\n{}",
             result.modules[&page]
         );
         assert!(
@@ -3208,8 +3208,8 @@ mod tests {
             result.modules[&card]
         );
         assert!(
-            result.modules[&page].contains("\"client:load\": true"),
-            "{}",
+            !result.modules[&page].contains("client:load"),
+            "client directives must not leak into emitted props:\n{}",
             result.modules[&page]
         );
     }

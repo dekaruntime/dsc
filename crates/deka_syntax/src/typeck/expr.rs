@@ -234,6 +234,13 @@ pub(super) fn primitive_member<'a>(
         // `.getType()` (rfd#41, deka#529). Only `toString()` is in scope for
         // this slice; the rest of the descriptor API is deferred.
         ("Type", "toString") => PrimitiveMember::BuiltinMethod(fn0(string_ty)),
+        // `import.meta` (rfd#12 amendment, dsc#282). `env` is deliberately
+        // absent (zero environment variables) and any other property is
+        // rejected with a dedicated message in `resolve_primitive_field`,
+        // not here — this table only ever supplies what exists.
+        ("import.meta", "url" | "dirname" | "filename") => PrimitiveMember::Property(string_ty),
+        ("import.meta", "main") => PrimitiveMember::Property(boolean_ty),
+        ("import.meta", "resolve") => PrimitiveMember::BuiltinMethod(fn1(&string_ty, &string_ty)),
         ("string", "length") => PrimitiveMember::Property(number_ty),
         // `bytes` is a Uint8Array view (dsc#88): integer indexing reads a
         // byte, and `.length` is the octet count (dsc#92). RFD 15 lists
@@ -1024,6 +1031,15 @@ impl<'a> Checker<'a> {
                 *span,
                 None,
             ),
+            // `import.meta` (rfd#12 amendment, dsc#282): a reserved nominal
+            // type, resolved through the same primitive-member table as
+            // `string`/`number`/`Array` so `.url`, `.dirname`, `.filename`,
+            // `.main` and `.resolve(...)` share one lookup with everything
+            // else's field access (`check_field_access` ->
+            // `resolve_primitive_field` -> `primitive_member`). The bare node
+            // itself (not accessed through a field) has no use, so it types
+            // as this marker rather than something constructible.
+            ast::Expr::ImportMeta { .. } => Type::Named { name: "import.meta" },
             _ => {
                 self.error_at_expr(expr, "unsupported expression in v2 typeck");
                 Type::Error
@@ -1733,6 +1749,28 @@ impl<'a> Checker<'a> {
             }
             "string" | "number" | "boolean" => {
                 self.error_span(span, format!("`{type_name}` has no field `{field}`"));
+                Type::Error
+            }
+            // `import.meta` (rfd#12 amendment, dsc#282). `env` gets its own
+            // message naming the invariant it violates; every other unknown
+            // property gets the struct-shaped list of what does exist.
+            "import.meta" if field == "env" => {
+                self.error_span(
+                    span,
+                    "`import.meta.env` does not exist; DekaScript has zero environment \
+                     variables (rfd#12)"
+                        .to_string(),
+                );
+                Type::Error
+            }
+            "import.meta" => {
+                self.error_span(
+                    span,
+                    format!(
+                        "`import.meta` has no property `{field}` \
+                         (available: `url`, `dirname`, `filename`, `main`, `resolve`)"
+                    ),
+                );
                 Type::Error
             }
             // The bytes catalog is deliberately closed at `length` (dsc#92):

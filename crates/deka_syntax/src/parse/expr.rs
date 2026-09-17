@@ -509,6 +509,7 @@ impl<'a> Parser<'a> {
                     span: self.span_from(start, start_byte),
                 })
             }
+            TokenKind::Import => self.parse_import_meta(start, start_byte),
             TokenKind::Super => {
                 // `super` is a hard keyword; in expression position there is
                 // nothing it can validly start. It is reserved for
@@ -553,6 +554,40 @@ impl<'a> Parser<'a> {
             }
             _ => false,
         }
+    }
+
+    /// Parse the `import.meta` meta-property (rfd#12 amendment, dsc#282).
+    ///
+    /// `import` only starts a statement (`import { a } from "…"`) elsewhere in
+    /// the grammar; in expression position the only legal continuation is
+    /// `.meta`. Dynamic `import(...)` of a computed specifier stays banned
+    /// (RFD 12), so it gets its own message here rather than the generic
+    /// "expected expression" fallback.
+    fn parse_import_meta(&mut self, start: crate::ast::Pos, start_byte: usize) -> Option<Expr<'a>> {
+        self.advance(); // `import`
+        if self.at(TokenKind::LParen) {
+            self.error(
+                "dynamic `import(...)` of a computed specifier is not supported; \
+                 imports must be static (rfd#12)"
+                    .to_string(),
+            );
+            return None;
+        }
+        if !self.eat(TokenKind::Dot) {
+            self.error(format!(
+                "expected `.meta` after `import`, found `{}`",
+                token_name(self.current_kind())
+            ));
+            return None;
+        }
+        let name = self.expect_field_name()?;
+        if name != "meta" {
+            self.error(format!("expected `import.meta`, found `import.{name}`"));
+            return None;
+        }
+        Some(Expr::ImportMeta {
+            span: self.span_from(start, start_byte),
+        })
     }
 
     /// Parse an `unsafe { ... }` raw JavaScript block.

@@ -243,6 +243,7 @@ pub fn walk_expr(expr: &Expr<'_>, visit: &mut dyn FnMut(&Expr<'_>)) {
         | Expr::None { .. }
         | Expr::Identifier { .. }
         | Expr::Unsafe { .. }
-        | Expr::JsxText { .. } => {}
+        | Expr::JsxText { .. }
+        | Expr::ImportMeta { .. } => {}
     }
 }

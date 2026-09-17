@@ -457,7 +457,8 @@ fn transform_expr<'a>(
         | Expr::String { .. }
         | Expr::Boolean { .. }
         | Expr::None { .. }
-        | Expr::Identifier { .. } => return expr,
+        | Expr::Identifier { .. }
+        | Expr::ImportMeta { .. } => return expr,
 
         Expr::Binary {
             op,
@@ -1211,7 +1212,8 @@ fn lower_expr<'a>(
         | Expr::String { .. }
         | Expr::Boolean { .. }
         | Expr::None { .. }
-        | Expr::Identifier { .. } => return expr,
+        | Expr::Identifier { .. }
+        | Expr::ImportMeta { .. } => return expr,
 
         Expr::Binary {
             op,

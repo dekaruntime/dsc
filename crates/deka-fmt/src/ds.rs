@@ -1060,6 +1060,7 @@ impl<'src> Formatter<'src> {
             // compile, so running it destroyed working code (deka#453).
             Expr::None { .. } => "None".to_string(),
             Expr::Identifier { name, .. } => name.to_string(),
+            Expr::ImportMeta { .. } => "import.meta".to_string(),
             Expr::Binary {
                 op, left, right, ..
             } => {

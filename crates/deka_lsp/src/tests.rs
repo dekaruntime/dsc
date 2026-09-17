@@ -5,6 +5,13 @@ use serde_json::json;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tower_lsp::lsp_types::{
+    CodeActionContext, CodeActionKind, CodeActionOrCommand, CodeActionParams, Diagnostic,
+    DiagnosticSeverity, Position, Range, TextDocumentIdentifier, Url,
+};
+use tower_lsp::LanguageServer;
+
+use crate::handlers::Backend;
 
 fn temp_dir(prefix: &str) -> PathBuf {
     let nonce = SystemTime::now()
@@ -1163,4 +1170,51 @@ fn bridge_call_definition_points_into_the_materialized_host_decl_file() {
     let line_start = location.range.start.line as usize;
     let declared_line = contents.lines().nth(line_start).unwrap_or("");
     assert!(declared_line.contains("read_file"), "{declared_line}");
+}
+
+#[tokio::test]
+async fn code_action_replaces_retired_function_keyword_with_fn() {
+    let workspace = temp_dir("dekascript_lsp_function_keyword_quickfix");
+    fs::write(workspace.join("deka.json"), "{}\n").expect("write deka.json");
+    let file = workspace.join("main.ds");
+    fs::write(&file, "function hello() {}\n").expect("write main.ds");
+
+    let backend = test_backend(&workspace);
+    let uri = Url::from_file_path(&file).expect("file uri");
+    let range = Range::new(Position::new(0, 0), Position::new(0, 8));
+    let params = CodeActionParams {
+        text_document: TextDocumentIdentifier { uri: uri.clone() },
+        range,
+        context: CodeActionContext {
+            diagnostics: vec![Diagnostic {
+                range,
+                severity: Some(DiagnosticSeverity::ERROR),
+                message: deka_syntax::parse::FUNCTION_KEYWORD_ERROR.to_string(),
+                ..Diagnostic::default()
+            }],
+            only: Some(vec![CodeActionKind::QUICKFIX]),
+            trigger_kind: None,
+        },
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+    };
+
+    let response = Backend::code_action(&backend, params)
+        .await
+        .expect("code_action should succeed");
+    let actions = response.expect("expected a quick fix for the retired keyword");
+    assert_eq!(actions.len(), 1, "expected one quick fix, got {actions:?}");
+
+    let CodeActionOrCommand::CodeAction(action) = &actions[0] else {
+        panic!("expected a code action, got {actions:?}");
+    };
+    assert_eq!(action.title, "Replace `function` with `fn`");
+    assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+
+    let edit = action.edit.as_ref().expect("action should carry an edit");
+    let changes = edit.changes.as_ref().expect("edit should have changes");
+    let edits = changes.get(&uri).expect("expected edits for the request uri");
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].range, range);
+    assert_eq!(edits[0].new_text, "fn");
 }

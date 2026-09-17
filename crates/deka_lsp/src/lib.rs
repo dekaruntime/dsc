@@ -12,12 +12,13 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 #[cfg(feature = "native")]
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
-    Diagnostic, DiagnosticOptions, DiagnosticServerCapabilities, DiagnosticSeverity,
-    DidChangeTextDocumentParams, DidOpenTextDocumentParams, DocumentDiagnosticParams,
-    DocumentDiagnosticReport, DocumentDiagnosticReportResult, Documentation,
-    FullDocumentDiagnosticReport, GotoDefinitionParams, GotoDefinitionResponse, Hover,
-    HoverContents, InitializeParams, InitializeResult, InitializedParams, InsertTextFormat,
+    CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams, CodeActionProviderCapability,
+    CodeActionResponse, CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams,
+    CompletionResponse, Diagnostic, DiagnosticOptions, DiagnosticServerCapabilities,
+    DiagnosticSeverity, DidChangeTextDocumentParams, DidOpenTextDocumentParams,
+    DocumentDiagnosticParams, DocumentDiagnosticReport, DocumentDiagnosticReportResult,
+    Documentation, FullDocumentDiagnosticReport, GotoDefinitionParams, GotoDefinitionResponse,
+    Hover, HoverContents, InitializeParams, InitializeResult, InitializedParams, InsertTextFormat,
     Location, MarkupContent, MarkupKind, MessageType, OneOf, Position, Range, ReferenceParams,
     RelatedFullDocumentDiagnosticReport, RenameParams, ServerCapabilities,
     TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Url, WorkspaceEdit,

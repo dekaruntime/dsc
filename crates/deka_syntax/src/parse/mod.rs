@@ -1813,6 +1813,161 @@ mod tests {
     }
 
     #[test]
+    fn parse_export_default_function() {
+        // rfd#12 ESM alignment amendment (dsc#280): a default export of a
+        // named function declaration keeps its own local name, exported
+        // under the sentinel key `"default"`.
+        let arena = Bump::new();
+        let result = parse("export default fn Page() string { return \"hi\"; }", &arena);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[0] {
+            Stmt::Export { decl, .. } => match decl {
+                crate::ast::ExportDecl::Function {
+                    name, is_default, ..
+                } => {
+                    assert_eq!(name, &"Page");
+                    assert!(is_default);
+                }
+                _ => panic!("expected default function export"),
+            },
+            _ => panic!("expected export"),
+        }
+    }
+
+    #[test]
+    fn parse_export_default_async_function() {
+        let arena = Bump::new();
+        let result = parse(
+            "export default async fn Page() string { return \"hi\"; }",
+            &arena,
+        );
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[0] {
+            Stmt::Export { decl, .. } => match decl {
+                crate::ast::ExportDecl::Function {
+                    is_async,
+                    is_default,
+                    ..
+                } => {
+                    assert!(is_async);
+                    assert!(is_default);
+                }
+                _ => panic!("expected default function export"),
+            },
+            _ => panic!("expected export"),
+        }
+    }
+
+    #[test]
+    fn parse_export_default_named_binding() {
+        // `export default app` desugars to `export { app as default }`
+        // (rfd#12 ESM alignment amendment): it is a named binding, not a
+        // new AST shape.
+        let arena = Bump::new();
+        let result = parse("const app = 1; export default app;", &arena);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[1] {
+            Stmt::Export { decl, .. } => match decl {
+                crate::ast::ExportDecl::NamedGroup { names, source } => {
+                    assert_eq!(names.len(), 1);
+                    assert_eq!(names[0].name, "app");
+                    assert_eq!(names[0].alias, Some("default"));
+                    assert!(source.is_none());
+                }
+                _ => panic!("expected named-group export"),
+            },
+            _ => panic!("expected export"),
+        }
+    }
+
+    #[test]
+    fn parse_export_default_anonymous_function_rejected() {
+        let arena = Bump::new();
+        let result = parse("export default fn () { return 1; }", &arena);
+        assert!(
+            result.errors.iter().any(|e| e.message.contains("name")),
+            "{:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn parse_export_default_object_literal_rejected() {
+        let arena = Bump::new();
+        let result = parse("export default { a: 1 };", &arena);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.message.contains("named declaration") || e.message.contains("named binding")),
+            "{:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn parse_export_reexport_default_as_named() {
+        // `export { default as json } from "./json"` (rfd#12 ESM alignment
+        // amendment item 4) parses through the existing named-group grammar:
+        // `default` is a plain identifier token, not a keyword.
+        let arena = Bump::new();
+        let result = parse("export { default as json } from \"./json\";", &arena);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[0] {
+            Stmt::Export { decl, .. } => match decl {
+                crate::ast::ExportDecl::NamedGroup { names, source } => {
+                    assert_eq!(names[0].name, "default");
+                    assert_eq!(names[0].alias, Some("json"));
+                    assert_eq!(source, &Some("./json"));
+                }
+                _ => panic!("expected named-group export"),
+            },
+            _ => panic!("expected export"),
+        }
+    }
+
+    #[test]
+    fn parse_import_default() {
+        let arena = Bump::new();
+        let result = parse("import Page from \"./page.ds\";", &arena);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[0] {
+            Stmt::Import {
+                specifiers, source, ..
+            } => {
+                assert_eq!(source, &"./page.ds");
+                assert_eq!(specifiers.len(), 1);
+                assert_eq!(specifiers[0].imported, "default");
+                assert_eq!(specifiers[0].local, "Page");
+            }
+            _ => panic!("expected import"),
+        }
+    }
+
+    #[test]
+    fn parse_import_default_mixed() {
+        let arena = Bump::new();
+        let result = parse("import Page, { helper } from \"./page.ds\";", &arena);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[0] {
+            Stmt::Import { specifiers, .. } => {
+                assert_eq!(specifiers.len(), 2);
+                assert_eq!(specifiers[0].imported, "default");
+                assert_eq!(specifiers[0].local, "Page");
+                assert_eq!(specifiers[1].imported, "helper");
+                assert_eq!(specifiers[1].local, "helper");
+            }
+            _ => panic!("expected import"),
+        }
+    }
+
+    #[test]
     fn parse_export_named_group() {
         let arena = Bump::new();
         let result = parse("const answer = 42; export { answer };", &arena);
@@ -1832,15 +1987,15 @@ mod tests {
     }
 
     #[test]
-    fn parse_export_default_rejected() {
+    fn parse_export_default_non_binding_expression_rejected() {
+        // Default exports are now allowed (rfd#12 ESM alignment amendment,
+        // dsc#280), but only as a named declaration or a named binding — a
+        // bare literal is neither.
         let arena = Bump::new();
         let result = parse("export default 42;", &arena);
         assert!(!result.errors.is_empty());
         assert!(
-            result
-                .errors
-                .iter()
-                .any(|e| e.message.contains("default exports")),
+            result.errors.iter().any(|e| e.message.contains("named")),
             "{:?}",
             result.errors
         );

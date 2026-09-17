@@ -791,8 +791,12 @@ impl<'src> Formatter<'src> {
                 return_type,
                 body,
                 is_async,
+                is_default,
             } => {
                 self.write("export ");
+                if *is_default {
+                    self.write("default ");
+                }
                 self.fmt_fn_sig(
                     *is_async,
                     Some(name),
@@ -1662,10 +1666,26 @@ fn import_to_string(stmt: &Stmt<'_>) -> String {
     };
 
     if specifiers.is_empty() {
-        format!("import \"{source}\"")
-    } else {
-        let parts: Vec<String> = specifiers.iter().map(import_spec_to_string).collect();
-        format!("import {{ {} }} from \"{source}\"", parts.join(", "))
+        return format!("import \"{source}\"");
+    }
+    // `import Name from "…"` / `import Name, { a } from "…"` (rfd#12 ESM
+    // alignment amendment): render the specifier importing the module's
+    // `"default"` key as a default binding, not inside `{ … }`.
+    let default_local = specifiers
+        .iter()
+        .find(|spec| spec.imported == "default")
+        .map(|spec| spec.local);
+    let named: Vec<String> = specifiers
+        .iter()
+        .filter(|spec| spec.imported != "default")
+        .map(import_spec_to_string)
+        .collect();
+    match (default_local, named.is_empty()) {
+        (Some(local), true) => format!("import {local} from \"{source}\""),
+        (Some(local), false) => {
+            format!("import {local}, {{ {} }} from \"{source}\"", named.join(", "))
+        }
+        (None, _) => format!("import {{ {} }} from \"{source}\"", named.join(", ")),
     }
 }
 

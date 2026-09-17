@@ -164,13 +164,16 @@ fn imported_name_hover(
     let target = project_module_source(Path::new(file_path), module_spec, &open_documents)?;
     let arena = bumpalo::Bump::new();
     let target_program = deka_syntax::parse_recovering(&target, &arena).program?;
-    if !is_exported(&target_program, imported) {
-        return None;
-    }
+    // For an ordinary named import `imported` already is the declared name;
+    // for `import X from "./m"` (rfd#12 ESM alignment amendment) `imported`
+    // is the sentinel key `"default"`, which resolves to whatever name the
+    // exporting module actually declared (`export default fn Page() { … }`
+    // declares `Page`, not `default`).
+    let declared = exported_declared_name(&target_program, imported)?;
     // Module-level items are collected ahead of (and deduped before) any
     // descended locals, so the module's own declaration wins by name.
     let declarations = deka_syntax::declarations_in_scope_at_offset(&target_program, target.len());
-    let decl = declarations.iter().find(|decl| decl.name == imported)?;
+    let decl = declarations.iter().find(|decl| decl.name == declared)?;
     Some(format!(
         "{}\nimported from `{module_spec}`",
         fenced(&decl.detail)
@@ -197,26 +200,42 @@ pub(crate) fn resolve_import_spec<'a>(
     })
 }
 
-/// True when `name` is on the module's export surface: an `export fn` /
-/// `export const` declaration or an `export { … }` group (including
-/// re-exports). `pub(crate)` so go-to-definition (`definition.rs`) shares
-/// this instead of re-deriving it.
-pub(crate) fn is_exported(program: &deka_syntax::Program, name: &str) -> bool {
-    program.statements.iter().any(|stmt| {
+/// The declared name behind an export key: for most exports the key and the
+/// declared name are the same, but a default export's key is always
+/// `"default"` while the declaration keeps its own name (rfd#12 ESM
+/// alignment amendment). Declaration files (rfd#39 2026-09-16 amendment)
+/// export ambient `Opaque` names and `declare fn` signatures the same way.
+/// Returns `None` when `exported` is not on the module's export surface at
+/// all. `pub(crate)` so go-to-definition (`definition.rs`) shares this
+/// instead of re-deriving it.
+pub(crate) fn exported_declared_name<'a>(
+    program: &'a deka_syntax::Program<'a>,
+    exported: &str,
+) -> Option<&'a str> {
+    program.statements.iter().find_map(|stmt| {
         let Stmt::Export { decl, .. } = stmt else {
-            return false;
+            return None;
         };
         match decl {
-            ExportDecl::Const { name: exported, .. }
-            | ExportDecl::Function {
-                name: exported, ..
-            } => *exported == name,
+            ExportDecl::Const { name, .. } if *name == exported => Some(*name),
+            ExportDecl::Function {
+                name,
+                is_default: true,
+                ..
+            } if exported == "default" => Some(*name),
+            ExportDecl::Function {
+                name,
+                is_default: false,
+                ..
+            } if *name == exported => Some(*name),
             ExportDecl::NamedGroup { names, .. } => names
                 .iter()
-                .any(|exported| exported.alias.unwrap_or(exported.name) == name),
+                .find(|n| n.alias.unwrap_or(n.name) == exported)
+                .map(|n| n.name),
             // `.d.ds` declaration files (rfd#39 2026-09-16 amendment).
-            ExportDecl::Opaque { name: exported } => *exported == name,
-            ExportDecl::Declare(function) => function.name == name,
+            ExportDecl::Opaque { name } if *name == exported => Some(*name),
+            ExportDecl::Declare(function) if function.name == exported => Some(function.name),
+            _ => None,
         }
     })
 }

@@ -26,12 +26,14 @@ pub(crate) fn entry_definition(
         project_module_location(Path::new(file_path), module_spec, &open_documents)?;
     let target_arena = bumpalo::Bump::new();
     let target_program = deka_syntax::parse_recovering(&target_text, &target_arena).program?;
-    if !is_exported(&target_program, imported) {
-        return None;
-    }
+    // `imported` is the exported *key* (the sentinel `"default"` for
+    // `import X from "./m"`, rfd#12 ESM alignment amendment); resolve it to
+    // the name the target module actually declared before looking the
+    // declaration up, the same way hover does.
+    let declared = exported_declared_name(&target_program, imported)?;
     let declarations =
         deka_syntax::declarations_in_scope_at_offset(&target_program, target_text.len());
-    let decl = declarations.iter().find(|decl| decl.name == imported)?;
+    let decl = declarations.iter().find(|decl| decl.name == declared)?;
     let target_uri = Url::from_file_path(&target_path).ok()?;
     let line_index = LineIndex::new(&target_text);
     Some(Location {

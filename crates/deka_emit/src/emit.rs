@@ -3135,8 +3135,12 @@ impl<'a> Emitter<'a> {
                         params,
                         body,
                         is_async,
+                        is_default,
                         ..
                     } => {
+                        if *is_default {
+                            self.out.push_str("default ");
+                        }
                         if *is_async {
                             self.out.push_str("async function ");
                         } else {
@@ -3250,20 +3254,39 @@ impl<'a> Emitter<'a> {
                     if kept.is_empty() {
                         return Ok(());
                     }
-                    self.out.push_str("import { ");
-                    for (i, spec) in kept.iter().enumerate() {
-                        if i > 0 {
+                    // `import Name from "…"` / `import Name, { a } from
+                    // "…"` (rfd#12 ESM alignment amendment): the specifier
+                    // importing the module's `"default"` key renders as a
+                    // default binding rather than inside `{ … }`.
+                    let default_spec = kept.iter().find(|spec| spec.imported == "default");
+                    let named: Vec<_> = kept
+                        .iter()
+                        .filter(|spec| spec.imported != "default")
+                        .collect();
+                    self.out.push_str("import ");
+                    if let Some(spec) = default_spec {
+                        self.out.push_str(spec.local);
+                        if !named.is_empty() {
                             self.out.push_str(", ");
                         }
-                        if spec.imported == spec.local {
-                            self.out.push_str(spec.imported);
-                        } else {
-                            self.out.push_str(spec.imported);
-                            self.out.push_str(" as ");
-                            self.out.push_str(spec.local);
-                        }
                     }
-                    self.out.push_str(" } from \"");
+                    if default_spec.is_none() || !named.is_empty() {
+                        self.out.push_str("{ ");
+                        for (i, spec) in named.iter().enumerate() {
+                            if i > 0 {
+                                self.out.push_str(", ");
+                            }
+                            if spec.imported == spec.local {
+                                self.out.push_str(spec.imported);
+                            } else {
+                                self.out.push_str(spec.imported);
+                                self.out.push_str(" as ");
+                                self.out.push_str(spec.local);
+                            }
+                        }
+                        self.out.push_str(" }");
+                    }
+                    self.out.push_str(" from \"");
                     self.out.push_str(&resolved_source);
                     self.out.push_str("\";");
                 }

@@ -1679,15 +1679,15 @@ assert.equal(threw, true, `expected throw, got ${uncovered}`);
             "fn Counter() ReactNode { return <button onClick={click}>x</button>; }\nfn click() {}\nconst page = <Counter client:load />;",
         );
         assert!(
-            !out.contains("client:load"),
-            "client directives are consumed by the runtime and must not leak into props: {out}"
+            out.contains("\"client:load\": true"),
+            "island directive must reach component props so the runtime can wrap it: {out}"
         );
         assert!(
             out.contains("jsx(\"button\", {\"data-deka-id\": \"module:Counter/i0\", \"onClick\": click, \"children\": \"x\"})"),
             "hydration walk matches host elements by data-deka-id: {out}"
         );
         assert!(
-            out.contains("jsx(Counter, {})"),
+            out.contains("jsx(Counter, {\"client:load\": true})"),
             "component tags are not host elements: {out}"
         );
     }
@@ -1827,11 +1827,11 @@ assert.equal(threw, true, `expected throw, got ${uncovered}`);
     }
 
     #[test]
-    fn emit_jsx_client_directive_is_stripped_from_props() {
+    fn emit_jsx_client_directive_keeps_directive_on_component_props() {
         let out = parse_and_emit("const el = <Cart client:load userId={id} />;");
         assert!(
-            !out.contains("client:load"),
-            "client directives must not leak into emitted props: {out}"
+            out.contains("\"client:load\": true"),
+            "component tags must keep the directive for the island runtime: {out}"
         );
         assert!(
             out.contains("\"userId\": id"),
@@ -1844,40 +1844,21 @@ assert.equal(threw, true, `expected throw, got ${uncovered}`);
     }
 
     #[test]
-    fn emit_jsx_client_directive_strips_all_suffixes() {
+    fn emit_jsx_client_directive_keeps_all_suffixes_on_component() {
         let out = parse_and_emit(
             "const el = <Cart client:load client:visible title=\"hi\" />;",
         );
         assert!(
-            !out.contains("client:load"),
-            "client:load must be stripped: {out}"
+            out.contains("\"client:load\": true"),
+            "client:load must stay on component props: {out}"
         );
         assert!(
-            !out.contains("client:visible"),
-            "client:visible must be stripped: {out}"
+            out.contains("\"client:visible\": true"),
+            "client:visible must stay on component props: {out}"
         );
         assert!(
             out.contains("\"title\": \"hi\""),
             "non-directive props must still emit: {out}"
-        );
-    }
-
-    #[test]
-    fn emit_jsx_client_directive_strips_on_host_elements() {
-        let out = parse_and_emit(
-            "fn click() {}\nconst el = <button client:load onClick={click}>x</button>;",
-        );
-        assert!(
-            !out.contains("client:load"),
-            "client directives must not leak onto host elements: {out}"
-        );
-        assert!(
-            out.contains("\"onClick\": click"),
-            "non-directive host props must still emit: {out}"
-        );
-        assert!(
-            out.contains("\"data-deka-id\""),
-            "host elements inside an island must keep their hydration marker: {out}"
         );
     }
 

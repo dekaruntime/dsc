@@ -625,6 +625,13 @@ pub fn check_module_graph_with_options(
             continue;
         }
         if let Some(program) = parse_result.program {
+            let directive_errors = crate::validate_client_directives(&program, &module.source);
+            if !directive_errors.is_empty() {
+                for d in directive_errors {
+                    errors.push(ModuleDiagnostic::prefixed(module.path.clone(), d));
+                }
+                continue;
+            }
             programs.insert(module.path.clone(), program);
         }
     }
@@ -3145,8 +3152,8 @@ mod tests {
         let result = compile_module_graph(&page, &InMemoryLoader { files, aliases })
             .expect("client:load is the island root for the whole component subtree");
         assert!(
-            !result.modules[&page].contains("client:load"),
-            "client directives are consumed by the runtime and must not leak into emitted props:\n{}",
+            result.modules[&page].contains("\"client:load\": true"),
+            "client directive must reach emitted island code so the runtime can wrap the component:\n{}",
             result.modules[&page]
         );
         assert!(
@@ -3208,9 +3215,36 @@ mod tests {
             result.modules[&card]
         );
         assert!(
-            !result.modules[&page].contains("client:load"),
-            "client directives must not leak into emitted props:\n{}",
+            result.modules[&page].contains("\"client:load\": true"),
+            "client directive must reach emitted island code so the runtime can wrap the component:\n{}",
             result.modules[&page]
+        );
+    }
+
+    #[test]
+    fn graph_client_directive_on_host_element_is_an_error() {
+        let page = PathBuf::from("/project/page.dsx");
+        let mut files = HashMap::new();
+        files.insert(
+            page.clone(),
+            "const page = <button client:load>hi</button>;".to_string(),
+        );
+
+        let errors = compile_module_graph(&page, &InMemoryLoader { files, aliases: HashMap::new() })
+            .expect_err("client:* on a host element must be a compile error");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let error = &errors[0];
+        assert!(
+            error.message.contains("client:load")
+                && error.message.contains("<button>")
+                && error.message.contains("component tags"),
+            "{}",
+            error.message
+        );
+        assert_eq!(
+            (error.line, error.column, error.underline_length),
+            (1, 22, 11),
+            "{error:?}"
         );
     }
 }

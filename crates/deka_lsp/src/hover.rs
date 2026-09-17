@@ -58,16 +58,7 @@ fn imported_name_hover(
     program: &deka_syntax::Program,
     local: &str,
 ) -> Option<String> {
-    let (imported, module_spec) = program.statements.iter().find_map(|stmt| {
-        let Stmt::Import {
-            specifiers, source, ..
-        } = stmt
-        else {
-            return None;
-        };
-        let spec = specifiers.iter().find(|spec| spec.local == local)?;
-        Some((spec.imported, *source))
-    })?;
+    let (imported, module_spec) = resolve_import_spec(program, local)?;
     let open_documents = open_document_paths(documents);
     let target = project_module_source(Path::new(file_path), module_spec, &open_documents)?;
     let arena = bumpalo::Bump::new();
@@ -85,10 +76,31 @@ fn imported_name_hover(
     ))
 }
 
+/// The specifier under which `local` was imported (`import { imported as
+/// local } from "module_spec"`): the exporting module's own name for it, and
+/// the module specifier. Shared by hover and go-to-definition (`definition.rs`)
+/// so both resolve the same import the same way.
+pub(crate) fn resolve_import_spec<'a>(
+    program: &'a deka_syntax::Program,
+    local: &str,
+) -> Option<(&'a str, &'a str)> {
+    program.statements.iter().find_map(|stmt| {
+        let Stmt::Import {
+            specifiers, source, ..
+        } = stmt
+        else {
+            return None;
+        };
+        let spec = specifiers.iter().find(|spec| spec.local == local)?;
+        Some((spec.imported, *source))
+    })
+}
+
 /// True when `name` is on the module's export surface: an `export fn` /
 /// `export const` declaration or an `export { … }` group (including
-/// re-exports).
-fn is_exported(program: &deka_syntax::Program, name: &str) -> bool {
+/// re-exports). `pub(crate)` so go-to-definition (`definition.rs`) shares
+/// this instead of re-deriving it.
+pub(crate) fn is_exported(program: &deka_syntax::Program, name: &str) -> bool {
     program.statements.iter().any(|stmt| {
         let Stmt::Export { decl, .. } = stmt else {
             return false;
@@ -101,6 +113,9 @@ fn is_exported(program: &deka_syntax::Program, name: &str) -> bool {
             ExportDecl::NamedGroup { names, .. } => names
                 .iter()
                 .any(|exported| exported.alias.unwrap_or(exported.name) == name),
+            // `.d.ds` declaration files (rfd#39 2026-09-16 amendment).
+            ExportDecl::Opaque { name: exported } => *exported == name,
+            ExportDecl::Declare(function) => function.name == name,
         }
     })
 }

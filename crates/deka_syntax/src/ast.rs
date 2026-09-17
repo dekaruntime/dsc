@@ -251,6 +251,17 @@ pub enum ExportDecl<'a> {
         names: &'a [ExportName<'a>],
         source: Option<&'a str>,
     },
+    /// `export opaque type Name` (rfd#39 2026-09-16 amendment). Grammar-legal
+    /// in any `.ds` file; a declaration file (`.d.ds`) is the only place a
+    /// compile accepts it — enforced downstream, not by the parser, so the
+    /// same node also serves a future `declare module { }` block (dsc#275).
+    Opaque { name: &'a str },
+    /// `export fn name(params) Return` / `export total fn name(params) Return`
+    /// with no body — a declaration-file signature (rfd#39 2026-09-16
+    /// amendment). Reuses [`SummonedFunction`]: identical colon-free grammar
+    /// and total/Exception rules as `summon`. Same file-kind restriction as
+    /// [`ExportDecl::Opaque`].
+    Declare(SummonedFunction<'a>),
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -741,6 +752,38 @@ pub struct JsxAttribute<'a> {
     pub name: &'a str,
     pub value: Option<Expr<'a>>,
     pub span: Span,
+}
+
+impl<'a> Stmt<'a> {
+    pub fn span(&self) -> Span {
+        match self {
+            Stmt::Opaque { span, .. }
+            | Stmt::Summon { span, .. }
+            | Stmt::Export { span, .. }
+            | Stmt::Import { span, .. }
+            | Stmt::Const { span, .. }
+            | Stmt::TupleBinding { span, .. }
+            | Stmt::Let { span, .. }
+            | Stmt::UnwrapLet { span, .. }
+            | Stmt::Function { span, .. }
+            | Stmt::ReceiverMethod { span, .. }
+            | Stmt::Struct { span, .. }
+            | Stmt::Enum { span, .. }
+            | Stmt::TypeAlias { span, .. }
+            | Stmt::Newtype { span, .. }
+            | Stmt::Interface { span, .. }
+            | Stmt::Expr { span, .. }
+            | Stmt::Return { span, .. }
+            | Stmt::If { span, .. }
+            | Stmt::Try { span, .. }
+            | Stmt::Block { span, .. }
+            | Stmt::Empty { span }
+            | Stmt::For { span, .. }
+            | Stmt::ForOf { span, .. }
+            | Stmt::Break { span }
+            | Stmt::Continue { span } => *span,
+        }
+    }
 }
 
 impl<'a> Type<'a> {

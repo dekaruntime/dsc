@@ -2204,7 +2204,8 @@ impl<'a> CaptureWalker<'a> {
                     self.stmts(body);
                     self.pop();
                 }
-                ast::ExportDecl::NamedGroup { .. } => {}
+                ast::ExportDecl::NamedGroup { .. } | ast::ExportDecl::Opaque { .. } => {}
+                ast::ExportDecl::Declare(function) => self.bind(function.name),
             },
             ast::Stmt::Expr { expr, .. } => self.expr(expr),
             ast::Stmt::Return { value, .. } => {

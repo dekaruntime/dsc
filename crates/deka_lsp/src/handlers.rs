@@ -291,6 +291,7 @@ impl LanguageServer for Backend {
                     TextDocumentSyncKind::FULL,
                 )),
                 hover_provider: Some(true.into()),
+                definition_provider: Some(OneOf::Left(true)),
                 completion_provider: Some(CompletionOptions {
                     trigger_characters: Some(vec![
                         "'".to_string(),
@@ -472,6 +473,35 @@ impl LanguageServer for Backend {
             }),
             range,
         }))
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<GotoDefinitionResponse>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        if !is_dekascript_uri(&uri) {
+            return Ok(None);
+        }
+        let position = params.text_document_position_params.position;
+        let Some(text) = self.get_document(&uri).await else {
+            return Ok(None);
+        };
+        let file_path = uri
+            .to_file_path()
+            .ok()
+            .and_then(|path| path.to_str().map(|path| path.to_string()))
+            .unwrap_or_else(|| uri.to_string());
+
+        let line_index = LineIndex::new(&text);
+        let offset = match line_index.position_to_offset(position) {
+            Some(offset) => offset,
+            None => return Ok(None),
+        };
+
+        let documents = self.documents.read().await.clone();
+        let location = entry_definition(&documents, &text, &file_path, offset);
+        Ok(location.map(GotoDefinitionResponse::Scalar))
     }
 
     async fn completion(

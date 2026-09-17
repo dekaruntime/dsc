@@ -789,6 +789,23 @@ impl<'src> Formatter<'src> {
                     self.write("\"");
                 }
             }
+            // `.d.ds` declaration files (rfd#39 2026-09-16 amendment).
+            ExportDecl::Opaque { name } => {
+                self.write("export opaque type ");
+                self.write(name);
+            }
+            ExportDecl::Declare(function) => {
+                self.write("export ");
+                if function.total {
+                    self.write("total ");
+                }
+                self.write("fn ");
+                self.write(function.name);
+                self.write("(");
+                self.fmt_param_list(function.params);
+                self.write(") ");
+                self.fmt_type(&function.return_type);
+            }
         }
     }
 

@@ -28,8 +28,6 @@ fn nominal_and_contained() {
             "const n = match handle() { Handle { secret } => secret }",
             "cannot destructure opaque",
         ),
-        ("const f = handle", "cannot escape"),
-        ("export { handle }", "file-private"),
         (
             "opaque type Other\nconst h: Other = handle()",
             "expected type `Other`",
@@ -37,6 +35,16 @@ fn nominal_and_contained() {
     ] {
         reject(&format!("{prefix}{body}"), diagnostic);
     }
+    // rfd#39 2026-09-16 amendment removes the file-private summoned-name
+    // rule: a summoned binding is an ordinary value once declared, so
+    // capturing it or exporting it is no longer an error (dsc#274; inverts
+    // dekaruntime/testsuite's summon/private_escape and summon/private_export
+    // corpus rows).
+    compile(&format!(
+        "{prefix}const f = handle\nconst n = read(f())\n"
+    ))
+    .unwrap();
+    compile(&format!("{prefix}export {{ handle }}\n")).unwrap();
     reject(
         "summon { number() number } from \"./foreign.mjs\"",
         "explicit `total`",
@@ -259,21 +267,6 @@ fn skip_fs_still_reports_diagnostics_that_do_not_need_module_bytes() {
         skip_summon_fs: true,
         ..Default::default()
     };
-    let errors = compile_to_js_with_options(
-        "opaque type Handle\nsummon { total handle() Handle } from \"./foreign.mjs\"\nexport { handle }\n",
-        "virtual.ds",
-        skip.clone(),
-    )
-    .unwrap_err();
-    assert!(
-        errors.iter().any(|d| d.message.contains("file-private")),
-        "{errors:?}"
-    );
-    assert!(
-        errors.iter().all(|d| d.severity == Severity::Error),
-        "{errors:?}"
-    );
-
     let errors = compile_to_js_with_options(
         "summon { fail() Exception<number, string> } from \"./foreign.mjs\"\nconst x = fail()\n",
         "virtual.ds",

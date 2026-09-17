@@ -5400,21 +5400,23 @@ impl<'a> Emitter<'a> {
         for attr in element.attributes.iter() {
             if attr.name.is_empty() {
                 return Err("JSX spread attributes are not supported".into());
-            } else {
-                let value = match &attr.value {
-                    Some(v) => {
-                        let mut buf = String::new();
-                        std::mem::swap(&mut self.out, &mut buf);
-                        self.emit_expr(v)?;
-                        std::mem::swap(&mut self.out, &mut buf);
-                        buf
-                    }
-                    None => "true".to_string(),
-                };
-                // Optional props erase to the caller's value, just like Some(v).
-                if attr.name == "key" { key = Some(value); } else {
-                    props.push(format!("\"{}\": {}", escape_string(attr.name), value));
+            }
+            if attr.name.starts_with("client:") {
+                continue;
+            }
+            let value = match &attr.value {
+                Some(v) => {
+                    let mut buf = String::new();
+                    std::mem::swap(&mut self.out, &mut buf);
+                    self.emit_expr(v)?;
+                    std::mem::swap(&mut self.out, &mut buf);
+                    buf
                 }
+                None => "true".to_string(),
+            };
+            // Optional props erase to the caller's value, just like Some(v).
+            if attr.name == "key" { key = Some(value); } else {
+                props.push(format!("\"{}\": {}", escape_string(attr.name), value));
             }
         }
 

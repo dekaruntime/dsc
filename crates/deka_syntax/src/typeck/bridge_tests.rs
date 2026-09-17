@@ -53,11 +53,12 @@ fn sync_bridge_call_typechecks_with_declared_signature_and_no_cast() {
 /// it and returning the awaited value against a `Result<T, E>`-typed
 /// function is exactly as legal as any other async stdlib wrapper — proof
 /// the async flag still comes from the declaration (`async fn`), not a
-/// hand-kept table.
+/// hand-kept table. `E` is `FsError` (deka#1146, dsc#288), not the old
+/// placeholder `string`: the host file's own declared error type.
 #[test]
 fn async_bridge_call_awaits_to_the_declared_result_type() {
     assert_ok(
-        "export async fn read_file(path: string) Promise<Result<bytes, string>> { return await bridge fs.read_file(path) }",
+        "export async fn read_file(path: string) Promise<Result<bytes, FsError>> { return await bridge fs.read_file(path) }",
     );
 }
 
@@ -67,7 +68,57 @@ fn async_bridge_call_awaits_to_the_declared_result_type() {
 #[test]
 fn async_bridge_call_without_await_types_as_a_promise() {
     assert_ok(
-        "export fn read_file(path: string) Promise<Result<bytes, string>> { return bridge fs.read_file(path) }",
+        "export fn read_file(path: string) Promise<Result<bytes, FsError>> { return bridge fs.read_file(path) }",
+    );
+}
+
+/// dsc#288 / deka#1146: the host file declares `struct`/`enum`/`interface`
+/// alongside its `bridge` blocks, and those names resolve in bridge
+/// signatures — `fs.read_file_sync`'s real declared error type is the host's
+/// own `FsError` enum, not a placeholder. Reverting `register_host_type`
+/// (or the host-file grammar restriction back to `bridge`-only) turns this
+/// into an "unknown type `FsError`" diagnostic.
+#[test]
+fn fs_bridge_call_types_its_error_as_the_host_declared_enum() {
+    assert_ok(
+        "export fn read_file_sync(path: string) Result<bytes, FsError> { return bridge fs.read_file_sync(path) }",
+    );
+}
+
+/// A `match` on the host's own `FsError`, including the struct-payload case
+/// (`PermissionDenied(FsPermission)`) recursing into `FsPermission`'s own
+/// field — proof `register_host_type` seeds a real `EnumInfo`/`StructInfo`
+/// with resolvable case payloads, not just a bare name. The outer function
+/// actually calls the bridge op, so this exercises the host file exactly as
+/// dsc#288 asks: an fs-shaped call typing as `Result<bytes, FsError>`, and a
+/// match on `FsError`'s cases (`PermissionDenied` included) typechecking.
+#[test]
+fn match_on_the_host_error_enum_typechecks_every_case() {
+    assert_ok(
+        "fn describe(error: FsError) string {\n\
+           return match (error) {\n\
+             PermissionDenied(FsPermission { capability }) => capability,\n\
+             UnsupportedHost => \"unsupported\",\n\
+             InvalidPayload => \"invalid\",\n\
+             Failed(message) => message,\n\
+           };\n\
+         }\n\
+         export fn read(path: string) string {\n\
+           return match (bridge fs.read_file_sync(path)) {\n\
+             Ok(_) => \"ok\",\n\
+             Err(error) => describe(error),\n\
+           };\n\
+         }",
+    );
+}
+
+/// dsc#288 / deka#1146: unit host actions now map to `boolean`, not `void`
+/// — `net.close`'s declared signature typechecks exactly like any other
+/// boolean-returning bridge op.
+#[test]
+fn unit_bridge_action_types_as_a_boolean_result() {
+    assert_ok(
+        "export fn close(handle: number) Result<boolean, string> { return bridge net.close(handle) }",
     );
 }
 

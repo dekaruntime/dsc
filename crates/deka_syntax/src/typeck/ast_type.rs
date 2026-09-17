@@ -58,7 +58,17 @@ impl<'a> Checker<'a> {
             ast::Type::Named { name, span } => match *name {
                 "ReactNode" => Type::react_node(),
                 "number" | "string" | "boolean" | "never" | "void" | "bytes" | "Component"
-                | "JsError" | "SyntaxError" | "TypeError" | "RangeError" | "Error" | "Type" => {
+                | "JsError" | "SyntaxError" | "TypeError" | "RangeError" | "Error" | "Type"
+                | "JsValue" => {
+                    // `JsValue` is a free-form foreign value with no static
+                    // shape (rfd#39's declaration-files amendment, decision
+                    // 6): today it is only produced by the host catalog's
+                    // `db.query` / `db.exec` / `db.stats` (rfd#27's
+                    // 2026-09-16 amendment). It was already reserved as a
+                    // builtin name (typeck/stmt.rs's `Opaque` redeclaration
+                    // guard); this makes it resolvable so those bridge
+                    // signatures typecheck. Narrowing methods (`as_T()`,
+                    // `as_struct<T>()`) are out of scope here.
                     Type::Named { name }
                 }
                 "Option" => {

@@ -12,7 +12,7 @@ pub mod scope;
 pub mod typeck;
 
 pub use ast::*;
-pub use bridge::{BRIDGE_OPS, BridgeOp, bridge_op_is_async};
+pub use bridge::{BridgeSignature, HOST_DECL_SOURCE, bridge_op_is_async, format_signature};
 pub use canonicalize::{lower_method_calls, resolve_imported_enum_constructors};
 pub use diagnostics::{Diagnostic, Severity};
 pub use lexer::Lexer;

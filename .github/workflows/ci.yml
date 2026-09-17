@@ -248,3 +248,11 @@ jobs:
       - name: Run clippy
         if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
         run: cargo clippy --all-features
+
+      # dsc#272 / rfd#27's 2026-09-16 amendment: `deka-host.d.ds` is checked
+      # in, not fetched, so a hand edit or a `deka-runtime-version` bump
+      # without `cargo xtask sync-host-decl` must fail here rather than
+      # silently drifting from the release it claims to match.
+      - name: Check host declaration file for drift
+        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.source_changed == 'true' }}
+        run: cargo run -p xtask -- check-host-decl-drift

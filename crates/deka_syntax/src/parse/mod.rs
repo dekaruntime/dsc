@@ -315,6 +315,25 @@ impl<'a> Parser<'a> {
         self.tokens.get(i).map(|t| t.kind).unwrap_or(TokenKind::Eof)
     }
 
+    /// True when the current `bridge` token starts an ambient declaration
+    /// block (`bridge crypto { ... }`) rather than a bridge call expression
+    /// (`bridge crypto.random_bytes(...)`): lookahead is `identifier {`,
+    /// skipping stray newlines, without consuming any tokens.
+    fn bridge_decl_ahead(&self) -> bool {
+        let mut i = self.pos + 1;
+        while i < self.tokens.len() && self.tokens[i].kind == TokenKind::Newline {
+            i += 1;
+        }
+        if self.tokens.get(i).map(|t| t.kind) != Some(TokenKind::Identifier) {
+            return false;
+        }
+        i += 1;
+        while i < self.tokens.len() && self.tokens[i].kind == TokenKind::Newline {
+            i += 1;
+        }
+        matches!(self.tokens.get(i).map(|t| t.kind), Some(TokenKind::LBrace))
+    }
+
     fn bump_str(&self, s: &str) -> &'a str {
         self.arena.alloc_str(s)
     }

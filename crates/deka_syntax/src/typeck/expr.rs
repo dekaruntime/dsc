@@ -958,29 +958,11 @@ impl<'a> Checker<'a> {
                 Type::Error
             }
             ast::Expr::Bridge {
-                kind, action, args, ..
-            } => {
-                // Host bridge calls are validated by the runtime catalog. The
-                // result shape is always Result<T, E>; async ops (deka#578)
-                // resolve through a Promise, so `await bridge fs.read_file(p)`
-                // typechecks as rfd#27 describes while sync ops such as
-                // `bridge crypto.random_bytes(n)` stay plain Results.
-                for arg in args.iter() {
-                    self.check_expr(arg);
-                }
-                let result = Type::Generic {
-                    base: "Result",
-                    args: vec![Type::Infer, Type::Infer],
-                };
-                if crate::bridge::bridge_op_is_async(kind, action) {
-                    Type::Generic {
-                        base: "Promise",
-                        args: vec![result],
-                    }
-                } else {
-                    result
-                }
-            }
+                kind,
+                action,
+                args,
+                span,
+            } => self.check_bridge_call(kind, action, args, *span),
             ast::Expr::Ternary {
                 condition,
                 then_branch,
@@ -4631,6 +4613,77 @@ impl<'a> Checker<'a> {
         );
 
         Some(self.check_method_call_args(method_name, receiver_name, &info, args, span))
+    }
+
+    /// Type a `bridge kind.action(args)` call from the embedded host
+    /// declaration file (rfd#27's 2026-09-16 amendment): the declared
+    /// signature gives the call its argument and return types directly,
+    /// rather than the pre-dsc#272 `Result<Infer, Infer>` every bridge call
+    /// used to produce. An unknown kind or action is a compile error here —
+    /// previously only the runtime allowlist rejected it.
+    fn check_bridge_call(
+        &mut self,
+        kind: &'a str,
+        action: &'a str,
+        args: &'a [ast::Expr<'a>],
+        span: ast::Span,
+    ) -> Type<'a> {
+        let Some(sig) = crate::bridge::find(kind, action) else {
+            for arg in args.iter() {
+                self.check_expr(arg);
+            }
+            if crate::bridge::kind_exists(kind) {
+                self.error_span(span, format!("unknown bridge action `{kind}.{action}`"));
+            } else {
+                self.error_span(span, format!("unknown bridge kind `{kind}`"));
+            }
+            return Type::Error;
+        };
+
+        if sig.params.len() != args.len() {
+            for arg in args.iter() {
+                self.check_expr(arg);
+            }
+            self.error_span(
+                span,
+                format!(
+                    "bridge `{kind}.{action}` expects {} argument{}, found {}",
+                    sig.params.len(),
+                    if sig.params.len() == 1 { "" } else { "s" },
+                    args.len()
+                ),
+            );
+        } else {
+            for (param, arg) in sig.params.iter().zip(args.iter()) {
+                let arg_type = self.check_expr(arg);
+                let Some(param_ty) = param.ty.as_ref() else {
+                    continue;
+                };
+                let expected = self.resolve_ast_type(param_ty);
+                if !self.is_assignable(&expected, &arg_type) {
+                    self.error_at_expr(
+                        arg,
+                        super::with_union_narrowing_hint(
+                            format!(
+                                "bridge `{kind}.{action}` expected argument type `{expected}`, found type `{arg_type}`"
+                            ),
+                            &expected,
+                            &arg_type,
+                        ),
+                    );
+                }
+            }
+        }
+
+        let result = self.resolve_ast_type(sig.return_type);
+        if sig.is_async {
+            Type::Generic {
+                base: "Promise",
+                args: vec![result],
+            }
+        } else {
+            result
+        }
     }
 
     /// Check call arguments against a receiver method's resolved parameter

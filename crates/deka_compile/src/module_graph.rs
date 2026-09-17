@@ -2927,6 +2927,50 @@ mod tests {
         assert!(main_js.contains(".ok === true"), "got: {}", main_js);
     }
 
+    /// dsc#272: bridge calls must type from the embedded host declaration
+    /// file on the exact path `dsc transpile` / `deka run` use — the module
+    /// graph (`compile_module_graph*`), not just the single-file
+    /// `check_program` path `typeck::bridge_tests` exercises. A `crypto`-
+    /// shaped package (a sync bridge call with a declared `Result<T, E>`
+    /// return) and an `fs`-shaped package (an `async fn` awaiting a bridge
+    /// call, declared `Promise<Result<T, E>>`) both live in a *dependency*
+    /// module, imported by the entry — mirroring `ds_modules/@deka/fs`
+    /// imported by a consumer, which is what `deka run` actually compiles.
+    ///
+    /// Before dsc#272 (`BRIDGE_OPS` deleted, no replacement wired to this
+    /// path) this fails with "expected return type `Result<bytes, string>`,
+    /// found type `Result<<infer>, <infer>>`" for the sync case and
+    /// "`await` expected `Promise<T>`, found type `Result<<infer>,
+    /// <infer>>`" for the async case — the exact diagnostics a stale build
+    /// of this branch reproduced against the real `deka run` gate.
+    #[test]
+    fn graph_types_bridge_calls_in_an_imported_package() {
+        let root = PathBuf::from("/project");
+        let host_pkg = root.join("ds_modules/fs.ds");
+        let main = root.join("main.ds");
+
+        let mut files = HashMap::new();
+        files.insert(
+            host_pkg.clone(),
+            "export fn random_bytes(len: number) Result<bytes, string> {\n  return bridge crypto.random_bytes(len)\n}\nexport async fn read_file(path: string) Promise<Result<bytes, string>> {\n  return await bridge fs.read_file(path)\n}".to_string(),
+        );
+        files.insert(
+            main.clone(),
+            "import { random_bytes, read_file } from \"fs\";\nexport fn sync_entry(len: number) Result<bytes, string> { return random_bytes(len) }\nexport async fn async_entry(path: string) Promise<Result<bytes, string>> { return await read_file(path) }".to_string(),
+        );
+
+        let mut aliases = HashMap::new();
+        aliases.insert((main.clone(), "fs".to_string()), host_pkg.clone());
+
+        let loader = InMemoryLoader { files, aliases };
+        let result = compile_module_graph(&main, &loader).expect(
+            "bridge calls inside an imported module must type from the host catalog, not fall back to Result<Infer, Infer>",
+        );
+        assert_eq!(result.modules.len(), 2);
+        let host_js = &result.modules[&host_pkg];
+        assert!(host_js.contains("random_bytes"), "got: {host_js}");
+    }
+
     #[test]
     fn fs_loader_resolves_relative_and_index() {
         let tmp = tempfile::tempdir().expect("tempdir");

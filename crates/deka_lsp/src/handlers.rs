@@ -309,6 +309,7 @@ impl LanguageServer for Backend {
                 )),
                 references_provider: Some(OneOf::Left(true)),
                 rename_provider: Some(OneOf::Left(true)),
+                definition_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
             server_info: None,
@@ -472,6 +473,36 @@ impl LanguageServer for Backend {
             }),
             range,
         }))
+    }
+
+    /// Currently only serves `bridge kind.action(...)` calls (dsc#272 item
+    /// 7): the location is a `Location` inside the read-only, materialized
+    /// `deka-host.d.ds` (see `hover::host_decl_document_path`). Every other
+    /// name returns `None` — dsc has no other go-to-definition source yet.
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<GotoDefinitionResponse>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        if !is_dekascript_uri(&uri) {
+            return Ok(None);
+        }
+        let position = params.text_document_position_params.position;
+        let Some(text) = self.get_document(&uri).await else {
+            return Ok(None);
+        };
+        let line_index = LineIndex::new(&text);
+        let Some(offset) = line_index.position_to_offset(position) else {
+            return Ok(None);
+        };
+        let arena = bumpalo::Bump::new();
+        let Some(program) = deka_syntax::parse_recovering(&text, &arena).program else {
+            return Ok(None);
+        };
+        let Some(location) = bridge_call_definition(&program, offset) else {
+            return Ok(None);
+        };
+        Ok(Some(GotoDefinitionResponse::Scalar(location)))
     }
 
     async fn completion(

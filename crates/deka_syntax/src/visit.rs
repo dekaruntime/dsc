@@ -126,6 +126,7 @@ pub fn walk_stmt(stmt: &Stmt<'_>, visit: &mut dyn FnMut(&Expr<'_>)) {
         | Stmt::TypeAlias { .. }
         | Stmt::Opaque { .. }
         | Stmt::Summon { .. }
+        | Stmt::BridgeDecl { .. }
         | Stmt::Newtype { .. }
         | Stmt::Interface { .. }
         | Stmt::Import { .. }

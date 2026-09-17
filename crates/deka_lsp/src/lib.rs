@@ -16,11 +16,11 @@ use tower_lsp::lsp_types::{
     Diagnostic, DiagnosticOptions, DiagnosticServerCapabilities, DiagnosticSeverity,
     DidChangeTextDocumentParams, DidOpenTextDocumentParams, DocumentDiagnosticParams,
     DocumentDiagnosticReport, DocumentDiagnosticReportResult, Documentation,
-    FullDocumentDiagnosticReport, Hover, HoverContents, InitializeParams, InitializeResult,
-    InitializedParams, InsertTextFormat, Location, MarkupContent, MarkupKind, MessageType, OneOf,
-    Position, Range, ReferenceParams, RelatedFullDocumentDiagnosticReport, RenameParams,
-    ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Url,
-    WorkspaceEdit,
+    FullDocumentDiagnosticReport, GotoDefinitionParams, GotoDefinitionResponse, Hover,
+    HoverContents, InitializeParams, InitializeResult, InitializedParams, InsertTextFormat,
+    Location, MarkupContent, MarkupKind, MessageType, OneOf, Position, Range, ReferenceParams,
+    RelatedFullDocumentDiagnosticReport, RenameParams, ServerCapabilities,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Url, WorkspaceEdit,
 };
 #[cfg(feature = "native")]
 use tower_lsp::{Client, LanguageServer, LspService, Server};

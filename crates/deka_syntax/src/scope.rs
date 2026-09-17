@@ -511,6 +511,7 @@ fn stmt_span(stmt: &Stmt<'_>) -> crate::ast::Span {
     match stmt {
         Stmt::Opaque { span, .. }
         | Stmt::Summon { span, .. }
+        | Stmt::BridgeDecl { span, .. }
         | Stmt::Export { span, .. }
         | Stmt::Import { span, .. }
         | Stmt::Const { span, .. }

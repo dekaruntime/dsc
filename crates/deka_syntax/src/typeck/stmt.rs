@@ -1570,6 +1570,17 @@ impl<'a> Checker<'a> {
             | ast::Stmt::ReceiverMethod { .. } => {
                 // Already collected and validated lazily at use sites (or no-op).
             }
+            ast::Stmt::BridgeDecl { span, .. } => {
+                // rfd#27's 2026-09-16 amendment: this grammar exists only to
+                // parse dsc's own embedded `deka-host.d.ds`, which is parsed
+                // directly by `crate::bridge` and never runs through
+                // `check_program`. Reaching here means real source declared
+                // one, which is always wrong.
+                self.error_span(
+                    *span,
+                    "ambient `bridge` blocks are only valid in deka's own host declaration file; application code calls stdlib packages instead of declaring bridge ops",
+                );
+            }
             // Imports are seeded before statement checking. Resolved exports
             // retain their signatures; unresolved imports have already emitted
             // a diagnostic and are bound to `Error`, never `Infer`.

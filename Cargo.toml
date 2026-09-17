@@ -14,6 +14,7 @@ members = [
     "crates/deka_project",
     "crates/deka_ui",
     "crates/bundler",
+    "crates/xtask",
 ]
 
 [workspace.package]

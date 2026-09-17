@@ -2311,6 +2311,7 @@ impl<'a> CaptureWalker<'a> {
             }
             ast::Stmt::Opaque { .. }
             | ast::Stmt::Summon { .. }
+            | ast::Stmt::BridgeDecl { .. }
             | ast::Stmt::Import { .. }
             | ast::Stmt::Enum { .. }
             | ast::Stmt::TypeAlias { .. }

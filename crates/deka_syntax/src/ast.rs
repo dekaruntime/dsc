@@ -55,6 +55,18 @@ pub enum Stmt<'a> {
         source: &'a str,
         span: Span,
     },
+    /// `bridge <kind> { fn action(args) Ret; async fn action(args) Ret }` —
+    /// an ambient block of the rfd#39 declaration grammar (rfd#27's
+    /// 2026-09-16 amendment). Declares the Rust host ops reachable through
+    /// `bridge kind.action(...)` call expressions. Only legal in dsc's own
+    /// embedded `deka-host.d.ds`; a checker pass rejects it everywhere else
+    /// (`crate::bridge` never runs typeck on the embedded file itself, so
+    /// this restriction lives entirely in the ordinary compile path).
+    BridgeDecl {
+        kind: &'a str,
+        actions: &'a [BridgeAction<'a>],
+        span: Span,
+    },
     /// `export const x = 1;` or `export function f() {}`
     Export { decl: ExportDecl<'a>, span: Span },
     /// `import { a, b } from "./mod.ds";`
@@ -220,6 +232,20 @@ pub struct SummonedFunction<'a> {
     pub params: &'a [Param<'a>],
     pub return_type: Type<'a>,
     pub total: bool,
+    pub span: Span,
+}
+
+/// One action inside an ambient `bridge <kind> { ... }` block (rfd#27's
+/// 2026-09-16 amendment). `return_type` is the full declared type, already
+/// including `Result<T, E>` — `is_async` additionally wraps the call site in
+/// `Promise<...>`, mirroring the pre-existing sync/async split in
+/// `crate::bridge::bridge_op_is_async`.
+#[derive(Clone, Debug, Serialize)]
+pub struct BridgeAction<'a> {
+    pub name: &'a str,
+    pub params: &'a [Param<'a>],
+    pub return_type: Type<'a>,
+    pub is_async: bool,
     pub span: Span,
 }
 

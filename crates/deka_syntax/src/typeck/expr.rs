@@ -518,6 +518,9 @@ impl<'a> Checker<'a> {
                     self.error_span(*span, message);
                     return Type::Error;
                 }
+                if self.reject_type_only_value_use(name, *span) {
+                    return Type::Error;
+                }
                 match self.lookup_var(name) {
                     Some(ty) => {
                         if let Some(builtin) = super::hooks::react_import_name(name) {
@@ -1235,6 +1238,11 @@ impl<'a> Checker<'a> {
         fields: &'a [ast::StructLiteralField<'a>],
         span: ast::Span,
     ) -> Type<'a> {
+        // Construction calls the struct's runtime factory (`Point({ … })`),
+        // so it is a value use like any other, not a type position (dsc#281).
+        if self.reject_type_only_value_use(name, span) {
+            return Type::Error;
+        }
         if self.opaques.contains_key(name) {
             self.error_span(
                 span,
@@ -3484,14 +3492,21 @@ impl<'a> Checker<'a> {
                 // Pipe desugars at emit time. Type-check the effective call.
                 match right {
                     ast::Expr::Identifier { name, span } => {
-                        let callee_type = match self.lookup_var(name) {
-                            Some(ty) => ty,
-                            None => {
-                                // Do not turn a missing pipe target into Infer:
-                                // that used to let `value |> missing` pass any
-                                // enclosing assignment or return check.
-                                self.error_span(*span, format!("unknown identifier `{name}`"));
-                                Type::Error
+                        let callee_type = if self.reject_type_only_value_use(name, *span) {
+                            Type::Error
+                        } else {
+                            match self.lookup_var(name) {
+                                Some(ty) => ty,
+                                None => {
+                                    // Do not turn a missing pipe target into Infer:
+                                    // that used to let `value |> missing` pass any
+                                    // enclosing assignment or return check.
+                                    self.error_span(
+                                        *span,
+                                        format!("unknown identifier `{name}`"),
+                                    );
+                                    Type::Error
+                                }
                             }
                         };
                         if callee_type.is_hook_fn() {

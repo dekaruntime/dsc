@@ -367,11 +367,12 @@ fn collect_module_item<'a>(stmt: &'a Stmt<'a>, collector: &mut Collector<'a>) {
             specifiers, source, ..
         } => {
             for spec in specifiers.iter() {
+                let type_prefix = if spec.is_type_only { "type " } else { "" };
                 let detail = if spec.imported == spec.local {
-                    format!("import {{ {} }} from '{source}'", spec.imported)
+                    format!("import {{ {type_prefix}{} }} from '{source}'", spec.imported)
                 } else {
                     format!(
-                        "import {{ {} as {} }} from '{source}'",
+                        "import {{ {type_prefix}{} as {} }} from '{source}'",
                         spec.imported, spec.local
                     )
                 };

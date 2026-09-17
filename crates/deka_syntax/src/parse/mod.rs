@@ -1672,6 +1672,46 @@ mod tests {
     }
 
     #[test]
+    fn parse_import_type_whole_statement() {
+        // rfd#12 ESM alignment amendment (dsc#281): `import type { … }` marks
+        // every specifier type-only.
+        let arena = Bump::new();
+        let result = parse("import type { Foo, Bar } from \"./types.ds\";", &arena);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[0] {
+            Stmt::Import {
+                specifiers, source, ..
+            } => {
+                assert_eq!(source, &"./types.ds");
+                assert_eq!(specifiers.len(), 2);
+                assert!(specifiers.iter().all(|s| s.is_type_only));
+            }
+            _ => panic!("expected import"),
+        }
+    }
+
+    #[test]
+    fn parse_import_type_inline_mixed() {
+        // The inline form marks only the flagged specifier type-only, so a
+        // mixed statement keeps its value import (dsc#281).
+        let arena = Bump::new();
+        let result = parse("import { type Foo, bar } from \"./mixed.ds\";", &arena);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[0] {
+            Stmt::Import { specifiers, .. } => {
+                assert_eq!(specifiers.len(), 2);
+                assert_eq!(specifiers[0].imported, "Foo");
+                assert!(specifiers[0].is_type_only);
+                assert_eq!(specifiers[1].imported, "bar");
+                assert!(!specifiers[1].is_type_only);
+            }
+            _ => panic!("expected import"),
+        }
+    }
+
+    #[test]
     fn parse_import_side_effect() {
         let arena = Bump::new();
         let result = parse("import \"./side-effects.ds\";", &arena);

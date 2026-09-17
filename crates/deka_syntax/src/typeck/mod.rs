@@ -1828,6 +1828,11 @@ struct Checker<'a> {
     interactive_component_depth: usize,
     /// Function and (eventually) global variable types.
     globals: HashMap<&'a str, Type<'a>>,
+    /// Local names bound by `import type { A }` or the inline `import {
+    /// type A, b }` form (rfd#12 ESM alignment amendment). Registered
+    /// normally for type positions (structs, enums, aliases, …), but a value
+    /// reference to one of these names is a typeck error naming the fix.
+    type_only_imports: HashSet<&'a str>,
     /// User-defined type aliases without type parameters.
     aliases: HashMap<&'a str, ast::Type<'a>>,
     /// User-defined enums.
@@ -1995,6 +2000,7 @@ impl<'a> Checker<'a> {
             jsx_island_depth: 0,
             interactive_component_depth: 0,
             globals: HashMap::new(),
+            type_only_imports: HashSet::new(),
             aliases: HashMap::new(),
             enums: HashMap::new(),
             case_to_enum: HashMap::new(),
@@ -2135,6 +2141,10 @@ impl<'a> Checker<'a> {
             for spec in specifiers.iter() {
                 let imported = spec.imported;
                 let local = spec.local;
+
+                if spec.is_type_only {
+                    self.type_only_imports.insert(local);
+                }
 
                 if let Some(info) = exports.interfaces.get(imported) {
                     self.interfaces.insert(local, info.clone());
@@ -2326,6 +2336,24 @@ impl<'a> Checker<'a> {
             }
         }
         None
+    }
+
+    /// Diagnose a value-position reference to a name bound by `import type`
+    /// (rfd#12 ESM alignment amendment). Returns `true` (and records the
+    /// error) when `name` is such a binding, so callers can short-circuit to
+    /// `Type::Error` instead of resolving the type it would otherwise have.
+    pub(super) fn reject_type_only_value_use(&mut self, name: &'a str, span: ast::Span) -> bool {
+        if self.type_only_imports.contains(name) {
+            self.error_span(
+                span,
+                format!(
+                    "`{name}` was imported with `import type` and can only be used as a type; remove `type` from the import to use it as a value"
+                ),
+            );
+            true
+        } else {
+            false
+        }
     }
 
     fn lookup_var(&self, name: &'a str) -> Option<Type<'a>> {

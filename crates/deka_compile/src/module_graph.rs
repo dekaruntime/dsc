@@ -3126,11 +3126,11 @@ mod tests {
         let mut files = HashMap::new();
         files.insert(
             host_pkg.clone(),
-            "export fn random_bytes(len: number) Result<bytes, string> {\n  return bridge crypto.random_bytes(len)\n}\nexport async fn read_file(path: string) Promise<Result<bytes, string>> {\n  return await bridge fs.read_file(path)\n}".to_string(),
+            "export fn random_bytes(len: number) Result<bytes, string> {\n  return bridge crypto.random_bytes(len)\n}\nexport async fn read_file(path: string) Promise<Result<bytes, FsError>> {\n  return await bridge fs.read_file(path)\n}".to_string(),
         );
         files.insert(
             main.clone(),
-            "import { random_bytes, read_file } from \"fs\";\nexport fn sync_entry(len: number) Result<bytes, string> { return random_bytes(len) }\nexport async fn async_entry(path: string) Promise<Result<bytes, string>> { return await read_file(path) }".to_string(),
+            "import { random_bytes, read_file } from \"fs\";\nexport fn sync_entry(len: number) Result<bytes, string> { return random_bytes(len) }\nexport async fn async_entry(path: string) Promise<Result<bytes, FsError>> { return await read_file(path) }".to_string(),
         );
 
         let mut aliases = HashMap::new();

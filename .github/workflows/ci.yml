@@ -64,6 +64,53 @@ jobs:
 
           echo "source_changed=$source_changed" >> "$GITHUB_OUTPUT"
 
+  lockstep:
+    # rfd#68's 2026-09-17 amendment to rfd#59 (dsc#293): dsc's pins on deka
+    # and the testsuite corpus must carry dsc's own version, or the
+    # immediately previous released version while a bump is mid-flight.
+    # Independent of the `changes`/`rust` jobs above: it always runs, needs
+    # no workspace build (only the small `xtask` crate + its two deps), and
+    # needs the full tag history to compute "immediately previous".
+    name: Lockstep pin check
+    runs-on: ubuntu-latest
+    environment: public-ci
+    env:
+      SCCACHE_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      SCCACHE_REGION: auto
+      SCCACHE_BUCKET: dsc-sccache-linux-x64
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_SCCACHE_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SCCACHE_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.96.0
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache
+        run: |
+          if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ] || [ -z "$SCCACHE_ENDPOINT" ]; then
+            echo "::error::R2 sccache credentials are missing. SCCACHE IS REQUIRED FOR ALL RUST COMPILATION."
+            exit 1
+          fi
+          if ! command -v sccache >/dev/null 2>&1; then
+            echo "::error::sccache is not on PATH. SCCACHE IS REQUIRED FOR ALL RUST COMPILATION. Reinstall it on this runner (cargo install sccache --locked), see deka#656."
+            exit 1
+          fi
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "sccache enabled for dsc-sccache-linux-x64"
+
+      - name: Run lockstep unit tests
+        run: cargo test -p xtask --locked lockstep::
+
+      - name: Check lockstep pins
+        run: cargo run -p xtask --locked -- check-lockstep
+
   rust:
     # Keep this exact required-check name. It always reports, while the
     # expensive steps below run only when source or CI inputs changed.

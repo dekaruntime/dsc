@@ -56,6 +56,45 @@ fn file_type_rule_error(
     None
 }
 
+fn validate_client_directives(program: &Program<'_>, _source: &str) -> Vec<Diagnostic> {
+    let mut errors = Vec::new();
+    for stmt in program.statements.iter() {
+        let mut visitor = |expr: &Expr<'_>| {
+            if let Expr::JsxElement { element, .. } = expr {
+                let is_host = element
+                    .tag
+                    .chars()
+                    .next()
+                    .map(|c| c.is_ascii_lowercase())
+                    .unwrap_or(false);
+                if is_host {
+                    for attr in element.attributes.iter() {
+                        if attr.name.starts_with("client:") {
+                            // The parser's attribute span starts at the part
+                            // after the colon for namespaced names, so back up
+                            // to the start of the whole `client:*` name.
+                            let prefix_len = attr.name.find(':').map(|i| i + 1).unwrap_or(0);
+                            errors.push(
+                                Diagnostic::error(
+                                    attr.span.start.line,
+                                    attr.span.start.column.saturating_sub(prefix_len),
+                                    format!(
+                                        "`{}` directive is not allowed on host element `<{}>`; `client:*` directives belong on component tags",
+                                        attr.name, element.tag
+                                    ),
+                                )
+                                .with_underline(attr.name.len()),
+                            );
+                        }
+                    }
+                }
+            }
+        };
+        deka_syntax::visit::walk_stmt(stmt, &mut visitor);
+    }
+    errors
+}
+
 fn is_api_import(spec: &str) -> bool {
     let trimmed = spec.trim();
     trimmed == "api"
@@ -640,6 +679,11 @@ pub fn compile_to_js_with_imports_and_options<'a>(
 
     if let Some(diagnostic) = file_type_rule_error(file_path, source, &program) {
         return Err(vec![diagnostic]);
+    }
+
+    let directive_errors = validate_client_directives(&program, source);
+    if !directive_errors.is_empty() {
+        return Err(directive_errors);
     }
 
     if options.client {
@@ -1818,6 +1862,29 @@ const arrow = unsafe { () => User { name: "Bob" } }
             result.js.contains("\"name\": \"Deka\""),
             "got: {}",
             result.js
+        );
+    }
+
+    #[test]
+    fn compile_jsx_client_directive_on_host_element_errors() {
+        let errors = compile_to_js(
+            "const el = <button client:load>hi</button>;",
+            "test.dsx",
+        )
+        .expect_err("client:* on a host element must be a compile error");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let error = &errors[0];
+        assert!(
+            error.message.contains("client:load")
+                && error.message.contains("<button>")
+                && error.message.contains("component tags"),
+            "{}",
+            error.message
+        );
+        assert_eq!(
+            (error.line, error.column, error.underline_length),
+            (1, 20, 11),
+            "{error:?}"
         );
     }
 

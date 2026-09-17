@@ -1680,7 +1680,7 @@ assert.equal(threw, true, `expected throw, got ${uncovered}`);
         );
         assert!(
             out.contains("\"client:load\": true"),
-            "island directive must emit: {out}"
+            "island directive must reach component props so the runtime can wrap it: {out}"
         );
         assert!(
             out.contains("jsx(\"button\", {\"data-deka-id\": \"module:Counter/i0\", \"onClick\": click, \"children\": \"x\"})"),
@@ -1827,19 +1827,38 @@ assert.equal(threw, true, `expected throw, got ${uncovered}`);
     }
 
     #[test]
-    fn emit_jsx_client_directive() {
+    fn emit_jsx_client_directive_keeps_directive_on_component_props() {
         let out = parse_and_emit("const el = <Cart client:load userId={id} />;");
         assert!(
             out.contains("\"client:load\": true"),
-            "namespaced client directive must emit as a prop: {out}"
+            "component tags must keep the directive for the island runtime: {out}"
         );
         assert!(
             out.contains("\"userId\": id"),
-            "island props must emit: {out}"
+            "non-directive props must still emit: {out}"
         );
         assert!(
             !out.contains("..."),
             "island emit must not spread props: {out}"
+        );
+    }
+
+    #[test]
+    fn emit_jsx_client_directive_keeps_all_suffixes_on_component() {
+        let out = parse_and_emit(
+            "const el = <Cart client:load client:visible title=\"hi\" />;",
+        );
+        assert!(
+            out.contains("\"client:load\": true"),
+            "client:load must stay on component props: {out}"
+        );
+        assert!(
+            out.contains("\"client:visible\": true"),
+            "client:visible must stay on component props: {out}"
+        );
+        assert!(
+            out.contains("\"title\": \"hi\""),
+            "non-directive props must still emit: {out}"
         );
     }
 

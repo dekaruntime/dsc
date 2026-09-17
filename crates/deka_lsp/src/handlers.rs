@@ -1,4 +1,5 @@
 use super::*;
+use deka_syntax::parse::FUNCTION_KEYWORD_ERROR;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -299,6 +300,7 @@ impl LanguageServer for Backend {
                     ]),
                     ..CompletionOptions::default()
                 }),
+                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 diagnostic_provider: Some(DiagnosticServerCapabilities::Options(
                     DiagnosticOptions {
                         identifier: Some(LANGUAGE_ID.to_string()),
@@ -355,6 +357,47 @@ impl LanguageServer for Backend {
                 },
             }),
         ))
+    }
+
+    async fn code_action(
+        &self,
+        params: CodeActionParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<CodeActionResponse>> {
+        let uri = params.text_document.uri;
+        if !is_dekascript_uri(&uri) {
+            return Ok(None);
+        }
+
+        let mut actions = Vec::new();
+        for diagnostic in &params.context.diagnostics {
+            if !diagnostic.message.contains(FUNCTION_KEYWORD_ERROR) {
+                continue;
+            }
+            let mut changes = HashMap::new();
+            changes.insert(
+                uri.clone(),
+                vec![TextEdit {
+                    range: diagnostic.range,
+                    new_text: "fn".to_string(),
+                }],
+            );
+            actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                title: "Replace `function` with `fn`".to_string(),
+                kind: Some(CodeActionKind::QUICKFIX),
+                diagnostics: Some(vec![diagnostic.clone()]),
+                edit: Some(WorkspaceEdit {
+                    changes: Some(changes),
+                    document_changes: None,
+                    change_annotations: None,
+                }),
+                command: None,
+                is_preferred: Some(true),
+                disabled: None,
+                data: None,
+            }));
+        }
+
+        Ok(if actions.is_empty() { None } else { Some(actions) })
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {

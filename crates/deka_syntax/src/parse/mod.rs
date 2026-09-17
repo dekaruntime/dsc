@@ -11,6 +11,8 @@ use crate::lexer::{Lexer, Token, TokenKind};
 
 #[cfg(test)]
 mod arrow_tests;
+#[cfg(test)]
+mod stmt_tests;
 mod expr;
 mod jsx;
 mod pattern;
@@ -39,6 +41,12 @@ pub struct ParseResult<'a> {
 /// reaches (serde uses 128 with ~100 B/level frames; our frames are ~200x
 /// larger, so our limit is ~200x smaller).
 const MAX_NESTING_DEPTH: usize = 64;
+
+/// Diagnostic message for the retired `function` keyword. Kept in one place so
+/// the LSP quick-fix path can match it exactly.
+pub const FUNCTION_KEYWORD_ERROR: &str =
+    "`function` is not a DekaScript keyword; use `fn` (e.g. `fn name(args) ReturnType { ... }`); \
+     `function` was retired with the PHP-era syntax";
 
 /// RAII guard counting one live recursive parse frame. Acquired on entry to
 /// every recursive parse function; `Drop` decrements, so early-return and
@@ -331,6 +339,24 @@ impl<'a> Parser<'a> {
     fn error_at(&mut self, pos: crate::ast::Pos, message: impl Into<String>) {
         self.errors
             .push(Diagnostic::error(pos.line, pos.column, message));
+    }
+
+    /// dsc#227: `function` is the first keyword newcomers type, but it was
+    /// retired with the PHP-era syntax. Point the diagnostic at the keyword
+    /// itself with an 8-character underline so editors can offer a `fn` rewrite,
+    /// then skip past the rest of the invalid declaration so we do not emit a
+    /// second "expected expression" diagnostic on the closing brace.
+    fn reject_retired_function_keyword(&mut self, in_block: bool) {
+        let span = self.current_span();
+        self.errors.push(
+            Diagnostic::error(span.start.line, span.start.column, FUNCTION_KEYWORD_ERROR)
+                .with_underline(8),
+        );
+        self.advance(); // skip `function`
+        self.synchronize();
+        if !in_block && self.at(TokenKind::RBrace) {
+            self.advance();
+        }
     }
 
     /// Diagnose the colon at its position, then consume it so the rest of the

@@ -121,6 +121,10 @@ impl<'a> Parser<'a> {
             self.error("there is no lowercase `throw` statement; use `Throw(e)` to raise into the exception channel");
             return None;
         }
+        if self.current_kind() == TokenKind::Function {
+            self.reject_retired_function_keyword(in_block);
+            return None;
+        }
         if self.current_kind() == TokenKind::Identifier && self.current_text() == "try" {
             self.advance();
             let body = self.parse_block()?;
@@ -1118,6 +1122,10 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Identifier if self.current_text() == "default" => {
                 self.error("unsupported export syntax: default exports are not allowed");
+                None
+            }
+            TokenKind::Function => {
+                self.reject_retired_function_keyword(false);
                 None
             }
             TokenKind::LBrace => {

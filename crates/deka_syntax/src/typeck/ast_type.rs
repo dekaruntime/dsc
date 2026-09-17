@@ -380,6 +380,17 @@ impl<'a> Checker<'a> {
         ));
     }
 
+    pub(super) fn warning_span(&mut self, span: ast::Span, message: impl Into<String>) {
+        if self.infer_only {
+            return;
+        }
+        self.warnings.push(Diagnostic::warning(
+            span.start.line,
+            span.start.column,
+            message,
+        ));
+    }
+
     pub(super) fn error_span_with_underline(
         &mut self,
         span: ast::Span,

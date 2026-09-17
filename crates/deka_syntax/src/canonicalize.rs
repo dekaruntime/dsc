@@ -191,6 +191,7 @@ fn transform_stmt<'a>(
                     return_type,
                     body,
                     is_async,
+                    is_default,
                 } => {
                     let new_body: Vec<Stmt<'a>> = body
                         .iter()
@@ -203,6 +204,7 @@ fn transform_stmt<'a>(
                         return_type: return_type.clone(),
                         body: ast::alloc_slice(arena, new_body),
                         is_async: *is_async,
+                        is_default: *is_default,
                     }
                 }
                 ast::ExportDecl::NamedGroup { .. } => decl.clone(),
@@ -911,6 +913,7 @@ fn lower_stmt<'a>(
                     return_type,
                     body,
                     is_async,
+                    is_default,
                 } => {
                     let new_body: Vec<Stmt<'a>> = body
                         .iter()
@@ -923,6 +926,7 @@ fn lower_stmt<'a>(
                         return_type: return_type.clone(),
                         body: ast::alloc_slice(arena, new_body),
                         is_async: *is_async,
+                        is_default: *is_default,
                     }
                 }
                 ast::ExportDecl::NamedGroup { .. } => decl.clone(),

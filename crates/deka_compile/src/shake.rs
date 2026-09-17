@@ -152,6 +152,26 @@ pub fn live_names(
         }
     }
 
+    // `export default fn Page() { … }` (rfd#12 ESM alignment amendment):
+    // exported under the key "default", declared under `name`. If a consumer
+    // imports the default, the declaration itself is live.
+    for stmt in program.statements.iter() {
+        if let Stmt::Export {
+            decl:
+                ExportDecl::Function {
+                    name,
+                    is_default: true,
+                    ..
+                },
+            ..
+        } = stmt
+        {
+            if live.contains("default") {
+                live.insert(name.to_string());
+            }
+        }
+    }
+
     // Primitive extension calls are rewritten to `method$receiver` only after
     // typechecking, which runs after shaking, so the mangled name never occurs
     // as an identifier the graph could see. Bridge the gap: a field access

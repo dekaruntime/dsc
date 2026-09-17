@@ -245,6 +245,10 @@ pub enum ExportDecl<'a> {
         return_type: Option<Type<'a>>,
         body: &'a [Stmt<'a>],
         is_async: bool,
+        /// `export default fn Page() { … }` (rfd#12 ESM alignment amendment).
+        /// `name` stays the local binding (`Page`); the module's export key
+        /// is `"default"` instead, like any other renamed export.
+        is_default: bool,
     },
     /// `export { a, b as c }` — re-exports already-declared names.
     NamedGroup {

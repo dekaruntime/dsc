@@ -1013,28 +1013,30 @@ impl<'a> Parser<'a> {
             });
         }
 
-        self.expect(TokenKind::LBrace)?;
         let mut specs = Vec::new();
-        if !self.at(TokenKind::RBrace) {
-            loop {
-                let (spec_start, spec_start_byte) = self.span_start();
-                let imported = self.expect_identifier()?;
-                let local = if self.eat(TokenKind::As) {
-                    self.expect_identifier()?
-                } else {
-                    imported
-                };
-                specs.push(crate::ast::ImportSpec {
-                    imported,
-                    local,
-                    span: self.span_from(spec_start, spec_start_byte),
-                });
-                if !self.eat(TokenKind::Comma) {
-                    break;
-                }
+
+        // Default import sugar: `import X from "…"` and the mixed
+        // `import X, { a } from "…"` (rfd#12 ESM alignment amendment). `X`
+        // binds this module's default export under the key `"default"`,
+        // exactly like the explicit `import { default as X }` spelling.
+        if self.at(TokenKind::Identifier) {
+            let (default_start, default_start_byte) = self.span_start();
+            let local = self.expect_identifier()?;
+            specs.push(crate::ast::ImportSpec {
+                imported: "default",
+                local,
+                span: self.span_from(default_start, default_start_byte),
+            });
+            if self.eat(TokenKind::Comma) {
+                self.expect(TokenKind::LBrace)?;
+                self.parse_named_import_specs(&mut specs)?;
+                self.expect(TokenKind::RBrace)?;
             }
+        } else {
+            self.expect(TokenKind::LBrace)?;
+            self.parse_named_import_specs(&mut specs)?;
+            self.expect(TokenKind::RBrace)?;
         }
-        self.expect(TokenKind::RBrace)?;
         self.expect(TokenKind::From)?;
 
         if !self.at(TokenKind::String) {
@@ -1053,6 +1055,36 @@ impl<'a> Parser<'a> {
             source,
             span: self.span_from(start, start_byte),
         })
+    }
+
+    /// The comma-separated `imported [as local]` body of a `{ … }` named
+    /// import clause, appended to `specs`. Shared between the bare `import {
+    /// … }` form and the mixed `import Default, { … }` form.
+    fn parse_named_import_specs(
+        &mut self,
+        specs: &mut Vec<crate::ast::ImportSpec<'a>>,
+    ) -> Option<()> {
+        if self.at(TokenKind::RBrace) {
+            return Some(());
+        }
+        loop {
+            let (spec_start, spec_start_byte) = self.span_start();
+            let imported = self.expect_identifier()?;
+            let local = if self.eat(TokenKind::As) {
+                self.expect_identifier()?
+            } else {
+                imported
+            };
+            specs.push(crate::ast::ImportSpec {
+                imported,
+                local,
+                span: self.span_from(spec_start, spec_start_byte),
+            });
+            if !self.eat(TokenKind::Comma) {
+                break;
+            }
+        }
+        Some(())
     }
 
     fn parse_export_statement(&mut self, start: Pos, start_byte: usize) -> Option<Stmt<'a>> {
@@ -1107,6 +1139,7 @@ impl<'a> Parser<'a> {
                         return_type,
                         body,
                         is_async,
+                        is_default: false,
                     },
                     Stmt::ReceiverMethod { .. } => {
                         self.error("cannot export a receiver method");
@@ -1117,8 +1150,8 @@ impl<'a> Parser<'a> {
                 Some(Stmt::Export { decl, span })
             }
             TokenKind::Identifier if self.current_text() == "default" => {
-                self.error("unsupported export syntax: default exports are not allowed");
-                None
+                self.advance(); // `default`
+                self.parse_export_default(start, start_byte)
             }
             TokenKind::LBrace => {
                 self.advance(); // `{`
@@ -1171,6 +1204,86 @@ impl<'a> Parser<'a> {
                     "expected `const`, `fn`, `async fn`, `{{` or `default` after `export`, found `{}`",
                     token_name(self.current_kind())
                 ));
+                None
+            }
+        }
+    }
+
+    /// `export default <named fn declaration>` or `export default <identifier>`
+    /// (rfd#12 ESM alignment amendment). Anonymous forms (`export default
+    /// fn () { … }`, `export default { … }`) are rejected: a default export
+    /// must be a named declaration or a named binding, so every import site
+    /// still has a real name to grep for.
+    fn parse_export_default(&mut self, start: Pos, start_byte: usize) -> Option<Stmt<'a>> {
+        match self.current_kind() {
+            TokenKind::Fn | TokenKind::Async => {
+                let fn_offset = if self.current_kind() == TokenKind::Async {
+                    if self.peek_kind(1) != Some(TokenKind::Fn) {
+                        self.error("expected `fn` after `async`");
+                        return None;
+                    }
+                    1
+                } else {
+                    0
+                };
+                if self.peek_kind(fn_offset + 1) == Some(TokenKind::LParen) {
+                    self.error(
+                        "anonymous default export: give the function a name, e.g. `export default fn Page() { ... }`",
+                    );
+                    return None;
+                }
+                let fn_stmt = self.parse_fn_statement(start, start_byte)?;
+                let span = self.span_from(start, start_byte);
+                let decl = match fn_stmt {
+                    Stmt::Function {
+                        name,
+                        type_params,
+                        params,
+                        return_type,
+                        body,
+                        is_async,
+                        ..
+                    } => crate::ast::ExportDecl::Function {
+                        name,
+                        type_params,
+                        params,
+                        return_type,
+                        body,
+                        is_async,
+                        is_default: true,
+                    },
+                    Stmt::ReceiverMethod { .. } => {
+                        self.error("cannot export a receiver method");
+                        return None;
+                    }
+                    _ => unreachable!(),
+                };
+                Some(Stmt::Export { decl, span })
+            }
+            TokenKind::Identifier => {
+                // `export default app` — a named binding, re-exported as the
+                // module's default. Equivalent to `export { app as default }`.
+                let (name_start, name_start_byte) = self.span_start();
+                let name = self.expect_identifier()?;
+                self.expect_statement_end(false)?;
+                let span = self.span_from(start, start_byte);
+                let names = vec![crate::ast::ExportName {
+                    name,
+                    alias: Some("default"),
+                    span: self.span_from(name_start, name_start_byte),
+                }];
+                Some(Stmt::Export {
+                    decl: crate::ast::ExportDecl::NamedGroup {
+                        names: alloc_slice(self.arena, names),
+                        source: None,
+                    },
+                    span,
+                })
+            }
+            _ => {
+                self.error(
+                    "default export must be a named declaration (`export default fn Page() { ... }`) or a named binding (`export default app`)",
+                );
                 None
             }
         }

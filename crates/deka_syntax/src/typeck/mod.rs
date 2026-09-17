@@ -257,6 +257,14 @@ pub struct ModuleExports<'a> {
     pub receiver_methods: HashMap<(&'a str, &'a str), MethodInfo<'a>>,
     /// Value bindings (functions / constants) exported by the module.
     pub values: HashMap<&'a str, Type<'a>>,
+    /// The declared name behind this module's default export, when it has
+    /// one (rfd#12 ESM alignment amendment) — the function name in
+    /// `export default fn Page() { … }`, or the identifier in
+    /// `export default app` / `export { app as default }`. Used only to
+    /// warn an importer whose local name differs from it (the greppability
+    /// rule); the export itself is always looked up under the key
+    /// `"default"` in the maps above, like any other renamed export.
+    pub default_export_declared_name: Option<&'a str>,
     /// Names exported via `export { name }` that are not locally declared
     /// (i.e. re-exports of imports). These pass through to importers.
     pub re_exports: HashSet<&'a str>,
@@ -292,6 +300,7 @@ impl<'a> Default for ModuleExports<'a> {
             newtypes: HashMap::new(),
             receiver_methods: HashMap::new(),
             values: HashMap::new(),
+            default_export_declared_name: None,
             re_exports: HashSet::new(),
             build_fragments: HashMap::new(),
             build_receiver_methods: HashMap::new(),
@@ -976,9 +985,9 @@ pub fn refresh_module_export_values<'a>(
     for stmt in program.statements.iter() {
         let names: Vec<_> = match stmt {
             ast::Stmt::Export {
-                decl: ast::ExportDecl::Function { name, .. },
+                decl: ast::ExportDecl::Function { name, is_default, .. },
                 ..
-            } => vec![(*name, *name)],
+            } => vec![(*name, if *is_default { "default" } else { *name })],
             ast::Stmt::Export {
                 decl:
                     ast::ExportDecl::NamedGroup {
@@ -1576,10 +1585,22 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
                 type_params,
                 params,
                 return_type,
+                is_default,
                 ..
             } => {
+                // `export default fn Page() { … }` exports under the key
+                // `"default"`; the local binding stays `Page` (rfd#12 ESM
+                // alignment amendment). Record the declared name so an
+                // importer whose local name differs from it gets a warning
+                // (the greppability rule).
+                let external = if *is_default {
+                    exports.default_export_declared_name = Some(*name);
+                    "default"
+                } else {
+                    *name
+                };
                 if let Some(ty) = inferred_globals.get(name) {
-                    exports.values.insert(*name, ty.clone());
+                    exports.values.insert(external, ty.clone());
                 } else if type_params.is_empty() {
                     let param_types: Vec<Type<'a>> = params
                         .iter()
@@ -1612,7 +1633,7 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
                         })
                         .unwrap_or(Type::Infer);
                     exports.values.insert(
-                        *name,
+                        external,
                         Type::Function {
                             params: param_types,
                             ret: Box::new(ret),
@@ -1620,13 +1641,21 @@ pub fn collect_module_exports<'a>(program: &'a Program<'a>, _arena: &'a Bump) ->
                         },
                     );
                 } else {
-                    exports.values.insert(*name, Type::Infer);
+                    exports.values.insert(external, Type::Infer);
                 }
             }
             ast::ExportDecl::NamedGroup { names, .. } => {
                 for export_name in names.iter() {
                     let local = export_name.name;
                     let external = export_name.alias.unwrap_or(local);
+                    // `export default app` (desugared here) and the explicit
+                    // `export { app as default }` spelling both name this
+                    // module's default export declaration (rfd#12 ESM
+                    // alignment amendment); record it for the importer
+                    // rename warning.
+                    if external == "default" {
+                        exports.default_export_declared_name = Some(local);
+                    }
 
                     if let Some((members, type_params, span)) =
                         program.statements.iter().find_map(|stmt| match stmt {
@@ -2135,6 +2164,24 @@ impl<'a> Checker<'a> {
             for spec in specifiers.iter() {
                 let imported = spec.imported;
                 let local = spec.local;
+
+                // Greppability rule (rfd#12 ESM alignment amendment): a
+                // default import may rename freely, since `default` has no
+                // name of its own to grep for, but a local name that
+                // disagrees with the declaration it names is a footgun for
+                // anyone reading the exporting module — warn, don't block.
+                if imported == "default" {
+                    if let Some(declared) = exports.default_export_declared_name {
+                        if declared != local {
+                            self.warning_span(
+                                spec.span,
+                                format!(
+                                    "default import `{local}` renames the exported declaration `{declared}`; import it as `{declared}` for greppability"
+                                ),
+                            );
+                        }
+                    }
+                }
 
                 if let Some(info) = exports.interfaces.get(imported) {
                     self.interfaces.insert(local, info.clone());
@@ -5209,6 +5256,55 @@ mod tests {
             "{}",
             errors[0].message
         );
+    }
+
+    #[test]
+    fn default_import_renamed_from_declaration_warns_for_greppability() {
+        // rfd#12 ESM alignment amendment (dsc#280): an import's local name
+        // may differ from the exported declaration's name; it is a warning,
+        // not an error, and the message names the declared name.
+        let arena = Bump::new();
+        let lib_source = "export default fn Page() number { return 1; }";
+        let lib_result = parse(lib_source, &arena);
+        assert!(lib_result.errors.is_empty(), "{:?}", lib_result.errors);
+        let lib_program = lib_result.program.expect("library parse produced no program");
+        let exports = collect_module_exports(&lib_program, &arena);
+        assert_eq!(exports.default_export_declared_name, Some("Page"));
+
+        let main_source = "import Component from \"./page.ds\"; const n: number = Component();";
+        let main_result = parse(main_source, &arena);
+        assert!(main_result.errors.is_empty(), "{:?}", main_result.errors);
+        let main_program = main_result.program.expect("main parse produced no program");
+        let mut imports = HashMap::new();
+        imports.insert("./page.ds", &exports);
+        let result = check_program_with_imports(&main_program, main_source, &imports);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.message.contains("Component") && w.message.contains("Page")),
+            "{:?}",
+            result.warnings
+        );
+    }
+
+    #[test]
+    fn default_import_matching_declared_name_has_no_warning() {
+        let arena = Bump::new();
+        let lib_source = "export default fn Page() number { return 1; }";
+        let lib_result = parse(lib_source, &arena);
+        let lib_program = lib_result.program.expect("library parse produced no program");
+        let exports = collect_module_exports(&lib_program, &arena);
+
+        let main_source = "import Page from \"./page.ds\"; const n: number = Page();";
+        let main_result = parse(main_source, &arena);
+        let main_program = main_result.program.expect("main parse produced no program");
+        let mut imports = HashMap::new();
+        imports.insert("./page.ds", &exports);
+        let result = check_program_with_imports(&main_program, main_source, &imports);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
     }
 
     #[test]

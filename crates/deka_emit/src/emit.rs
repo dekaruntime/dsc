@@ -1919,6 +1919,7 @@ impl<'a> Emitter<'a> {
             | Stmt::Try { .. }
             | Stmt::Opaque { .. }
             | Stmt::Summon { .. }
+            | Stmt::BridgeDecl { .. }
             | Stmt::Empty { .. } => true,
         }
     }
@@ -3368,9 +3369,12 @@ impl<'a> Emitter<'a> {
                 self.out.push_str(&json_string(source));
                 self.out.push(';');
             }
-            Stmt::Opaque { .. } | Stmt::TypeAlias { .. } => {
-                // Erased at runtime.
-            }
+            // Erased at runtime. `BridgeDecl` additionally should never reach
+            // emission in a valid program: it is a hard typeck error
+            // anywhere outside dsc's own embedded host declaration file
+            // (rfd#27's 2026-09-16 amendment), which is never compiled
+            // through this emitter at all.
+            Stmt::Opaque { .. } | Stmt::TypeAlias { .. } | Stmt::BridgeDecl { .. } => {}
             Stmt::Newtype { name, repr, .. } => {
                 self.emit_newtype_factory(name, *repr)?;
             }

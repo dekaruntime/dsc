@@ -25,6 +25,8 @@ mod expr;
 #[cfg(test)]
 mod arrow_tests;
 #[cfg(test)]
+mod bridge_tests;
+#[cfg(test)]
 mod contextual_tests;
 mod hooks;
 #[cfg(test)]
@@ -556,6 +558,7 @@ fn summarize_stmt<'a>(
         | ast::Stmt::TypeAlias { .. }
         | ast::Stmt::Opaque { .. }
         | ast::Stmt::Summon { .. }
+        | ast::Stmt::BridgeDecl { .. }
         | ast::Stmt::Newtype { .. }
         | ast::Stmt::Interface { .. }
         | ast::Stmt::Break { .. }

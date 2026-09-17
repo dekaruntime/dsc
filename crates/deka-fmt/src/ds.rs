@@ -564,6 +564,32 @@ impl<'src> Formatter<'src> {
                 self.write(" } from ");
                 self.write(&format!("\"{}\"", escape_string(source)));
             }
+            Stmt::BridgeDecl { kind, actions, .. } => {
+                self.write("bridge ");
+                self.write(kind);
+                self.write(" {");
+                if !actions.is_empty() {
+                    self.newline();
+                    self.indented(|this| {
+                        for (i, action) in actions.iter().enumerate() {
+                            if i > 0 {
+                                this.newline();
+                            }
+                            if action.is_async {
+                                this.write("async ");
+                            }
+                            this.write("fn ");
+                            this.write(action.name);
+                            this.write("(");
+                            this.fmt_param_list(action.params);
+                            this.write(") ");
+                            this.fmt_type(&action.return_type);
+                        }
+                        this.newline();
+                    });
+                }
+                self.write("}");
+            }
             Stmt::Newtype { name, repr, .. } => {
                 self.write("type ");
                 self.write(name);
@@ -1910,7 +1936,10 @@ fn stmt_span(stmt: &Stmt<'_>) -> Span {
         Stmt::Struct { span, .. } => *span,
         Stmt::Enum { span, .. } => *span,
         Stmt::TypeAlias { span, .. } => *span,
-        Stmt::Opaque { span, .. } | Stmt::Summon { span, .. } | Stmt::Newtype { span, .. } => *span,
+        Stmt::Opaque { span, .. }
+        | Stmt::Summon { span, .. }
+        | Stmt::BridgeDecl { span, .. }
+        | Stmt::Newtype { span, .. } => *span,
         Stmt::Interface { span, .. } => *span,
         Stmt::Expr { span, .. } => *span,
         Stmt::Return { span, .. } => *span,

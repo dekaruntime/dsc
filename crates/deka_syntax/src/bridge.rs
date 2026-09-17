@@ -1,63 +1,212 @@
-//! Host bridge op catalog (rfd#27).
+//! Host bridge declaration catalog (rfd#27, 2026-09-16 amendment; grammar
+//! from rfd#39's declaration-files amendment).
 //!
-//! The bridge itself does not know sync from async — the catalog does
-//! (rfd#27 decision 2). Each `bridge kind.action(args)` call maps to one host
-//! op, declared here as synchronous or asynchronous. The typechecker uses this
-//! to give sync ops the type `Result<T, E>` and async ops
-//! `Promise<Result<T, E>>`, so `await bridge fs.read_file(path)` typechecks
-//! while `bridge crypto.random_bytes(n)` stays a plain `Result`.
+//! Every `bridge kind.action(args)` call is typed from `deka-host.d.ds`, the
+//! declaration file deka generates from `HOST_CATALOG` (the table the
+//! runtime actually executes) and publishes with every release. dsc embeds a
+//! checked-in copy at compile time — synced by `cargo xtask sync-host-decl`
+//! and pinned to `scripts/deka-runtime-version` — and parses it once, with
+//! its own parser, into the same `Stmt::BridgeDecl` / `BridgeAction` AST that
+//! parsing a user's `bridge <kind> { ... }` block would produce. There is no
+//! separate hand-kept table to drift from the grammar: this *is* the
+//! grammar, applied to the one file allowed to use it.
 //!
-//! This table is the compiler-side mirror of the host op declarations in
-//! `deka_host` (`#[op2]` vs `#[op2(async)]`) and the runtime allowlist
-//! (`DS_HOST_CATALOG` in `crates/pool/src/isolate_pool/worker_execution.rs`).
-//! All three must agree: an op marked async here must be dispatched through
-//! an async op host-side, or the emitted `.then(__deka_to_result)` would be a
-//! no-op on a plain value and the isolate would keep blocking.
+//! Before this (dsc#223, dsc#272), the catalog was a hand-written
+//! `BRIDGE_OPS` list of names and async flags, and every bridge call typed as
+//! `Result<Infer, Infer>` regardless of the op's real signature. That list is
+//! gone; the async flag now comes from whether the declared action is
+//! `async fn`.
 
-/// One entry in the bridge op catalog.
-pub struct BridgeOp {
-    pub kind: &'static str,
-    pub action: &'static str,
-    /// True when the host op is declared `#[op2(async)]` and the bridge
-    /// dispatch returns a Promise.
+use std::sync::OnceLock;
+
+use crate::ast::{self, Program};
+use bumpalo::Bump;
+
+/// The checked-in copy of deka's generated host declaration file. Do not
+/// hand-edit: `cargo xtask sync-host-decl` overwrites it from the release
+/// pinned in `scripts/deka-runtime-version`, and CI's drift check fails a PR
+/// that edited this file (or bumped the pin) without also syncing it.
+pub const HOST_DECL_SOURCE: &str = include_str!("../host-decl/deka-host.d.ds");
+
+/// A resolved entry from the host catalog: `kind.action`'s declared
+/// parameter and return types, and whether the call is async.
+#[derive(Clone, Copy)]
+pub struct BridgeSignature {
+    pub params: &'static [ast::Param<'static>],
+    pub return_type: &'static ast::Type<'static>,
     pub is_async: bool,
+    /// Byte span of this action's declaration within [`HOST_DECL_SOURCE`] —
+    /// used by the LSP to point go-to-definition at the right line (dsc#272
+    /// item 7), not just open the file.
+    pub span: ast::Span,
 }
 
-/// The full catalog of host ops reachable through `bridge kind.action(..)`.
-/// Mirrors `DS_HOST_CATALOG`; unknown kinds/actions are rejected by the
-/// runtime allowlist, not here.
-pub const BRIDGE_OPS: &[BridgeOp] = &[
-    // crypto — rfd#27's canonical sync op.
-    BridgeOp { kind: "crypto", action: "random_bytes", is_async: false },
-    BridgeOp { kind: "crypto", action: "digest", is_async: false },
-    BridgeOp { kind: "crypto", action: "hmac", is_async: false },
-    BridgeOp { kind: "crypto", action: "secure_compare", is_async: false },
-    BridgeOp { kind: "crypto", action: "aes_256_gcm_encrypt", is_async: false },
-    BridgeOp { kind: "crypto", action: "aes_256_gcm_decrypt", is_async: false },
-    BridgeOp { kind: "crypto", action: "bcrypt_verify", is_async: false },
-    // fs — blocking std::fs IO; dispatched through the async op so a read or
-    // write does not stall the isolate (deka#578).
-    BridgeOp { kind: "fs", action: "read_file", is_async: true },
-    BridgeOp { kind: "fs", action: "write_file", is_async: true },
-    BridgeOp { kind: "fs", action: "read_dir", is_async: true },
-    BridgeOp { kind: "fs", action: "mkdirs", is_async: true },
-    // net / tls — synchronous std::net dispatch today.
-    BridgeOp { kind: "net", action: "connect", is_async: false },
-    BridgeOp { kind: "net", action: "listen", is_async: false },
-    BridgeOp { kind: "net", action: "accept", is_async: false },
-    BridgeOp { kind: "net", action: "read", is_async: false },
-    BridgeOp { kind: "net", action: "write", is_async: false },
-    BridgeOp { kind: "net", action: "close", is_async: false },
-    BridgeOp { kind: "net", action: "set_deadline", is_async: false },
-    BridgeOp { kind: "tls", action: "upgrade", is_async: false },
-    // time
-    BridgeOp { kind: "time", action: "sleep_ms", is_async: false },
-];
+struct HostCatalog {
+    program: &'static Program<'static>,
+}
+
+static CATALOG: OnceLock<HostCatalog> = OnceLock::new();
+
+fn catalog() -> &'static HostCatalog {
+    CATALOG.get_or_init(|| {
+        // Leaked once for the process lifetime: the embedded catalog is
+        // parsed a single time and consulted by every subsequent compile,
+        // the same way `lib.*.d.ts` is loaded once inside `tsc`.
+        let arena: &'static Bump = Box::leak(Box::new(Bump::new()));
+        let result = crate::parse::parse(HOST_DECL_SOURCE, arena);
+        let program = result.program.unwrap_or_else(|| {
+            panic!(
+                "deka-host.d.ds embedded in dsc failed to parse (this is a dsc bug, not a \
+                 user error — the checked-in file is out of sync or corrupt): {:?}",
+                result.errors
+            )
+        });
+        for stmt in program.statements {
+            if !matches!(stmt, ast::Stmt::BridgeDecl { .. }) {
+                panic!(
+                    "deka-host.d.ds contains a non-`bridge` top-level statement; the embedded \
+                     catalog must only declare `bridge <kind> {{ ... }}` blocks"
+                );
+            }
+        }
+        let program: &'static Program<'static> = Box::leak(Box::new(program));
+        HostCatalog { program }
+    })
+}
+
+/// Look up `kind.action` in the embedded host catalog.
+pub fn find(kind: &str, action: &str) -> Option<BridgeSignature> {
+    for stmt in catalog().program.statements {
+        let ast::Stmt::BridgeDecl {
+            kind: decl_kind,
+            actions,
+            ..
+        } = stmt
+        else {
+            continue;
+        };
+        if *decl_kind != kind {
+            continue;
+        }
+        for entry in actions.iter() {
+            if entry.name == action {
+                return Some(BridgeSignature {
+                    params: entry.params,
+                    return_type: &entry.return_type,
+                    is_async: entry.is_async,
+                    span: entry.span,
+                });
+            }
+        }
+    }
+    None
+}
+
+/// True when `kind` is a declared bridge kind at all, regardless of action —
+/// used to tell "unknown kind" from "unknown action on a known kind" at a
+/// bad call site.
+pub fn kind_exists(kind: &str) -> bool {
+    catalog()
+        .program
+        .statements
+        .iter()
+        .any(|stmt| matches!(stmt, ast::Stmt::BridgeDecl { kind: k, .. } if *k == kind))
+}
 
 /// Whether the host dispatches `kind.action` asynchronously, i.e. the bridge
-/// call evaluates to a `Promise` rather than a plain value.
+/// call evaluates to a `Promise` rather than a plain value. Unknown ops are
+/// not async; the typechecker reports them as unknown separately.
 pub fn bridge_op_is_async(kind: &str, action: &str) -> bool {
-    BRIDGE_OPS
+    find(kind, action).is_some_and(|sig| sig.is_async)
+}
+
+/// Render a declared type back into DekaScript source syntax, for
+/// diagnostics and LSP hover. The catalog only ever contains primitive and
+/// generic types (no user types, no type parameters), so this need not
+/// handle every `ast::Type` shape as richly as a full pretty-printer would.
+pub fn format_type(ty: &ast::Type<'_>) -> String {
+    match ty {
+        ast::Type::Named { name, .. } => (*name).to_string(),
+        ast::Type::Generic { base, args, .. } => {
+            let rendered: Vec<String> = args.iter().map(format_type).collect();
+            format!("{base}<{}>", rendered.join(", "))
+        }
+        ast::Type::Function { params, ret, .. } => {
+            let rendered: Vec<String> = params.iter().map(format_type).collect();
+            format!("fn({}) {}", rendered.join(", "), format_type(ret))
+        }
+        ast::Type::Option { inner, .. } => format!("Option<{}>", format_type(inner)),
+        ast::Type::Tuple { elements, .. } => {
+            let rendered: Vec<String> = elements.iter().map(format_type).collect();
+            format!("({})", rendered.join(", "))
+        }
+        ast::Type::Record { .. } => "{ .. }".to_string(),
+        ast::Type::Union { members, .. } => {
+            let rendered: Vec<String> = members.iter().map(format_type).collect();
+            rendered.join(" | ")
+        }
+    }
+}
+
+/// Render `kind.action`'s declared signature as DekaScript source, for
+/// hover text. `None` for an unknown op.
+pub fn format_signature(kind: &str, action: &str) -> Option<String> {
+    let sig = find(kind, action)?;
+    let params: Vec<String> = sig
+        .params
         .iter()
-        .any(|op| op.kind == kind && op.action == action && op.is_async)
+        .map(|p| {
+            let name = p.binding.identifier().unwrap_or("_");
+            match &p.ty {
+                Some(ty) => format!("{name}: {}", format_type(ty)),
+                None => name.to_string(),
+            }
+        })
+        .collect();
+    let ret = format_type(sig.return_type);
+    let prefix = if sig.is_async { "async fn" } else { "fn" };
+    Some(format!("{prefix} {action}({}) {ret}", params.join(", ")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedded_catalog_parses_and_only_declares_bridge_blocks() {
+        // Forces the lazy parse; panics (failing the test) if the checked-in
+        // file is malformed or was hand-edited into something else.
+        assert!(kind_exists("crypto"));
+    }
+
+    #[test]
+    fn known_sync_op_resolves() {
+        let sig = find("crypto", "random_bytes").expect("crypto.random_bytes is in the catalog");
+        assert!(!sig.is_async);
+        assert_eq!(sig.params.len(), 1);
+    }
+
+    #[test]
+    fn known_async_op_resolves() {
+        let sig = find("fs", "read_file").expect("fs.read_file is in the catalog");
+        assert!(sig.is_async);
+    }
+
+    #[test]
+    fn unknown_action_is_none() {
+        assert!(find("crypto", "not_a_real_action").is_none());
+    }
+
+    #[test]
+    fn unknown_kind_is_none_and_not_a_known_kind() {
+        assert!(find("not_a_real_kind", "anything").is_none());
+        assert!(!kind_exists("not_a_real_kind"));
+    }
+
+    #[test]
+    fn bridge_op_is_async_matches_declared_async_flag() {
+        assert!(bridge_op_is_async("fs", "read_file"));
+        assert!(!bridge_op_is_async("crypto", "random_bytes"));
+        assert!(!bridge_op_is_async("nope", "nope"));
+    }
 }

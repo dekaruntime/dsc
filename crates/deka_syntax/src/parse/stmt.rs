@@ -1,8 +1,9 @@
 //! Statement parsing.
 
 use crate::ast::{
-    EnumCase, ExportDecl, Expr, ForInit, InterfaceMember, NewtypeRepr, Param, ParamBinding, Pos, Program,
-    Stmt, StructField, TemplatePart, Type, TypeParam, alloc, alloc_slice,
+    BridgeAction, EnumCase, ExportDecl, Expr, ForInit, InterfaceMember, NewtypeRepr, Param,
+    ParamBinding, Pos, Program, Stmt, StructField, TemplatePart, Type, TypeParam, alloc,
+    alloc_slice,
 };
 use crate::diagnostics::Diagnostic;
 use crate::lexer::TokenKind;
@@ -116,6 +117,13 @@ impl<'a> Parser<'a> {
                 source,
                 span: self.span_from(start, start_byte),
             });
+        }
+        if self.current_kind() == TokenKind::Bridge && self.bridge_decl_ahead() {
+            if in_block {
+                self.error("`bridge` declaration blocks are only allowed at the top level");
+                return None;
+            }
+            return self.parse_bridge_decl_statement(start, start_byte);
         }
         if self.current_kind() == TokenKind::Identifier && self.current_text() == "throw" {
             self.error("there is no lowercase `throw` statement; use `Throw(e)` to raise into the exception channel");
@@ -929,6 +937,50 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// Parse an ambient `bridge <kind> { fn action(args) Ret; async fn
+    /// action(args) Ret }` declaration block (rfd#39's declaration grammar,
+    /// specialized for the host catalog by rfd#27's 2026-09-16 amendment).
+    /// Grammar only — whether this block is allowed to appear at all (only
+    /// inside dsc's embedded `deka-host.d.ds`) is enforced by the checker,
+    /// not the parser, since the parser has no notion of "which file this
+    /// is."
+    fn parse_bridge_decl_statement(&mut self, start: Pos, start_byte: usize) -> Option<Stmt<'a>> {
+        self.advance(); // `bridge`
+        let kind = self.expect_identifier()?;
+        self.expect(TokenKind::LBrace)?;
+        self.skip_newlines();
+
+        let mut actions = Vec::new();
+        while !self.at(TokenKind::RBrace) && !self.at_end() {
+            let (action_start, action_start_byte) = self.span_start();
+            let is_async = self.eat(TokenKind::Async);
+            self.expect(TokenKind::Fn)?;
+            let name = self.expect_identifier()?;
+            self.expect(TokenKind::LParen)?;
+            self.skip_newlines();
+            let params = self.parse_params()?;
+            self.expect(TokenKind::RParen)?;
+            self.reject_return_type_colon();
+            let return_type = self.parse_type()?;
+            actions.push(BridgeAction {
+                name,
+                params,
+                return_type,
+                is_async,
+                span: self.span_from(action_start, action_start_byte),
+            });
+            self.expect_statement_end(true)?;
+            self.skip_newlines();
+        }
+        self.expect(TokenKind::RBrace)?;
+
+        Some(Stmt::BridgeDecl {
+            kind,
+            actions: alloc_slice(self.arena, actions),
+            span: self.span_from(start, start_byte),
+        })
+    }
+
     fn parse_type_alias_statement(&mut self, start: Pos, start_byte: usize) -> Option<Stmt<'a>> {
         let keyword = self.current_kind();
         self.advance(); // `type` or `alias`
@@ -1500,6 +1552,7 @@ fn stmt_has_top_level_await(stmt: &Stmt<'_>) -> bool {
         | Stmt::Interface { .. }
         | Stmt::Opaque { .. }
         | Stmt::Summon { .. }
+        | Stmt::BridgeDecl { .. }
         | Stmt::Import { .. } => false,
     }
 }

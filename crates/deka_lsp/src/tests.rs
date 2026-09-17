@@ -1026,3 +1026,67 @@ fn rename_rewrites_param_and_local_in_active_file() {
         collect_symbol_rename_edits(std::slice::from_ref(&dir), &uri, source, "name", "who");
     assert_eq!(edits.get(&uri).map(Vec::len), Some(2), "edits={edits:?}");
 }
+
+// dsc#272 item 7 / rfd#27's 2026-09-16 amendment: hover and go-to-definition
+// on a `bridge kind.action(...)` call.
+
+fn parse_for_bridge_test(source: &str) -> deka_syntax::ParseResult<'static> {
+    // Leaked, not scoped: the returned `Program` borrows the arena, and these
+    // tests only need it for the duration of one assertion.
+    let arena: &'static bumpalo::Bump = Box::leak(Box::new(bumpalo::Bump::new()));
+    let source: &'static str = Box::leak(source.to_string().into_boxed_str());
+    deka_syntax::parse(source, arena)
+}
+
+#[test]
+fn bridge_call_at_finds_the_call_containing_the_cursor() {
+    let source = "export fn f(len: number) Result<bytes, string> { return bridge crypto.random_bytes(len) }";
+    let parsed = parse_for_bridge_test(source);
+    let program = parsed.program.expect("parses");
+    let offset = source.find("random_bytes").expect("random_bytes");
+    let (kind, action) = bridge_call_at(&program, offset).expect("bridge call at cursor");
+    assert_eq!(kind, "crypto");
+    assert_eq!(action, "random_bytes");
+    // Outside the call span entirely: no match.
+    assert!(bridge_call_at(&program, 0).is_none());
+}
+
+#[test]
+fn bridge_call_hover_shows_the_declared_signature() {
+    let source = "export fn f(len: number) Result<bytes, string> { return bridge crypto.random_bytes(len) }";
+    let parsed = parse_for_bridge_test(source);
+    let program = parsed.program.expect("parses");
+    let offset = source.find("random_bytes").expect("random_bytes");
+    let hover = bridge_call_hover(&program, offset).expect("hover over a known bridge call");
+    assert!(hover.contains("fn random_bytes(len: number) Result<bytes, string>"), "{hover}");
+    assert!(hover.contains("deka-host.d.ds"), "{hover}");
+}
+
+#[test]
+fn bridge_call_hover_is_none_off_a_bridge_call() {
+    let source = "export fn f(len: number) number { return len }";
+    let parsed = parse_for_bridge_test(source);
+    let program = parsed.program.expect("parses");
+    assert!(bridge_call_hover(&program, source.find("len").unwrap()).is_none());
+}
+
+#[test]
+fn bridge_call_definition_points_into_the_materialized_host_decl_file() {
+    let source = "export async fn f(path: string) Promise<Result<bytes, string>> { return await bridge fs.read_file(path) }";
+    let parsed = parse_for_bridge_test(source);
+    let program = parsed.program.expect("parses");
+    let offset = source.find("read_file").expect("read_file");
+    let location =
+        bridge_call_definition(&program, offset).expect("definition for a known bridge call");
+    let path = location.uri.to_file_path().expect("file:// uri");
+    assert_eq!(path.file_name().and_then(|n| n.to_str()), Some("deka-host.d.ds"));
+    let metadata = fs::metadata(&path).expect("materialized file exists");
+    assert!(metadata.permissions().readonly(), "host decl document must be read-only");
+    let contents = fs::read_to_string(&path).expect("read materialized file");
+    assert_eq!(contents, deka_syntax::bridge::HOST_DECL_SOURCE);
+    // The range actually lands on `read_file`'s own declaration line, not
+    // just anywhere in the file.
+    let line_start = location.range.start.line as usize;
+    let declared_line = contents.lines().nth(line_start).unwrap_or("");
+    assert!(declared_line.contains("read_file"), "{declared_line}");
+}

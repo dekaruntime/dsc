@@ -529,6 +529,10 @@ impl<'a> Checker<'a> {
                         let message = if *name == "Math" {
                             "`Math` is not available in DekaScript; import { PI } from \"math\" instead for PI, or use number methods such as `x.sqrt()`"
                                 .to_string()
+                        } else if self.type_only_imports.contains(name) {
+                            format!(
+                                "cannot use `{name}` as a value because it was imported with `import type`"
+                            )
                         } else {
                             format!("unknown identifier `{name}`")
                         };
@@ -847,13 +851,18 @@ impl<'a> Checker<'a> {
                     // tag: skip the uninitialized-variable check entirely.
                 } else if let Some(first) = element.tag.chars().next() {
                     if first.is_uppercase() && self.lookup_var(element.tag).is_none() {
-                        self.error_span(
-                            *span,
+                        let message = if self.type_only_imports.contains(element.tag) {
+                            format!(
+                                "cannot use `{}` as a value because it was imported with `import type`",
+                                element.tag
+                            )
+                        } else {
                             format!(
                                 "`{}` is used here but is not initialized until later",
                                 element.tag
-                            ),
-                        );
+                            )
+                        };
+                        self.error_span(*span, message);
                     }
                 }
                 let has_client_directive = element
@@ -1235,6 +1244,15 @@ impl<'a> Checker<'a> {
         fields: &'a [ast::StructLiteralField<'a>],
         span: ast::Span,
     ) -> Type<'a> {
+        if self.type_only_imports.contains(name) {
+            self.error_span(
+                span,
+                format!(
+                    "cannot use `{name}` as a value because it was imported with `import type`"
+                ),
+            );
+            return Type::Error;
+        }
         if self.opaques.contains_key(name) {
             self.error_span(
                 span,
@@ -1978,7 +1996,15 @@ impl<'a> Checker<'a> {
                 _ => false,
             };
             if !valid {
-                self.error_span(span, format!("component `{}` is a function from a props interface or struct to ReactNode; JSX values have type ReactNode", element.tag));
+                let message = if self.type_only_imports.contains(element.tag) {
+                    format!(
+                        "cannot use `{}` as a value because it was imported with `import type`",
+                        element.tag
+                    )
+                } else {
+                    format!("component `{}` is a function from a props interface or struct to ReactNode; JSX values have type ReactNode", element.tag)
+                };
+                self.error_span(span, message);
             }
         }
         let Some((interface_name, fields)) = self.jsx_props_fields(element.tag) else {
@@ -2235,6 +2261,16 @@ impl<'a> Checker<'a> {
 
         if enum_name == "Result" {
             return self.check_result_constructor(case_name, payload, payload_type, span);
+        }
+
+        if self.type_only_imports.contains(enum_name) {
+            self.error_span(
+                span,
+                format!(
+                    "cannot use `{enum_name}` as a value because it was imported with `import type`"
+                ),
+            );
+            return Type::Error;
         }
 
         // User-defined enum.
@@ -3490,7 +3526,14 @@ impl<'a> Checker<'a> {
                                 // Do not turn a missing pipe target into Infer:
                                 // that used to let `value |> missing` pass any
                                 // enclosing assignment or return check.
-                                self.error_span(*span, format!("unknown identifier `{name}`"));
+                                let message = if self.type_only_imports.contains(name) {
+                                    format!(
+                                        "cannot use `{name}` as a value because it was imported with `import type`"
+                                    )
+                                } else {
+                                    format!("unknown identifier `{name}`")
+                                };
+                                self.error_span(*span, message);
                                 Type::Error
                             }
                         };

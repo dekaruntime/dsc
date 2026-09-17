@@ -1591,10 +1591,11 @@ impl<'src> Formatter<'src> {
 // --- helpers that don't need Formatter state -----------------------------
 
 fn import_spec_to_string(spec: &ImportSpec<'_>) -> String {
+    let type_kw = if spec.type_only { "type " } else { "" };
     if spec.imported == spec.local {
-        spec.imported.to_string()
+        format!("{type_kw}{}", spec.imported)
     } else {
-        format!("{} as {}", spec.imported, spec.local)
+        format!("{type_kw}{} as {}", spec.imported, spec.local)
     }
 }
 
@@ -1620,8 +1621,28 @@ fn import_to_string(stmt: &Stmt<'_>) -> String {
     if specifiers.is_empty() {
         format!("import \"{source}\"")
     } else {
-        let parts: Vec<String> = specifiers.iter().map(import_spec_to_string).collect();
-        format!("import {{ {} }} from \"{source}\"", parts.join(", "))
+        let statement_type_only = specifiers.iter().all(|s| s.type_only);
+        let parts: Vec<String> = specifiers
+            .iter()
+            .map(|spec| {
+                if statement_type_only {
+                    // Statement-level `import type` carries the keyword; skip
+                    // the per-specifier `type` prefix.
+                    if spec.imported == spec.local {
+                        spec.imported.to_string()
+                    } else {
+                        format!("{} as {}", spec.imported, spec.local)
+                    }
+                } else {
+                    import_spec_to_string(spec)
+                }
+            })
+            .collect();
+        if statement_type_only {
+            format!("import type {{ {} }} from \"{source}\"", parts.join(", "))
+        } else {
+            format!("import {{ {} }} from \"{source}\"", parts.join(", "))
+        }
     }
 }
 
@@ -2624,6 +2645,20 @@ struct Employee {
             output
         );
         parse_ds(&output);
+    }
+
+    #[test]
+    fn formats_import_type_statement() {
+        let input = "import type { Point } from \"./types.ds\"\n";
+        let output = format_ds(input).unwrap();
+        assert_eq!(output, input, "got: {output:?}");
+    }
+
+    #[test]
+    fn formats_inline_type_import_specifier() {
+        let input = "import { type Point, origin } from \"./types.ds\"\n";
+        let output = format_ds(input).unwrap();
+        assert_eq!(output, input, "got: {output:?}");
     }
 
     #[test]

@@ -265,6 +265,10 @@ pub struct ImportSpec<'a> {
     pub imported: &'a str,
     pub local: &'a str,
     pub span: Span,
+    /// `true` for names brought in by `import type { ... }` or the inline
+    /// `import { type X, ... }` form. Type-only imports are erased at emit
+    /// and may only appear in type positions.
+    pub type_only: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]

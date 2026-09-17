@@ -7,6 +7,7 @@ pub(crate) struct ImportInfo {
     pub(crate) span: Span,
     pub(crate) module_span: Option<Span>,
     pub(crate) is_wasm: bool,
+    pub(crate) type_only: bool,
 }
 
 pub(crate) fn parse_imports(source: &str) -> Vec<ImportInfo> {
@@ -22,6 +23,15 @@ pub(crate) fn parse_imports(source: &str) -> Vec<ImportInfo> {
                 .strip_prefix("import")
                 .unwrap_or(trimmed)
                 .trim_start();
+            // `import type { A } from "..."` — the `type` keyword is not a
+            // default import name.
+            let statement_type_only = rest.starts_with("type")
+                && rest.len() > 4
+                && (rest.as_bytes()[4].is_ascii_whitespace()
+                    || rest.as_bytes()[4] == b'{');
+            if statement_type_only {
+                rest = rest.strip_prefix("type").unwrap_or(rest).trim_start();
+            }
             let mut default_name: Option<&str> = None;
             let mut spec_part: Option<&str> = None;
 
@@ -55,6 +65,7 @@ pub(crate) fn parse_imports(source: &str) -> Vec<ImportInfo> {
                             span,
                             module_span: Some(module_span),
                             is_wasm,
+                            type_only: statement_type_only,
                         });
                     }
                 }
@@ -69,6 +80,16 @@ pub(crate) fn parse_imports(source: &str) -> Vec<ImportInfo> {
                             cursor += spec.len() + 1;
                             continue;
                         }
+                        // Inline type-only specifier: `import { type A, b }`.
+                        let inline_type_only = spec_trim.starts_with("type")
+                            && spec_trim.len() > 4
+                            && (spec_trim.as_bytes()[4].is_ascii_whitespace()
+                                || spec_trim.as_bytes()[4] == b'}');
+                        let spec_trim = if inline_type_only {
+                            spec_trim[4..].trim_start()
+                        } else {
+                            spec_trim
+                        };
                         let (imported, local) =
                             if let Some((left, right)) = spec_trim.split_once(" as ") {
                                 (left.trim(), right.trim())
@@ -87,6 +108,7 @@ pub(crate) fn parse_imports(source: &str) -> Vec<ImportInfo> {
                                     span,
                                     module_span: Some(module_span),
                                     is_wasm,
+                                    type_only: statement_type_only || inline_type_only,
                                 });
                             } else {
                                 imports.push(ImportInfo {
@@ -96,6 +118,7 @@ pub(crate) fn parse_imports(source: &str) -> Vec<ImportInfo> {
                                     span,
                                     module_span: None,
                                     is_wasm,
+                                    type_only: statement_type_only || inline_type_only,
                                 });
                             }
                         }

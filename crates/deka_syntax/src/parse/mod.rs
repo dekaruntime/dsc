@@ -1689,6 +1689,52 @@ mod tests {
     }
 
     #[test]
+    fn parse_import_type_statement() {
+        let arena = Bump::new();
+        let result = parse("import type { A, B } from \"./types.ds\";", &arena);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[0] {
+            Stmt::Import { specifiers, .. } => {
+                assert_eq!(specifiers.len(), 2);
+                assert!(specifiers.iter().all(|s| s.type_only));
+                assert_eq!(specifiers[0].imported, "A");
+                assert_eq!(specifiers[1].imported, "B");
+            }
+            _ => panic!("expected import"),
+        }
+    }
+
+    #[test]
+    fn parse_import_inline_type_specifier() {
+        let arena = Bump::new();
+        let result = parse("import { type A, b } from \"./types.ds\";", &arena);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.unwrap();
+        match &program.statements[0] {
+            Stmt::Import { specifiers, .. } => {
+                assert_eq!(specifiers.len(), 2);
+                assert!(specifiers[0].type_only);
+                assert!(!specifiers[1].type_only);
+                assert_eq!(specifiers[0].imported, "A");
+                assert_eq!(specifiers[1].imported, "b");
+            }
+            _ => panic!("expected import"),
+        }
+    }
+
+    #[test]
+    fn parse_import_type_rejects_side_effect_form() {
+        let arena = Bump::new();
+        let result = parse("import type \"./types.ds\";", &arena);
+        assert!(
+            result.errors.iter().any(|e| e.message.contains("expected `{`")),
+            "{:?}",
+            result.errors
+        );
+    }
+
+    #[test]
     fn parse_export_const() {
         let arena = Bump::new();
         let result = parse("export const x: number = 42;", &arena);

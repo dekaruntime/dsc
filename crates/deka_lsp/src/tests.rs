@@ -44,6 +44,28 @@ fn collects_all_matching_import_module_spans() {
 }
 
 #[test]
+fn parses_import_type_statement() {
+    let src = "import type { A } from 'db/postgres'\n";
+    let imports = parse_imports(src);
+    assert_eq!(imports.len(), 1);
+    assert_eq!(imports[0].imported, "A");
+    assert_eq!(imports[0].local, "A");
+    assert_eq!(imports[0].from, "db/postgres");
+    assert!(imports[0].type_only);
+}
+
+#[test]
+fn parses_inline_type_import_specifier() {
+    let src = "import { type A, b } from 'db/postgres'\n";
+    let imports = parse_imports(src);
+    assert_eq!(imports.len(), 2);
+    assert_eq!(imports[0].imported, "A");
+    assert!(imports[0].type_only);
+    assert_eq!(imports[1].imported, "b");
+    assert!(!imports[1].type_only);
+}
+
+#[test]
 fn target_mode_defaults_to_server() {
     let params = InitializeParams::default();
     assert_eq!(

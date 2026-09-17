@@ -1935,6 +1935,10 @@ struct Checker<'a> {
     /// name, for the call-site check that runs after inference solves the
     /// type arguments (rfd#56 phase 2).
     fn_param_bounds: HashMap<&'a str, Vec<(&'a str, Type<'a>)>>,
+    /// Bindings introduced by `import type { ... }` or inline `type` import
+    /// specifiers. These names are available in type positions but cannot be
+    /// used as values; value use is reported with a fix-named diagnostic.
+    type_only_imports: HashSet<&'a str>,
     /// Are we currently inside a function body?
     in_function: bool,
     /// Are we currently inside an async function body?
@@ -2041,6 +2045,7 @@ impl<'a> Checker<'a> {
             param_bounds: Vec::new(),
             bound_cache: HashMap::new(),
             fn_param_bounds: HashMap::new(),
+            type_only_imports: HashSet::new(),
             in_function: false,
             in_async_function: false,
             exception_forms: ExceptionLowering {
@@ -2136,6 +2141,10 @@ impl<'a> Checker<'a> {
                 let imported = spec.imported;
                 let local = spec.local;
 
+                if spec.type_only {
+                    self.type_only_imports.insert(local);
+                }
+
                 if let Some(info) = exports.interfaces.get(imported) {
                     self.interfaces.insert(local, info.clone());
                 }
@@ -2174,40 +2183,42 @@ impl<'a> Checker<'a> {
                     }
                 }
 
-                if let Some(ty) = exports.values.get(imported) {
-                    let ty = exceptions::localize_export(ty, specifiers, exports);
-                    self.intern_imported_context(local, &ty);
-                    self.declare_var(local, ty.clone());
-                    // A value can carry a private struct type (for example,
-                    // `export const origin = Point { ... }`). Reuse the
-                    // compiler-private closure from dsc#86 for field lookup
-                    // without adding the struct to `self.structs`, which
-                    // would make it nameable or constructible by importers.
-                    let mut names = HashSet::new();
-                    collect_struct_type_names(&ty, &mut names);
-                    for name in names {
-                        if let Some(closure) = exports.promotion_structs.get(name) {
-                            self.promotion_structs.insert(name, closure.clone());
+                if !spec.type_only {
+                    if let Some(ty) = exports.values.get(imported) {
+                        let ty = exceptions::localize_export(ty, specifiers, exports);
+                        self.intern_imported_context(local, &ty);
+                        self.declare_var(local, ty.clone());
+                        // A value can carry a private struct type (for example,
+                        // `export const origin = Point { ... }`). Reuse the
+                        // compiler-private closure from dsc#86 for field lookup
+                        // without adding the struct to `self.structs`, which
+                        // would make it nameable or constructible by importers.
+                        let mut names = HashSet::new();
+                        collect_struct_type_names(&ty, &mut names);
+                        for name in names {
+                            if let Some(closure) = exports.promotion_structs.get(name) {
+                                self.promotion_structs.insert(name, closure.clone());
+                            }
                         }
                     }
-                }
 
-                if let Some(tree) = exports.build_fragments.get(imported) {
-                    // A renamed import binds the fragment under the local
-                    // name, so the spliced descriptor must root under the
-                    // local name too (dsc#51). Nested factory references keep
-                    // the declaring module's names — hydration obtains those
-                    // through the module's factory closure (dsc#52).
-                    let mut tree = tree.clone();
-                    if local != imported {
-                        match &mut tree {
-                            DescriptorTree::Struct { name, .. }
-                            | DescriptorTree::Enum { name, .. }
-                            | DescriptorTree::Newtype { name, .. } => *name = local,
-                            _ => {}
+                    if let Some(tree) = exports.build_fragments.get(imported) {
+                        // A renamed import binds the fragment under the local
+                        // name, so the spliced descriptor must root under the
+                        // local name too (dsc#51). Nested factory references keep
+                        // the declaring module's names — hydration obtains those
+                        // through the module's factory closure (dsc#52).
+                        let mut tree = tree.clone();
+                        if local != imported {
+                            match &mut tree {
+                                DescriptorTree::Struct { name, .. }
+                                | DescriptorTree::Enum { name, .. }
+                                | DescriptorTree::Newtype { name, .. } => *name = local,
+                                _ => {}
+                            }
                         }
+                        self.build_fragments.insert(local, tree);
                     }
-                    self.build_fragments.insert(local, tree);
                 }
 
                 let known = exports.interfaces.contains_key(imported)

@@ -1842,14 +1842,14 @@ impl<'a> Emitter<'a> {
 
         if self.live_names.is_some() {
             return specifiers.iter().any(|specifier| {
-                self.is_live(specifier.local) || self.is_build_factory_import(specifier)
+                !specifier.type_only
+                    && (self.is_live(specifier.local) || self.is_build_factory_import(specifier))
             });
         }
 
-        if specifiers
-            .iter()
-            .any(|specifier| self.is_build_factory_import(specifier))
-        {
+        if specifiers.iter().any(|specifier| {
+            !specifier.type_only && self.is_build_factory_import(specifier)
+        }) {
             return true;
         }
 
@@ -1857,8 +1857,9 @@ impl<'a> Emitter<'a> {
         // their module initialization may be observable. Only an import whose
         // every binding belongs solely to a dev entry can leave runtime JS.
         !specifiers.iter().all(|specifier| {
-            dev_uses_name(self.program, specifier.local)
-                && !runtime_uses_name(self.program, specifier.local)
+            specifier.type_only
+                || (dev_uses_name(self.program, specifier.local)
+                    && !runtime_uses_name(self.program, specifier.local))
         })
     }
 
@@ -1873,7 +1874,8 @@ impl<'a> Emitter<'a> {
             Stmt::Import { specifiers, .. } => {
                 specifiers.is_empty()
                     || specifiers.iter().any(|spec| {
-                        !self.is_erased_binding(spec.local)
+                        !spec.type_only
+                            && !self.is_erased_binding(spec.local)
                             && (self.is_live(spec.local) || self.is_build_factory_import(spec))
                     })
             }
@@ -3186,7 +3188,8 @@ impl<'a> Emitter<'a> {
                     let kept: Vec<_> = specifiers
                         .iter()
                         .filter(|spec| {
-                            !self.is_erased_binding(spec.local)
+                            !spec.type_only
+                                && !self.is_erased_binding(spec.local)
                                 && (self.is_live(spec.local) || self.is_build_factory_import(spec))
                         })
                         .collect();
@@ -3211,7 +3214,8 @@ impl<'a> Emitter<'a> {
                     let kept: Vec<_> = specifiers
                         .iter()
                         .filter(|spec| {
-                            !self.is_erased_binding(spec.local)
+                            !spec.type_only
+                                && !self.is_erased_binding(spec.local)
                                 && (self.is_live(spec.local) || self.is_build_factory_import(spec))
                         })
                         .collect();

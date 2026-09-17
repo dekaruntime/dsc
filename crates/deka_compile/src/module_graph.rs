@@ -899,6 +899,9 @@ pub fn check_module_graph_with_options(
                 continue;
             };
             for specifier in specifiers.iter() {
+                if specifier.type_only {
+                    continue;
+                }
                 let is_factory = dep_exports.structs.contains_key(specifier.imported)
                     || dep_exports.enums.contains_key(specifier.imported)
                     || dep_exports.newtypes.contains_key(specifier.imported);
@@ -1203,6 +1206,9 @@ fn resolve_module_re_exports<'a>(
         {
             if let Some(dep) = module.dependencies.get(*source) {
                 for spec in specifiers.iter() {
+                    if spec.type_only {
+                        continue;
+                    }
                     imports_by_local.insert(spec.local, (spec.imported, dep));
                 }
             }
@@ -3211,6 +3217,105 @@ mod tests {
             result.modules[&page].contains("\"client:load\": true"),
             "{}",
             result.modules[&page]
+        );
+    }
+
+    #[test]
+    fn graph_import_type_is_usable_in_type_positions() {
+        let root = PathBuf::from("/project");
+        let types = root.join("types.ds");
+        let main = root.join("main.ds");
+        let mut files = HashMap::new();
+        files.insert(
+            types.clone(),
+            "struct Point { x: number }\n\
+             export fn origin() Point { return Point { x: 0 } }\n\
+             export { Point }"
+                .to_string(),
+        );
+        files.insert(
+            main.clone(),
+            "import type { Point } from \"./types.ds\";\n\
+             import { origin } from \"./types.ds\";\n\
+             const p: Point = origin();"
+                .to_string(),
+        );
+        let mut aliases = HashMap::new();
+        aliases.insert((main.clone(), "./types.ds".to_string()), types.clone());
+        let result =
+            compile_module_graph(&main, &InMemoryLoader { files, aliases }).expect("compile graph");
+        let main_js = &result.modules[&main];
+        assert!(
+            main_js.contains("import { origin } from \"./types.ds\";"),
+            "value import must remain, got: {}",
+            main_js
+        );
+        assert!(
+            !main_js.contains("Point"),
+            "type-only import must be erased, got: {}",
+            main_js
+        );
+    }
+
+    #[test]
+    fn graph_import_type_rejects_value_use() {
+        let root = PathBuf::from("/project");
+        let types = root.join("types.ds");
+        let main = root.join("main.ds");
+        let mut files = HashMap::new();
+        files.insert(
+            types.clone(),
+            "struct Point { x: number }\nexport { Point }".to_string(),
+        );
+        files.insert(
+            main.clone(),
+            "import type { Point } from \"./types.ds\";\nconst p = Point { x: 0 };".to_string(),
+        );
+        let mut aliases = HashMap::new();
+        aliases.insert((main.clone(), "./types.ds".to_string()), types.clone());
+        let errors = compile_module_graph(&main, &InMemoryLoader { files, aliases })
+            .expect_err("type-only import used as value must fail");
+        assert!(
+            errors.iter().any(|d| d.message
+                .contains("cannot use `Point` as a value because it was imported with `import type`")),
+            "expected import-type value-use error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn graph_mixed_inline_type_import_keeps_value_binding() {
+        let root = PathBuf::from("/project");
+        let types = root.join("types.ds");
+        let main = root.join("main.ds");
+        let mut files = HashMap::new();
+        files.insert(
+            types.clone(),
+            "struct Point { x: number }\n\
+             export fn origin() Point { return Point { x: 0 } }\n\
+             export { Point }"
+                .to_string(),
+        );
+        files.insert(
+            main.clone(),
+            "import { type Point, origin } from \"./types.ds\";\n\
+             const p: Point = origin();"
+                .to_string(),
+        );
+        let mut aliases = HashMap::new();
+        aliases.insert((main.clone(), "./types.ds".to_string()), types.clone());
+        let result =
+            compile_module_graph(&main, &InMemoryLoader { files, aliases }).expect("compile graph");
+        let main_js = &result.modules[&main];
+        assert!(
+            main_js.contains("import { origin } from \"./types.ds\";"),
+            "value binding must survive erasure, got: {}",
+            main_js
+        );
+        assert!(
+            !main_js.contains("Point"),
+            "type-only binding must be erased, got: {}",
+            main_js
         );
     }
 }

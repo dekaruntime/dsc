@@ -1001,8 +1001,20 @@ impl<'a> Parser<'a> {
     fn parse_import_statement(&mut self, start: Pos, start_byte: usize) -> Option<Stmt<'a>> {
         self.advance(); // `import`
 
+        // `import type { A, B } from "..."` imports names that exist only at
+        // compile time and are erased at emit.
+        let statement_type_only = self.at(TokenKind::Type) && self.current_text() == "type";
+        if statement_type_only {
+            self.advance(); // `type`
+        }
+
         // Side-effect import: `import "./mod.ds";`
+        // `import type "./mod.ds"` is meaningless and rejected.
         if self.at(TokenKind::String) {
+            if statement_type_only {
+                self.error("expected `{` after `import type`; a type-only import must name bindings");
+                return None;
+            }
             let source = self.bump_str(self.current_text());
             self.advance();
             self.expect_statement_end(false)?;
@@ -1018,6 +1030,13 @@ impl<'a> Parser<'a> {
         if !self.at(TokenKind::RBrace) {
             loop {
                 let (spec_start, spec_start_byte) = self.span_start();
+                // Inline type-only specifier: `import { type A, b } from "..."`.
+                let inline_type_only = !statement_type_only
+                    && self.at(TokenKind::Type)
+                    && self.current_text() == "type";
+                if inline_type_only {
+                    self.advance(); // `type`
+                }
                 let imported = self.expect_identifier()?;
                 let local = if self.eat(TokenKind::As) {
                     self.expect_identifier()?
@@ -1028,6 +1047,7 @@ impl<'a> Parser<'a> {
                     imported,
                     local,
                     span: self.span_from(spec_start, spec_start_byte),
+                    type_only: statement_type_only || inline_type_only,
                 });
                 if !self.eat(TokenKind::Comma) {
                     break;

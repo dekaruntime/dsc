@@ -121,10 +121,14 @@ pub(crate) fn hover_from_import(source: &str, offset: usize) -> Option<String> {
     let imports = parse_imports(source);
     for import in imports {
         if import.span.start <= offset && offset < import.span.end {
+            let type_kw = if import.type_only { "type " } else { "" };
             let line = if import.imported == "default" {
-                format!("import {} from '{}'", import.local, import.from)
+                format!("import {}{} from '{}'", type_kw, import.local, import.from)
             } else {
-                format!("import {{ {} }} from '{}'", import.local, import.from)
+                format!(
+                    "import {}{{{}}} from '{}'",
+                    type_kw, import.local, import.from
+                )
             };
             return Some(format!("```dekascript\n{}\n```", line));
         }

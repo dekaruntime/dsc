@@ -1314,6 +1314,31 @@ assert.equal(threw, true, `expected throw, got ${uncovered}`);
     }
 
     #[test]
+    fn emit_erases_type_only_import_statement() {
+        let out = parse_and_emit("import type { A } from \"./types.ds\";");
+        assert!(
+            !out.contains("import"),
+            "type-only import must be erased, got: {}",
+            out
+        );
+    }
+
+    #[test]
+    fn emit_mixed_inline_type_import_keeps_value_binding() {
+        let out = parse_and_emit("import { type A, b } from \"./types.ds\";\nconst x = b;");
+        assert!(
+            out.contains("import { b } from \"./types.ds\";"),
+            "value binding must survive erasure, got: {}",
+            out
+        );
+        assert!(
+            !out.contains("A"),
+            "type-only binding must be erased, got: {}",
+            out
+        );
+    }
+
+    #[test]
     fn emit_export_const() {
         let out = parse_and_emit("export const x: number = 42;");
         assert!(out.contains("export const x = 42;"), "got: {}", out);

@@ -339,6 +339,21 @@ impl<'a> Parser<'a> {
                 self.parse_type_alias_statement(start, start_byte)
             }
 
+            // `import { a } from "…"` is a declaration; `import.meta` at
+            // statement start is the meta-property used as an expression
+            // (`import.meta.env`-style access, or a bare `import.meta.url;`
+            // statement) — rfd#12 amendment, dsc#282.
+            TokenKind::Import
+                if self.tokens.get(self.pos + 1).map(|t| t.kind) == Some(TokenKind::Dot) =>
+            {
+                let expr = self.parse_expression()?;
+                self.expect_statement_end(in_block)?;
+                Some(Stmt::Expr {
+                    expr,
+                    span: self.span_from(start, start_byte),
+                })
+            }
+
             TokenKind::Import => self.parse_import_statement(start, start_byte),
 
             TokenKind::Export => self.parse_export_statement(start, start_byte),
@@ -1639,6 +1654,7 @@ pub fn expr_has_top_level_await(expr: &Expr<'_>) -> bool {
         | Expr::String { .. }
         | Expr::Boolean { .. }
         | Expr::None { .. }
-        | Expr::Identifier { .. } => false,
+        | Expr::Identifier { .. }
+        | Expr::ImportMeta { .. } => false,
     }
 }

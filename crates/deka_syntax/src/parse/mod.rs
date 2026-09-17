@@ -3167,4 +3167,74 @@ mod tests {
         }
     }
 
+    // rfd#12 amendment, dsc#282: `import.meta` as a meta-property.
+
+    #[test]
+    fn import_meta_field_access_parses() {
+        for field in ["url", "dirname", "filename", "main"] {
+            let source = format!("const x = import.meta.{field}");
+            let arena = Bump::new();
+            let result = parse(&source, &arena);
+            assert!(result.errors.is_empty(), "{source}: {:?}", result.errors);
+            let program = result.program.expect("parses");
+            match program.statements[0] {
+                Stmt::Const {
+                    value: Expr::FieldAccess { object, field: got_field, .. },
+                    ..
+                } => {
+                    assert_eq!(got_field, field);
+                    assert!(
+                        matches!(object, Expr::ImportMeta { .. }),
+                        "expected Expr::ImportMeta, got {object:?}"
+                    );
+                }
+                ref other => panic!("expected const with field access, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn import_meta_resolve_call_parses() {
+        let arena = Bump::new();
+        let result = parse("const x = import.meta.resolve(\"./sibling.ds\")", &arena);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let program = result.program.expect("parses");
+        match program.statements[0] {
+            Stmt::Const {
+                value: Expr::Call { callee, .. },
+                ..
+            } => {
+                assert!(matches!(
+                    callee,
+                    Expr::FieldAccess { field: "resolve", .. }
+                ));
+            }
+            ref other => panic!("expected const with call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn import_meta_without_dot_meta_errors() {
+        let arena = Bump::new();
+        let result = parse("const x = import.other", &arena);
+        assert!(
+            result.errors.iter().any(|e| e.message.contains("import.meta")),
+            "{:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn dynamic_import_call_errors_with_static_import_message() {
+        let arena = Bump::new();
+        let result = parse("const x = import(spec)", &arena);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.message.contains("imports must be static")),
+            "{:?}",
+            result.errors
+        );
+    }
 }

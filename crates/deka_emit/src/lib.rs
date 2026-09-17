@@ -112,6 +112,21 @@ async fn asyncSum([a, b]: [number, number] = [4, 5]) Promise<number> { return a 
         );
     }
 
+    // rfd#12 amendment, dsc#282: the compiler never inlines `import.meta`; it
+    // emits the meta-property unchanged so the host (deka's module loader, or
+    // the browser) supplies the object at load time.
+    #[test]
+    fn import_meta_emits_verbatim() {
+        let out = parse_check_and_emit(
+            "export const u = import.meta.url;\nexport const d = import.meta.dirname;\nexport const f = import.meta.filename;\nexport const m = import.meta.main;\nexport const r = import.meta.resolve(\"./sibling\");",
+        );
+        assert!(out.contains("import.meta.url"), "{out}");
+        assert!(out.contains("import.meta.dirname"), "{out}");
+        assert!(out.contains("import.meta.filename"), "{out}");
+        assert!(out.contains("import.meta.main"), "{out}");
+        assert!(out.contains("import.meta.resolve(\"./sibling\")"), "{out}");
+    }
+
     #[test]
     fn flat_tuple_parameters_exact_output() {
         assert_eq!(

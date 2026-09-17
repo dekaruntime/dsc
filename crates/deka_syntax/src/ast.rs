@@ -600,6 +600,14 @@ pub enum Expr<'a> {
         form: FunctionForm,
         span: Span,
     },
+    /// `import.meta`, the ESM meta-property (rfd#12 amendment, dsc#282). Only
+    /// this node's field accesses (`import.meta.url`, `.resolve(...)`, …) are
+    /// meaningful; the checker gives the bare node the frozen `import.meta`
+    /// struct type. Emission writes `import.meta` back out unchanged — the
+    /// compiler never inlines a value for it.
+    ImportMeta {
+        span: Span,
+    },
 }
 
 /// How a function literal was spelled (dsc#252).
@@ -819,6 +827,7 @@ impl<'a> Expr<'a> {
             Expr::Paren { span, .. } => *span,
             Expr::TemplateLiteral { span, .. } => *span,
             Expr::Function { span, .. } => *span,
+            Expr::ImportMeta { span, .. } => *span,
         }
     }
 }

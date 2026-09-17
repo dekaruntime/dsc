@@ -2433,7 +2433,8 @@ impl<'a> CaptureWalker<'a> {
             | ast::Expr::String { .. }
             | ast::Expr::Boolean { .. }
             | ast::Expr::None { .. }
-            | ast::Expr::JsxText { .. } => {}
+            | ast::Expr::JsxText { .. }
+            | ast::Expr::ImportMeta { .. } => {}
         }
     }
 

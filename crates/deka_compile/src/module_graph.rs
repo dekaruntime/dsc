@@ -878,6 +878,44 @@ pub fn check_module_graph_with_options(
         ));
         return Err(errors);
     }
+    // rfd#12 amendment (dsc#282): `import.meta.dirname` / `.filename` /
+    // `.main` do not exist in a browser, so every module the client graph
+    // actually keeps is scanned for them here, alongside the ui/server
+    // check above. `url` and `resolve(...)` stay legal -- the browser (or,
+    // for a `client:*` island, deka's hydration runtime) supplies them.
+    if options.client {
+        for path in plan.keep.iter() {
+            let Some(program) = programs.get(path) else {
+                continue;
+            };
+            let mut client_errors = Vec::new();
+            for stmt in program.statements.iter() {
+                deka_syntax::visit::walk_stmt(stmt, &mut |expr| {
+                    if let deka_syntax::Expr::FieldAccess { object, field, span } = expr {
+                        if matches!(**object, deka_syntax::Expr::ImportMeta { .. })
+                            && matches!(*field, "dirname" | "filename" | "main")
+                        {
+                            client_errors.push(diag(
+                                span.start.line,
+                                span.start.column,
+                                format!(
+                                    "`import.meta.{field}` does not exist in a client graph \
+                                     (browsers have no filesystem); `url` and `resolve(...)` \
+                                     are available instead (rfd#12)"
+                                ),
+                            ));
+                        }
+                    }
+                });
+            }
+            for diagnostic in client_errors {
+                errors.push(ModuleDiagnostic::prefixed(path.clone(), diagnostic));
+            }
+        }
+        if !errors.is_empty() {
+            return Err(errors);
+        }
+    }
 
     // A build entry can construct an imported struct/enum/newtype solely for
     // its declared-type materializer. The runtime graph still needs that
@@ -2715,6 +2753,66 @@ mod tests {
             "{:?}",
             err
         );
+    }
+
+    #[test]
+    fn client_graph_rejects_import_meta_dirname_filename_main() {
+        // rfd#12 amendment, dsc#282: these three do not exist in a browser.
+        for field in ["dirname", "filename", "main"] {
+            let root = PathBuf::from("/project");
+            let main = root.join("main.dsx");
+            let mut files = HashMap::new();
+            files.insert(
+                main.clone(),
+                format!("export const x = import.meta.{field};"),
+            );
+            let loader = InMemoryLoader {
+                files,
+                aliases: HashMap::new(),
+            };
+            let err = compile_module_graph_with_options(
+                &main,
+                &loader,
+                GraphCompileOptions {
+                    client: true,
+                    ..Default::default()
+                },
+            )
+            .expect_err(&format!("import.meta.{field} on a client entry"));
+            assert!(
+                err.iter()
+                    .any(|d| d.message.contains(&format!("import.meta.{field}"))),
+                "{field}: {:?}",
+                err
+            );
+        }
+    }
+
+    #[test]
+    fn client_graph_allows_import_meta_url_and_resolve() {
+        // rfd#12 amendment, dsc#282: the browser (or the island hydration
+        // runtime) supplies these two, so a client graph must not reject them.
+        let root = PathBuf::from("/project");
+        let main = root.join("main.dsx");
+        let mut files = HashMap::new();
+        files.insert(
+            main.clone(),
+            "export const u = import.meta.url;\nexport const r = import.meta.resolve(\"./x\");"
+                .to_string(),
+        );
+        let loader = InMemoryLoader {
+            files,
+            aliases: HashMap::new(),
+        };
+        let result = compile_module_graph_with_options(
+            &main,
+            &loader,
+            GraphCompileOptions {
+                client: true,
+                ..Default::default()
+            },
+        );
+        assert!(result.is_ok(), "{:?}", result.err());
     }
 
     #[test]

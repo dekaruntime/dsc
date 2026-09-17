@@ -335,6 +335,13 @@ impl fmt::Display for Type<'_> {
             Type::Var => write!(f, "_"),
             Type::Never => write!(f, "never"),
             Type::None => write!(f, "none"),
+            // `import.meta` (rfd#12 amendment, dsc#282) displays as its frozen
+            // struct shape rather than a bare name, so hover and `.d.ds` show
+            // the fields instead of an opaque type identifier.
+            Type::Named { name: "import.meta" } => write!(
+                f,
+                "{{ url: string, dirname: string, filename: string, main: boolean, resolve: fn(string) string }}"
+            ),
             Type::Named { name } => write!(f, "{name}"),
             Type::Option { inner } => write!(f, "Option<{inner}>"),
             Type::Function {

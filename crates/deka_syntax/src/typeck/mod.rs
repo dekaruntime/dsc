@@ -691,7 +691,8 @@ fn summarize_expr<'a>(
         | ast::Expr::None { .. }
         | ast::Expr::Identifier { .. }
         | ast::Expr::Unsafe { .. }
-        | ast::Expr::JsxText { .. } => {}
+        | ast::Expr::JsxText { .. }
+        | ast::Expr::ImportMeta { .. } => {}
     }
 }
 
@@ -6168,6 +6169,62 @@ mod tests {
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(
             errors[0].message.contains("found type `T`"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    // rfd#12 amendment, dsc#282: `import.meta` typechecks as a frozen struct.
+
+    #[test]
+    fn import_meta_string_fields_typecheck() {
+        for field in ["url", "dirname", "filename"] {
+            let source = format!("const x: string = import.meta.{field}");
+            let errors = typeck(&source);
+            assert!(errors.is_empty(), "{source}: {errors:?}");
+        }
+    }
+
+    #[test]
+    fn import_meta_main_typechecks_as_boolean() {
+        let errors = typeck("const x: boolean = import.meta.main");
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn import_meta_resolve_typechecks_as_string_to_string_function() {
+        let errors = typeck("const x: string = import.meta.resolve(\"./sibling\")");
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn import_meta_env_is_rejected() {
+        let errors = typeck("const x = import.meta.env");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("zero environment variables"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn import_meta_unknown_property_is_rejected() {
+        let errors = typeck("const x = import.meta.bogus");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("import.meta` has no property `bogus`"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn import_meta_assignment_is_rejected() {
+        let errors = typeck("import.meta.url = \"x\"");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("immutable"),
             "{}",
             errors[0].message
         );

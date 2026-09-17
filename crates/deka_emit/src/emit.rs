@@ -3890,6 +3890,13 @@ impl<'a> Emitter<'a> {
             Expr::Identifier { name, .. } => {
                 self.out.push_str(name);
             }
+            // `import.meta` (rfd#12 amendment, dsc#282): emitted verbatim.
+            // The compiler never inlines a value for it — the host (deka's
+            // module loader, or the browser for an island) supplies the
+            // object at load time.
+            Expr::ImportMeta { .. } => {
+                self.out.push_str("import.meta");
+            }
             Expr::Binary {
                 op, left, right, ..
             } => {

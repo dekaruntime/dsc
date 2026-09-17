@@ -1840,6 +1840,11 @@ impl<'a> Emitter<'a> {
             return true;
         }
 
+        // `import type { … }` erases entirely: it names no runtime binding.
+        if specifiers.iter().all(|specifier| specifier.is_type_only) {
+            return false;
+        }
+
         if self.live_names.is_some() {
             return specifiers.iter().any(|specifier| {
                 self.is_live(specifier.local) || self.is_build_factory_import(specifier)
@@ -1873,7 +1878,8 @@ impl<'a> Emitter<'a> {
             Stmt::Import { specifiers, .. } => {
                 specifiers.is_empty()
                     || specifiers.iter().any(|spec| {
-                        !self.is_erased_binding(spec.local)
+                        !spec.is_type_only
+                            && !self.is_erased_binding(spec.local)
                             && (self.is_live(spec.local) || self.is_build_factory_import(spec))
                     })
             }
@@ -3187,7 +3193,8 @@ impl<'a> Emitter<'a> {
                     let kept: Vec<_> = specifiers
                         .iter()
                         .filter(|spec| {
-                            !self.is_erased_binding(spec.local)
+                            !spec.is_type_only
+                                && !self.is_erased_binding(spec.local)
                                 && (self.is_live(spec.local) || self.is_build_factory_import(spec))
                         })
                         .collect();
@@ -3212,7 +3219,8 @@ impl<'a> Emitter<'a> {
                     let kept: Vec<_> = specifiers
                         .iter()
                         .filter(|spec| {
-                            !self.is_erased_binding(spec.local)
+                            !spec.is_type_only
+                                && !self.is_erased_binding(spec.local)
                                 && (self.is_live(spec.local) || self.is_build_factory_import(spec))
                         })
                         .collect();

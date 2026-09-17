@@ -291,6 +291,11 @@ pub struct ImportSpec<'a> {
     pub imported: &'a str,
     pub local: &'a str,
     pub span: Span,
+    /// `import type { A }` or the inline `import { type A, b }` form (rfd#12
+    /// ESM alignment amendment). The name resolves for type positions only;
+    /// using it as a value is a typeck error, and the emitter drops it from
+    /// the emitted `import` statement entirely.
+    pub is_type_only: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]

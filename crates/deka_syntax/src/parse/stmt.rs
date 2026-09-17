@@ -1065,11 +1065,24 @@ impl<'a> Parser<'a> {
             });
         }
 
+        // `import type { A, B } from "…"` (rfd#12 ESM alignment amendment):
+        // every specifier in the statement is type-only. Only recognized when
+        // `type` is immediately followed by `{` — `import type from "…"` is a
+        // default import of a binding literally named `type` (dsc#280), not
+        // this form.
+        let all_type_only =
+            self.at(TokenKind::Type) && self.peek_kind(1) == Some(TokenKind::LBrace);
+        if all_type_only {
+            self.advance(); // `type`
+        }
+
         self.expect(TokenKind::LBrace)?;
         let mut specs = Vec::new();
         if !self.at(TokenKind::RBrace) {
             loop {
                 let (spec_start, spec_start_byte) = self.span_start();
+                // Inline per-specifier form: `import { type A, b } from "…"`.
+                let is_type_only = all_type_only || self.eat(TokenKind::Type);
                 let imported = self.expect_identifier()?;
                 let local = if self.eat(TokenKind::As) {
                     self.expect_identifier()?
@@ -1080,6 +1093,7 @@ impl<'a> Parser<'a> {
                     imported,
                     local,
                     span: self.span_from(spec_start, spec_start_byte),
+                    is_type_only,
                 });
                 if !self.eat(TokenKind::Comma) {
                     break;

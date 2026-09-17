@@ -1,4 +1,0 @@
-opaque type Handle
-summon { total handle() Handle, total read(h: Handle) number } from "./foreign.mjs"
-const saved = handle
-if (read(saved()) != 42) { panic("handle identity"); }

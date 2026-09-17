@@ -1,4 +1,0 @@
-fn greeting(name: string) string {
-    const shout = name;
-    return shout;
-}

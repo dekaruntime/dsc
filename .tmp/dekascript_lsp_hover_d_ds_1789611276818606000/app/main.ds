@@ -1,2 +1,0 @@
-import { scene } from "./three.mjs"
-const s = scene();

@@ -1,3 +1,0 @@
-export fn greeting(name: string) string {
-    return name;
-}

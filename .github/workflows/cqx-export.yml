@@ -1,0 +1,181 @@
+name: cqx
+
+# What this repository scores, and what the explorer shows.
+#
+# Two jobs, because they answer different questions. A pull request wants a
+# number and a direction, which needs no credentials and nothing published. A
+# push to main wants the commit browsable at explorer.deka.gg, which is the only
+# case worth keeping.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  COMMITS: 5
+
+jobs:
+  # ---------------------------------------------------------------------------
+  report:
+    name: score
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch cqx
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo samifouad/cqx \
+            --pattern cqx-linux-x86_64 --output cqx
+          gh release download --repo samifouad/cqx --pattern SHA256SUMS --output SHA256SUMS
+          sed 's|cqx-linux-x86_64|cqx|' SHA256SUMS | grep ' cqx$' | sha256sum -c -
+          chmod +x cqx
+
+      # A score on its own says little — every project sits somewhere. What a
+      # reviewer needs is the direction this change moves it in, so the base of
+      # the pull request is scored too.
+      - name: Score this change, and what it is based on
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          score() {
+            ./cqx extract "$1" > facts.ndjson 2>/dev/null
+            ./cqx score --facts facts.ndjson --json 2>/dev/null > "$2"
+          }
+          score . head.json
+          git fetch --depth=1 origin "$BASE"
+          git worktree add --detach ../base "$BASE"
+          score ../base base.json
+
+      - name: Say what changed
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+
+          head = json.load(open('head.json'))
+          base = json.load(open('base.json'))
+
+          print('| | ' + ' | '.join(head['scores']) + ' |')
+          print('|---|' + '---|' * len(head['scores']))
+          print('| base | ' + ' | '.join(str(v) for v in base['scores'].values()) + ' |')
+          print('| this | ' + ' | '.join(str(v) for v in head['scores'].values()) + ' |')
+
+          moved = {
+              category: value - base['scores'].get(category, value)
+              for category, value in head['scores'].items()
+          }
+          print('| | ' + ' | '.join(
+              f'**{d:+}**' if d else '·' for d in moved.values()) + ' |')
+          print()
+          print(f"{head['lines']:,} lines, {head['lines'] - base['lines']:+,} against the base.")
+
+          # Only the rules that actually took something off, worst first: a list
+          # of everything that passed is not a review.
+          hurting = sorted(
+              (r for r in head['rules'] if r['deducted'] > 0),
+              key=lambda r: -r['deducted'],
+          )
+          if hurting:
+              print()
+              print('| rule | category | off | what it measures |')
+              print('|---|---|---|---|')
+              for rule in hurting[:10]:
+                  print(f"| `{rule['rule']}` | {rule['category']} | "
+                        f"−{rule['deducted']:.0f} | {rule['describes']} |")
+          PY
+
+  # ---------------------------------------------------------------------------
+  publish:
+    name: publish to the explorer
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    # Where the bucket credentials live. They are scoped to the cqx bucket and
+    # to nothing else.
+    environment: release
+    # One publisher at a time: two runs writing one index would race over which
+    # timeline is current, and the loser would not know.
+    concurrency:
+      group: cqx-publish
+      cancel-in-progress: false
+    env:
+      BUCKET: cqx
+      AWS_ACCESS_KEY_ID: ${{ secrets.CQX_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.CQX_R2_SECRET_ACCESS_KEY }}
+      AWS_ENDPOINT: ${{ secrets.CQX_R2_ENDPOINT }}
+      AWS_DEFAULT_REGION: auto
+    steps:
+      # Deep enough that a first-parent walk of five commits cannot run out of
+      # history on a branch that merges often.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 60
+
+      - name: Fetch cqx
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo samifouad/cqx \
+            --pattern cqx-linux-x86_64 --output cqx
+          gh release download --repo samifouad/cqx --pattern SHA256SUMS --output SHA256SUMS
+          sed 's|cqx-linux-x86_64|cqx|' SHA256SUMS | grep ' cqx$' | sha256sum -c -
+          chmod +x cqx
+
+      # A dataset names its commit and describes nothing else, which makes it
+      # immutable — written once, cached forever, never analysed twice. Taking
+      # down the ones the bucket already has is what turns "the last five
+      # commits" into "the one that is new".
+      - name: Take down what the bucket already has
+        run: |
+          mkdir -p "out/${{ github.repository }}"
+          : > have.txt
+          for sha in $(git rev-list --first-parent -n "$COMMITS" HEAD | cut -c1-8); do
+            if aws s3 cp "s3://$BUCKET/${{ github.repository }}/$sha.json" \
+                 "out/${{ github.repository }}/$sha.json" \
+                 --endpoint-url="$AWS_ENDPOINT" --only-show-errors 2>/dev/null; then
+              echo "$sha.json" >> have.txt
+              echo "have $sha"
+            else
+              echo "need $sha"
+            fi
+          done
+
+      - name: Export
+        run: ./cqx export . --commits "$COMMITS" --name "${{ github.repository }}" --out out
+
+      - name: Put back what is new
+        run: |
+          for path in out/${{ github.repository }}/*.json; do
+            name=$(basename "$path")
+            # The index is the one file that changes, so it always goes up.
+            if [ "$name" != "index.json" ] && grep -qxF "$name" have.txt; then
+              echo "unchanged $name"
+              continue
+            fi
+            aws s3 cp "$path" "s3://$BUCKET/${{ github.repository }}/$name" \
+              --endpoint-url="$AWS_ENDPOINT" \
+              --content-type application/json --only-show-errors
+            echo "published $name"
+          done
+
+      - name: Say what is live
+        run: |
+          {
+            echo "[explorer.deka.gg/${{ github.repository }}](https://explorer.deka.gg/${{ github.repository }})"
+            echo
+            python3 - <<'PY'
+          import json
+          index = json.load(open('out/${{ github.repository }}/index.json'))
+          categories = list(index['commits'][0]['scores'])
+          print('| commit | subject | ' + ' | '.join(categories) + ' |')
+          print('|---|---|' + '---|' * len(categories))
+          for commit in reversed(index['commits']):
+              scores = ' | '.join(str(commit['scores'][c]) for c in categories)
+              print(f"| `{commit['short']}` | {commit['subject'][:48]} | {scores} |")
+          PY
+          } >> "$GITHUB_STEP_SUMMARY"

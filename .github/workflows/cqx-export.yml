@@ -24,71 +24,24 @@ jobs:
     name: score
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # So each finding lands on its own line in Files changed, rather than in
+      # a comment that grows on every push.
+      security-events: write
     steps:
+      # Deep enough to reach the base of the pull request without a second
+      # fetch: that is what turns a score into a direction.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Fetch cqx
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release download --repo samifouad/cqx \
-            --pattern cqx-linux-x86_64 --output cqx
-          gh release download --repo samifouad/cqx --pattern SHA256SUMS --output SHA256SUMS
-          sed 's|cqx-linux-x86_64|cqx|' SHA256SUMS | grep ' cqx$' | sha256sum -c -
-          chmod +x cqx
-
-      # A score on its own says little — every project sits somewhere. What a
-      # reviewer needs is the direction this change moves it in, so the base of
-      # the pull request is scored too.
-      - name: Score this change, and what it is based on
-        env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-        run: |
-          score() {
-            ./cqx extract "$1" > facts.ndjson 2>/dev/null
-            ./cqx score --facts facts.ndjson --json 2>/dev/null > "$2"
-          }
-          score . head.json
-          git fetch --depth=1 origin "$BASE"
-          git worktree add --detach ../base "$BASE"
-          score ../base base.json
-
-      - name: Say what changed
-        run: |
-          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
-          import json
-
-          head = json.load(open('head.json'))
-          base = json.load(open('base.json'))
-
-          print('| | ' + ' | '.join(head['scores']) + ' |')
-          print('|---|' + '---|' * len(head['scores']))
-          print('| base | ' + ' | '.join(str(v) for v in base['scores'].values()) + ' |')
-          print('| this | ' + ' | '.join(str(v) for v in head['scores'].values()) + ' |')
-
-          moved = {
-              category: value - base['scores'].get(category, value)
-              for category, value in head['scores'].items()
-          }
-          print('| | ' + ' | '.join(
-              f'**{d:+}**' if d else '·' for d in moved.values()) + ' |')
-          print()
-          print(f"{head['lines']:,} lines, {head['lines'] - base['lines']:+,} against the base.")
-
-          # Only the rules that actually took something off, worst first: a list
-          # of everything that passed is not a review.
-          hurting = sorted(
-              (r for r in head['rules'] if r['deducted'] > 0),
-              key=lambda r: -r['deducted'],
-          )
-          if hurting:
-              print()
-              print('| rule | category | off | what it measures |')
-              print('|---|---|---|---|')
-              for rule in hurting[:10]:
-                  print(f"| `{rule['rule']}` | {rule['category']} | "
-                        f"−{rule['deducted']:.0f} | {rule['describes']} |")
-          PY
+      - uses: samifouad/cqx-action@v1
+        with:
+          # Reporting only, to begin with. dsc's score moves every day and a
+          # gate that fails the author teaches the author to turn it off.
+          # Flip this to true once the numbers settle.
+          fail: 'false'
 
   # ---------------------------------------------------------------------------
   publish:
@@ -116,15 +69,16 @@ jobs:
         with:
           fetch-depth: 60
 
-      - name: Fetch cqx
-        env:
-          GH_TOKEN: ${{ github.token }}
+      # The installer picks the binary for this runner and checks it against
+      # the sums published beside it. Naming the asset here is what broke: the
+      # release renamed cqx-linux-x86_64 to cqx-linux-x64 and this went on
+      # asking for a file that no longer exists.
+      - name: Install cqx
         run: |
-          gh release download --repo samifouad/cqx \
-            --pattern cqx-linux-x86_64 --output cqx
-          gh release download --repo samifouad/cqx --pattern SHA256SUMS --output SHA256SUMS
-          sed 's|cqx-linux-x86_64|cqx|' SHA256SUMS | grep ' cqx$' | sha256sum -c -
-          chmod +x cqx
+          set -euo pipefail
+          export CQX_INSTALL_DIR="${RUNNER_TEMP}/cqx" CQX_NO_MODIFY_PATH=1
+          curl -fsSL https://cqx.bio/install | sh
+          echo "${CQX_INSTALL_DIR}/bin" >> "$GITHUB_PATH"
 
       # A dataset names its commit and describes nothing else, which makes it
       # immutable — written once, cached forever, never analysed twice. Taking
@@ -146,7 +100,7 @@ jobs:
           done
 
       - name: Export
-        run: ./cqx export . --commits "$COMMITS" --name "${{ github.repository }}" --out out
+        run: cqx export . --commits "$COMMITS" --name "${{ github.repository }}" --out out
 
       - name: Put back what is new
         run: |

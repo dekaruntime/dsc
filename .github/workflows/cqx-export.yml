@@ -77,7 +77,7 @@ jobs:
         run: |
           set -euo pipefail
           export CQX_INSTALL_DIR="${RUNNER_TEMP}/cqx" CQX_NO_MODIFY_PATH=1
-          curl -fsSL https://cqx.bio/install | sh
+          curl -fsSL https://cqx.dev/install | sh
           echo "${CQX_INSTALL_DIR}/bin" >> "$GITHUB_PATH"
 
       # A dataset names its commit and describes nothing else, which makes it

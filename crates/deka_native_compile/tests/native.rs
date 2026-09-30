@@ -106,3 +106,35 @@ fn box_contract_parses_and_rejects_invalid_dimensions() {
     let decoded = serde_json::from_str(&serde_json::to_string(&program).unwrap()).unwrap();
     assert_eq!(program, decoded);
 }
+
+#[test]
+fn conditional_animation_targets_are_checked_and_emitted() {
+    let source = r#"export fn App() ReactNode {
+        const [open, setOpen] = useState(0);
+        return (<button className={open == 1 ? "w-48 opacity-100 translate-x-8 transition-all duration-400 ease-linear" : "w-24 opacity-0 -translate-x-8 transition-all duration-400 ease-linear"}
+          onClick={fn() { setOpen(1 - open); }}>Toggle</button>);
+    }"#;
+    let program = compile(source).unwrap();
+    let choice = program.root.style_when.as_ref().unwrap();
+    assert_eq!(
+        choice.condition,
+        deka_native_ir::Condition::Equal(Number::State(0), Number::Literal(1.))
+    );
+    assert_eq!(choice.then_style.opacity, 1.);
+    assert_eq!(choice.else_style.opacity, 0.);
+    assert_eq!(choice.else_style.translate_x, -32.);
+    assert_eq!(choice.then_style.transition, 15);
+    assert_eq!(choice.then_style.duration_ms, 400.);
+    let rust = deka_native_compile::emit_rust(&program);
+    assert!(rust.contains("if (state[0]) == (1.0)"));
+    for invalid in [
+        "opacity-101",
+        "duration-NaN",
+        "translate-x-inf",
+        "transition-magic",
+    ] {
+        assert!(compile(&source.replace("opacity-100", invalid)).is_err());
+    }
+    let decoded = serde_json::from_str(&serde_json::to_string(&program).unwrap()).unwrap();
+    assert_eq!(program, decoded);
+}

@@ -72,6 +72,14 @@ pub struct Style {
     pub max_height: Length,
     pub clip: bool,
     pub nowrap: Option<bool>,
+    pub opacity: f32,
+    pub translate_x: f32,
+    pub translate_y: f32,
+    /// Bitset: opacity=1, translation=2, size=4, colours=8.
+    pub transition: u8,
+    pub duration_ms: f32,
+    /// 0 linear, 1 ease-out, 2 ease-in-out.
+    pub easing: u8,
 }
 impl Default for Style {
     fn default() -> Self {
@@ -99,6 +107,12 @@ impl Default for Style {
             max_height: Length::Auto,
             clip: false,
             nowrap: None,
+            opacity: 1.,
+            translate_x: 0.,
+            translate_y: 0.,
+            transition: 0,
+            duration_ms: 200.,
+            easing: 1,
         }
     }
 }
@@ -115,7 +129,7 @@ mod program {
     use super::Style;
     use serde::{Deserialize, Serialize};
     /// Bump when changing the development protocol. Readers must reject mismatches.
-    pub const FORMAT_VERSION: u32 = 2;
+    pub const FORMAT_VERSION: u32 = 3;
     #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
     pub struct Program {
         pub format: u32,
@@ -130,9 +144,20 @@ mod program {
         pub initial: f64,
     }
     #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+    pub enum Condition {
+        Equal(Number, Number),
+    }
+    #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+    pub struct StyleWhen {
+        pub condition: Condition,
+        pub then_style: Style,
+        pub else_style: Style,
+    }
+    #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
     pub struct Template {
         pub id: String,
         pub style: Style,
+        pub style_when: Option<StyleWhen>,
         pub text: Option<Text>,
         pub on_click: Option<usize>,
         pub children: Vec<Template>,

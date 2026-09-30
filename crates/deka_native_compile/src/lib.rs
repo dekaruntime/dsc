@@ -1,6 +1,8 @@
 //! Isolated native target. The existing DS parser/checker remains authoritative.
 mod emit;
-use deka_native_ir::{FORMAT_VERSION, Number, Program, State, Style, Template, Text, Update};
+use deka_native_ir::{
+    Condition, FORMAT_VERSION, Number, Program, State, Style, StyleWhen, Template, Text, Update,
+};
 use deka_syntax::{Diagnostic, Severity, ast::*};
 pub use emit::emit_rust;
 use std::collections::HashMap;
@@ -149,6 +151,7 @@ impl Lower {
         let mut node = Template {
             id: id.clone(),
             style: Style::default(),
+            style_when: None,
             text: None,
             on_click: None,
             children: vec![],
@@ -160,6 +163,17 @@ impl Lower {
                 for attr in element.attributes {
                     match (attr.name, &attr.value) {
                         ("className", Some(Expr::String { value, .. })) => deka_native_ir::apply_classes(&mut node.style, value)?,
+                        ("className", Some(Expr::Ternary { condition, then_branch, else_branch, .. })) => {
+                            let (Expr::String { value: yes, .. }, Expr::String { value: no, .. }) = (then_branch, else_branch) else { return Err("native conditional classes require two string literals".into()); };
+                            let mut then_style = node.style.clone();
+                            let mut else_style = node.style.clone();
+                            deka_native_ir::apply_classes(&mut then_style, yes)?;
+                            deka_native_ir::apply_classes(&mut else_style, no)?;
+                            node.style_when = Some(StyleWhen { condition: match condition {
+                                Expr::Binary { left, op: BinOp::Eq, right, .. } => Condition::Equal(self.number(left)?, self.number(right)?),
+                                _ => return Err("native conditional classes require a numeric equality, such as open == 1".into()),
+                            }, then_style, else_style });
+                        }
                         ("onClick", Some(handler)) if element.tag == "button" => {
                             let Expr::Function { params, body, is_async: false, .. } = handler else { return Err("native onClick requires an inline synchronous function".into()); };
                             if !params.is_empty() { return Err("native click event arguments are not supported yet".into()); }

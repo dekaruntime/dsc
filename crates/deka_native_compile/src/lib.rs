@@ -42,6 +42,7 @@ pub fn compile(source: &str) -> Result<Program> {
         states: vec![],
         bindings: HashMap::new(),
         setters: HashMap::new(),
+        mutable: std::collections::HashSet::new(),
         handlers: vec![],
     };
     let mut root = None;
@@ -50,6 +51,22 @@ pub fn compile(source: &str) -> Result<Program> {
             return Err("native component must end at its return".into());
         }
         match statement {
+            Stmt::Let {
+                name,
+                value: Expr::Number { value, .. },
+                ..
+            } if value.is_finite() => {
+                if lower.bindings.contains_key(*name) || lower.setters.contains_key(*name) {
+                    return Err(format!("duplicate native state binding: {name}"));
+                }
+                let index = lower.states.len();
+                lower.states.push(State {
+                    name: (*name).into(),
+                    initial: *value,
+                });
+                lower.bindings.insert((*name).into(), index);
+                lower.mutable.insert((*name).into());
+            }
             Stmt::TupleBinding {
                 names,
                 value: Expr::Call { callee, args, .. },
@@ -75,7 +92,7 @@ pub fn compile(source: &str) -> Result<Program> {
             } => root = Some(lower.node(expr, "root".into())?),
             _ => {
                 return Err(
-                    "native slice supports useState declarations followed by a JSX return".into(),
+                    "native slice supports numeric let state (or legacy useState) followed by a JSX return".into(),
                 );
             }
         }
@@ -112,8 +129,49 @@ struct Lower {
     bindings: HashMap<String, usize>,
     setters: HashMap<String, usize>,
     handlers: Vec<Update>,
+    mutable: std::collections::HashSet<String>,
 }
 impl Lower {
+    fn update(&self, expr: &Expr<'_>) -> Result<Update> {
+        match expr {
+            Expr::Paren { expr, .. } => self.update(expr),
+            Expr::Binary {
+                left, op, right, ..
+            } => {
+                let name = ident(left).ok_or("native assignment needs a local state name")?;
+                if !self.mutable.contains(name) {
+                    return Err(format!(
+                        "native assignment requires mutable let state: {name}"
+                    ));
+                }
+                let state = self.bindings[name];
+                let value = self.number(right)?;
+                let current = Box::new(Number::State(state));
+                let value = match op {
+                    BinOp::Assign => value,
+                    BinOp::AddAssign => Number::Add(current, Box::new(value)),
+                    BinOp::SubAssign => Number::Sub(current, Box::new(value)),
+                    BinOp::MulAssign => Number::Mul(current, Box::new(value)),
+                    _ => return Err("native assignment supports =, +=, -= and *=".into()),
+                };
+                Ok(Update { state, value })
+            }
+            Expr::Call { callee, args, .. } => {
+                let state = ident(callee)
+                    .and_then(|name| self.setters.get(name))
+                    .copied()
+                    .ok_or("native handler must assign local state or call a legacy setter")?;
+                let [value] = *args else {
+                    return Err("native setter requires one numeric expression".into());
+                };
+                Ok(Update {
+                    state,
+                    value: self.number(value)?,
+                })
+            }
+            _ => Err("native handler requires a state assignment".into()),
+        }
+    }
     fn number(&self, expr: &Expr<'_>) -> Result<Number> {
         match expr {
             Expr::Number { value, .. } if value.is_finite() => Ok(Number::Literal(*value)),
@@ -159,23 +217,58 @@ impl Lower {
         };
         match expr {
             Expr::Paren { expr, .. } => return self.node(expr, id),
-            Expr::Ternary { condition, then_branch, else_branch, .. } => {
-                if id == "root" { return Err("conditional native content needs a container root".into()); }
-                if !matches!(else_branch, Expr::None { .. }) { return Err("native conditional children require None as the absent branch".into()); }
+            Expr::Ternary {
+                condition,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                if id == "root" {
+                    return Err("conditional native content needs a container root".into());
+                }
+                if !matches!(else_branch, Expr::None { .. }) {
+                    return Err(
+                        "native conditional children require None as the absent branch".into(),
+                    );
+                }
                 let mut child = self.node(then_branch, id)?;
                 child.visible_when = Some(match condition {
-                    Expr::Binary { left, op: BinOp::Eq, right, .. } => Condition::Equal(self.number(left)?, self.number(right)?),
+                    Expr::Binary {
+                        left,
+                        op: BinOp::Eq,
+                        right,
+                        ..
+                    } => Condition::Equal(self.number(left)?, self.number(right)?),
                     _ => return Err("native presence requires numeric equality".into()),
                 });
                 return Ok(child);
             }
             Expr::JsxElement { element, .. } => {
+                if element.tag == "view" && id != "root" {
+                    return Err("this native slice supports view only as the component root".into());
+                }
                 node.style = deka_native_ir::element_style(element.tag)?;
                 for attr in element.attributes {
                     match (attr.name, &attr.value) {
-                        ("className", Some(Expr::String { value, .. })) => deka_native_ir::apply_classes(&mut node.style, value)?,
-                        ("className", Some(Expr::Ternary { condition, then_branch, else_branch, .. })) => {
-                            let (Expr::String { value: yes, .. }, Expr::String { value: no, .. }) = (then_branch, else_branch) else { return Err("native conditional classes require two string literals".into()); };
+                        ("className", Some(Expr::String { value, .. })) => {
+                            deka_native_ir::apply_classes(&mut node.style, value)?
+                        }
+                        (
+                            "className",
+                            Some(Expr::Ternary {
+                                condition,
+                                then_branch,
+                                else_branch,
+                                ..
+                            }),
+                        ) => {
+                            let (Expr::String { value: yes, .. }, Expr::String { value: no, .. }) =
+                                (then_branch, else_branch)
+                            else {
+                                return Err(
+                                    "native conditional classes require two string literals".into(),
+                                );
+                            };
                             let mut then_style = node.style.clone();
                             let mut else_style = node.style.clone();
                             deka_native_ir::apply_classes(&mut then_style, yes)?;
@@ -186,30 +279,63 @@ impl Lower {
                             }, then_style, else_style });
                         }
                         ("onClick", Some(handler)) if element.tag == "button" => {
-                            let Expr::Function { params, body, is_async: false, .. } = handler else { return Err("native onClick requires an inline synchronous function".into()); };
-                            if !params.is_empty() { return Err("native click event arguments are not supported yet".into()); }
-                            let [Stmt::Expr { expr: Expr::Call { callee, args, .. }, .. }] = *body else { return Err("native handler must contain exactly one state setter call".into()); };
-                            let index = ident(callee).and_then(|name| self.setters.get(name)).copied().ok_or("native handler must call a useState setter")?;
-                            let [value] = *args else { return Err("native setter requires one numeric expression".into()); };
+                            let Expr::Function {
+                                params,
+                                body,
+                                is_async: false,
+                                ..
+                            } = handler
+                            else {
+                                return Err(
+                                    "native onClick requires an inline synchronous function".into(),
+                                );
+                            };
+                            if !params.is_empty() {
+                                return Err(
+                                    "native click event arguments are not supported yet".into()
+                                );
+                            }
+                            let expression = match *body {
+                                [Stmt::Expr { expr, .. }] | [Stmt::Return { value: Some(expr), .. }] => expr,
+                                _ => return Err("native handler requires one state assignment or legacy setter call".into()),
+                            };
+                            let update = self.update(expression)?;
                             node.on_click = Some(self.handlers.len());
-                            self.handlers.push(Update { state: index, value: self.number(value)? });
+                            self.handlers.push(update);
                         }
-                        _ => return Err(format!("unsupported native attribute or attribute value: {}", attr.name)),
+                        _ => {
+                            return Err(format!(
+                                "unsupported native attribute or attribute value: {}",
+                                attr.name
+                            ));
+                        }
                     }
                 }
                 for (i, child) in element.children.iter().enumerate() {
                     let child = self.node(child, format!("{id}/{i}"))?;
-                    if matches!(&child.text, Some(Text::Literal(text)) if text.is_empty()) { continue; }
+                    if matches!(&child.text, Some(Text::Literal(text)) if text.is_empty()) {
+                        continue;
+                    }
                     node.children.push(child);
                 }
             }
             Expr::String { value, .. } => node.text = Some(Text::Literal((*value).into())),
             Expr::JsxText { value, .. } => node.text = Some(Text::Literal(jsx_text(value))),
             Expr::Call { callee, args, .. } if ident(callee) == Some("string") => {
-                let [arg] = *args else { return Err("string requires one argument".into()); };
+                let [arg] = *args else {
+                    return Err("string requires one argument".into());
+                };
                 node.text = Some(Text::Number(self.number(arg)?));
             }
-            _ => return Err("native children currently support elements, literal text, and string(numeric expression)".into()),
+            Expr::Identifier { .. }
+            | Expr::Number { .. }
+            | Expr::Binary { .. }
+            | Expr::Unary { .. } => node.text = Some(Text::Number(self.number(expr)?)),
+            _ => {
+                return Err(
+                    "native children support elements, literal text and numeric bindings".into(),
+                );
+            }
         }
         Ok(node)
     }

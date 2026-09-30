@@ -3,3 +3,7 @@
 **/.cache/
 **/.tmp/
 **/.target/
+
+/.target/
+
+/.tmp/

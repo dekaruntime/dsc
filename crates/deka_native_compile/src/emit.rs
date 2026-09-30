@@ -53,8 +53,29 @@ fn node(template: &Template) -> String {
         Some(Text::Literal(t)) => format!("Some({t:?}.to_owned())"),
         Some(Text::Number(n)) => format!("Some(({}).to_string())", number(n)),
     };
+    let children = if template.children.is_empty() {
+        "vec![]".into()
+    } else {
+        format!(
+            "{{ let mut children = Vec::new(); {} children }}",
+            template
+                .children
+                .iter()
+                .map(|child| {
+                    let push = format!("children.push({});", node(child));
+                    match &child.visible_when {
+                        Some(Condition::Equal(a, b)) => {
+                            format!("if ({}) == ({}) {{ {push} }}", number(a), number(b))
+                        }
+                        None => push,
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    };
     format!(
-        "Node {{ id: {:?}.into(), style: {}, text: {}, on_click: {:?}, children: {{ let mut children = Vec::new(); {} children }} }}",
+        "Node {{ id: {:?}.into(), style: {}, text: {}, on_click: {:?}, children: {} }}",
         template.id,
         template.style_when.as_ref().map_or_else(
             || style(&template.style),
@@ -69,20 +90,7 @@ fn node(template: &Template) -> String {
         ),
         text,
         template.on_click,
-        template
-            .children
-            .iter()
-            .map(|child| {
-                let push = format!("children.push({});", node(child));
-                match &child.visible_when {
-                    Some(Condition::Equal(a, b)) => {
-                        format!("if ({}) == ({}) {{ {push} }}", number(a), number(b))
-                    }
-                    None => push,
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
+        children
     )
 }
 fn style(s: &deka_native_ir::Style) -> String {

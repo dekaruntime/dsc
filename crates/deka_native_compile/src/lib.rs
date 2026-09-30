@@ -1,6 +1,5 @@
 //! Isolated native target. The existing DS parser/checker remains authoritative.
 mod emit;
-mod style;
 use deka_native_ir::{FORMAT_VERSION, Number, Program, State, Style, Template, Text, Update};
 use deka_syntax::{Diagnostic, Severity, ast::*};
 pub use emit::emit_rust;
@@ -157,12 +156,10 @@ impl Lower {
         match expr {
             Expr::Paren { expr, .. } => return self.node(expr, id),
             Expr::JsxElement { element, .. } => {
-                if !matches!(element.tag, "div" | "span" | "p" | "button") { return Err(format!("unsupported native element: {}", element.tag)); }
-                if matches!(element.tag, "span" | "p") { node.style.row = true; }
-                if element.tag == "button" { node.style.padding = 12.; node.style.radius = 6.; node.style.background = Some(0x226c65); node.style.row = true; }
+                node.style = deka_native_ir::element_style(element.tag)?;
                 for attr in element.attributes {
                     match (attr.name, &attr.value) {
-                        ("className", Some(Expr::String { value, .. })) => style::apply(&mut node.style, value)?,
+                        ("className", Some(Expr::String { value, .. })) => deka_native_ir::apply_classes(&mut node.style, value)?,
                         ("onClick", Some(handler)) if element.tag == "button" => {
                             let Expr::Function { params, body, is_async: false, .. } = handler else { return Err("native onClick requires an inline synchronous function".into()); };
                             if !params.is_empty() { return Err("native click event arguments are not supported yet".into()); }

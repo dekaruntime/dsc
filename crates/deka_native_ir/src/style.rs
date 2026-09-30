@@ -1,4 +1,4 @@
-use deka_native_ir::Style;
+use crate::Style;
 
 pub fn apply(style: &mut Style, classes: &str) -> Result<(), String> {
     for class in classes.split_whitespace() {
@@ -55,4 +55,21 @@ fn color(value: &str) -> Result<u32, String> {
         return Err("native colors require six hex digits".into());
     }
     u32::from_str_radix(value, 16).map_err(|_| "invalid native hex color".into())
+}
+
+/// Native element defaults shared by the compiler and live component host.
+pub fn for_element(tag: &str) -> Result<Style, String> {
+    let mut style = Style::default();
+    match tag {
+        "div" => {}
+        "span" | "p" => style.row = true,
+        "button" => {
+            style.row = true;
+            style.padding = 12.;
+            style.radius = 6.;
+            style.background = Some(0x226c65);
+        }
+        _ => return Err(format!("unsupported native element: {tag}")),
+    }
+    Ok(style)
 }

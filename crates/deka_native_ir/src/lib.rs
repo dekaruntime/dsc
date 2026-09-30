@@ -84,3 +84,7 @@ mod program {
 }
 #[cfg(feature = "program")]
 pub use program::*;
+
+mod style;
+/// Apply the utility subset shared by compilation and live native components.
+pub use style::{apply as apply_classes, for_element as element_style};

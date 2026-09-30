@@ -3,6 +3,9 @@ use crate::{Align, Edges, Justify, Length, Style};
 /// Classes are applied left to right; later declarations win. Unknown utilities fail.
 pub fn apply(style: &mut Style, classes: &str) -> Result<(), String> {
     for class in classes.split_whitespace() {
+        if crate::motion::apply(style, class)? {
+            continue;
+        }
         match class {
             "transition-none" => style.transition = 0,
             "transition-opacity" => style.transition = 1,

@@ -48,6 +48,43 @@ pub enum Justify {
 }
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "program", derive(serde::Serialize, serde::Deserialize))]
+pub struct Keyframe {
+    pub property: u8,
+    pub at: f32,
+    pub value: f32,
+}
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "program", derive(serde::Serialize, serde::Deserialize))]
+pub struct Motion {
+    pub stiffness: f32,
+    pub damping: f32,
+    pub delay_ms: f32,
+    pub stagger_ms: f32,
+    pub enter: u8,
+    pub exit: u8,
+    pub layout: bool,
+    pub frames: Vec<Keyframe>,
+    pub repeats: u32,
+    pub alternate: bool,
+}
+impl Default for Motion {
+    fn default() -> Self {
+        Self {
+            stiffness: 0.,
+            damping: 20.,
+            delay_ms: 0.,
+            stagger_ms: 0.,
+            enter: 0,
+            exit: 0,
+            layout: false,
+            frames: vec![],
+            repeats: 1,
+            alternate: false,
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "program", derive(serde::Serialize, serde::Deserialize))]
 pub struct Style {
     pub row: bool,
     pub wrap: bool,
@@ -72,6 +109,9 @@ pub struct Style {
     pub max_height: Length,
     pub clip: bool,
     pub nowrap: Option<bool>,
+    pub scale: f32,
+    pub rotate: f32,
+    pub motion: Motion,
     pub opacity: f32,
     pub translate_x: f32,
     pub translate_y: f32,
@@ -107,6 +147,9 @@ impl Default for Style {
             max_height: Length::Auto,
             clip: false,
             nowrap: None,
+            scale: 1.,
+            rotate: 0.,
+            motion: Motion::default(),
             opacity: 1.,
             translate_x: 0.,
             translate_y: 0.,
@@ -129,7 +172,7 @@ mod program {
     use super::Style;
     use serde::{Deserialize, Serialize};
     /// Bump when changing the development protocol. Readers must reject mismatches.
-    pub const FORMAT_VERSION: u32 = 3;
+    pub const FORMAT_VERSION: u32 = 4;
     #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
     pub struct Program {
         pub format: u32,
@@ -158,6 +201,7 @@ mod program {
         pub id: String,
         pub style: Style,
         pub style_when: Option<StyleWhen>,
+        pub visible_when: Option<Condition>,
         pub text: Option<Text>,
         pub on_click: Option<usize>,
         pub children: Vec<Template>,
@@ -187,3 +231,5 @@ pub use program::*;
 mod style;
 /// Apply the utility subset shared by compilation and live native components.
 pub use style::{apply as apply_classes, for_element as element_style};
+
+mod motion;

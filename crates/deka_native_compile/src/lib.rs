@@ -152,12 +152,23 @@ impl Lower {
             id: id.clone(),
             style: Style::default(),
             style_when: None,
+            visible_when: None,
             text: None,
             on_click: None,
             children: vec![],
         };
         match expr {
             Expr::Paren { expr, .. } => return self.node(expr, id),
+            Expr::Ternary { condition, then_branch, else_branch, .. } => {
+                if id == "root" { return Err("conditional native content needs a container root".into()); }
+                if !matches!(else_branch, Expr::None { .. }) { return Err("native conditional children require None as the absent branch".into()); }
+                let mut child = self.node(then_branch, id)?;
+                child.visible_when = Some(match condition {
+                    Expr::Binary { left, op: BinOp::Eq, right, .. } => Condition::Equal(self.number(left)?, self.number(right)?),
+                    _ => return Err("native presence requires numeric equality".into()),
+                });
+                return Ok(child);
+            }
             Expr::JsxElement { element, .. } => {
                 node.style = deka_native_ir::element_style(element.tag)?;
                 for attr in element.attributes {

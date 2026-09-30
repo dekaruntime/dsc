@@ -138,3 +138,36 @@ fn conditional_animation_targets_are_checked_and_emitted() {
     let decoded = serde_json::from_str(&serde_json::to_string(&program).unwrap()).unwrap();
     assert_eq!(program, decoded);
 }
+#[test]
+fn presence_and_motion_contract_are_checked() {
+    let source = r#"export fn App() ReactNode {
+        const [open, setOpen] = useState(1);
+        return (<div className="stagger-100">
+            {open == 1 ? <button className="enter-slide exit-fade spring scale-110 rotate-15 transition-layout frames-x-[0:0,50:20,100:0] repeat-2 alternate" onClick={fn() {setOpen(0);}}>Hello</button> : None}
+        </div>);
+    }"#;
+    let p = compile(source).unwrap();
+    let child = p
+        .root
+        .children
+        .iter()
+        .find(|c| c.visible_when.is_some())
+        .unwrap();
+    assert_eq!(child.style.motion.enter, 2);
+    assert_eq!(child.style.motion.frames.len(), 3);
+    assert!(child.style.motion.layout);
+    let decoded = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
+    assert_eq!(p, decoded);
+    for invalid in [
+        "spring-damping-0",
+        "frames-x-[0:0,0:1,100:0]",
+        "repeat-1.5",
+        "scale-0",
+        "-animate-spin",
+    ] {
+        assert!(
+            compile(&source.replace("stagger-100", invalid)).is_err(),
+            "accepted {invalid}"
+        );
+    }
+}

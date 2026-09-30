@@ -1,12 +1,12 @@
 use deka_native_compile::compile;
-use deka_native_ir::{Number, Text};
+use deka_native_ir::{Edges, Length, Number, Text};
 const COUNTER: &str = include_str!("../examples/counter.dsx");
 #[test]
 fn source_produces_state_layout_and_executable_handler() {
     let p = compile(COUNTER).unwrap();
     assert_eq!(p.states[0].initial, 0.);
-    assert_eq!(p.root.style.padding, 24.);
-    assert_eq!(p.root.style.width, Some(384.));
+    assert_eq!(p.root.style.padding, Edges::all(24.));
+    assert_eq!(p.root.style.width, Length::Px(384.));
     assert_eq!(
         p.handlers[0].value,
         Number::Add(Box::new(Number::State(0)), Box::new(Number::Literal(1.)))
@@ -63,4 +63,46 @@ fn inline_text_keeps_spaces_and_can_override_its_flow() {
         compact.root.children[0].text,
         Some(Text::Literal("Count:".into()))
     );
+}
+
+#[test]
+fn box_contract_parses_and_rejects_invalid_dimensions() {
+    use deka_native_ir::{Align, Justify};
+    let source = r#"export fn App() ReactNode { return (<div className="w-full h-64 min-w-12 max-w-96 flex-row flex-wrap items-center justify-between p-4 px-2 pt-1 m-2 gap-x-3 gap-y-1 overflow-hidden whitespace-nowrap"><span className="w-1/2 grow shrink-0 self-end">Hello</span></div>); }"#;
+    let program = compile(source).unwrap();
+    let s = &program.root.style;
+    assert_eq!(s.width, Length::Percent(1.));
+    assert_eq!(s.height, Length::Px(256.));
+    assert_eq!(
+        s.padding,
+        Edges {
+            top: 4.,
+            right: 8.,
+            bottom: 16.,
+            left: 8.
+        }
+    );
+    assert_eq!(s.align, Align::Center);
+    assert_eq!(s.justify, Justify::Between);
+    assert!(s.wrap && s.clip);
+    assert_eq!(s.nowrap, Some(true));
+    assert_eq!(program.root.children[0].style.width, Length::Percent(0.5));
+    assert_eq!(program.root.children[0].style.align_self, Some(Align::End));
+    for bad in [
+        "w-NaN",
+        "w-inf",
+        "w-1/0",
+        "w-2/1",
+        "w--2",
+        "overflow-scroll",
+        "items-baseline",
+        "p-auto",
+    ] {
+        assert!(
+            compile(&source.replace("w-full", bad)).is_err(),
+            "accepted {bad}"
+        );
+    }
+    let decoded = serde_json::from_str(&serde_json::to_string(&program).unwrap()).unwrap();
+    assert_eq!(program, decoded);
 }

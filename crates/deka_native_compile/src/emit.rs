@@ -1,4 +1,4 @@
-use deka_native_ir::{Number, Program, Template, Text};
+use deka_native_ir::{Condition, Number, Program, Template, Text};
 
 /// Emit executable Rust from the checked native program, not an embedded interpreter.
 pub fn emit_rust(program: &Program) -> String {
@@ -56,7 +56,17 @@ fn node(template: &Template) -> String {
     format!(
         "Node {{ id: {:?}.into(), style: {}, text: {}, on_click: {:?}, children: vec![{}] }}",
         template.id,
-        style(&template.style),
+        template.style_when.as_ref().map_or_else(
+            || style(&template.style),
+            |s| format!(
+                "if {} {{ {} }} else {{ {} }}",
+                match &s.condition {
+                    Condition::Equal(a, b) => format!("({}) == ({})", number(a), number(b)),
+                },
+                style(&s.then_style),
+                style(&s.else_style)
+            )
+        ),
         text,
         template.on_click,
         template
@@ -72,7 +82,7 @@ fn style(s: &deka_native_ir::Style) -> String {
         .align_self
         .map_or("None".to_owned(), |a| format!("Some(Align::{a:?})"));
     format!(
-        "Style {{ row: {:?}, wrap: {:?}, grow: {:?}, shrink: {:?}, align: Align::{:?}, align_self: {}, justify: Justify::{:?}, padding: {:?}, margin: {:?}, gap_x: {:?}, gap_y: {:?}, background: {:?}, color: {:?}, font_size: {:?}, radius: {:?}, width: Length::{:?}, height: Length::{:?}, min_width: Length::{:?}, min_height: Length::{:?}, max_width: Length::{:?}, max_height: Length::{:?}, clip: {:?}, nowrap: {:?} }}",
+        "Style {{ row: {:?}, wrap: {:?}, grow: {:?}, shrink: {:?}, align: Align::{:?}, align_self: {}, justify: Justify::{:?}, padding: {:?}, margin: {:?}, gap_x: {:?}, gap_y: {:?}, background: {:?}, color: {:?}, font_size: {:?}, radius: {:?}, width: Length::{:?}, height: Length::{:?}, min_width: Length::{:?}, min_height: Length::{:?}, max_width: Length::{:?}, max_height: Length::{:?}, clip: {:?}, nowrap: {:?}, opacity: {:?}, translate_x: {:?}, translate_y: {:?}, transition: {:?}, duration_ms: {:?}, easing: {:?} }}",
         s.row,
         s.wrap,
         s.grow,
@@ -95,6 +105,12 @@ fn style(s: &deka_native_ir::Style) -> String {
         s.max_width,
         s.max_height,
         s.clip,
-        s.nowrap
+        s.nowrap,
+        s.opacity,
+        s.translate_x,
+        s.translate_y,
+        s.transition,
+        s.duration_ms,
+        s.easing
     )
 }

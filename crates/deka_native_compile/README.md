@@ -53,3 +53,23 @@ components can compute class strings on each state update; this restricted
 compiler still requires literal class strings. The changed style schema bumps
 `FORMAT_VERSION` to 2 so old saved programs fail explicitly rather than acquire
 incorrect defaults. Generated Rust uses the same typed style values.
+
+### Presentation transitions
+
+The experimental native contract now supports `opacity-0` through `opacity-100`,
+`translate-x-N` / `translate-y-N` (including negative prefixes, spacing ×4),
+`transition-opacity`, `transition-transform`, `transition-size`,
+`transition-colors`, `transition-all`, `transition-none`, `duration-N`
+(milliseconds, 0–4096), and `ease-linear` / `ease-out` / `ease-in-out`.
+The default duration is 200ms, easing is ease-out, and transitions are off.
+
+The restricted compiler accepts `className={open == 1 ? "..." : "..."}` where
+both alternatives are literal supported classes and the condition compares
+numeric expressions. Each alternative is a complete style target. This is an
+extension of the experimental native target, not a change to normal DekaScript
+semantics. The normal React host already accepts computed class strings.
+
+Stable template paths identify retained animation targets. Keep fading elements
+mounted; this slice does not defer unmounts. Structural source edits/reset clear
+animation history in the host. Native program format is now version 3; rebuild
+compiler and renderer together.

@@ -4,6 +4,15 @@ use crate::{Align, Edges, Justify, Length, Style};
 pub fn apply(style: &mut Style, classes: &str) -> Result<(), String> {
     for class in classes.split_whitespace() {
         match class {
+            "transition-none" => style.transition = 0,
+            "transition-opacity" => style.transition = 1,
+            "transition-transform" => style.transition = 2,
+            "transition-size" => style.transition = 4,
+            "transition-colors" => style.transition = 8,
+            "transition-all" => style.transition = 15,
+            "ease-linear" => style.easing = 0,
+            "ease-out" => style.easing = 1,
+            "ease-in-out" => style.easing = 2,
             "flex" => {}
             "flex-col" => style.row = false,
             "flex-row" => style.row = true,
@@ -51,6 +60,28 @@ pub fn apply(style: &mut Style, classes: &str) -> Result<(), String> {
     Ok(())
 }
 fn apply_value(style: &mut Style, class: &str) -> Result<(), String> {
+    if let Some(value) = class.strip_prefix("opacity-") {
+        let n = finite(value)?;
+        if n > 100. {
+            return Err("native opacity must be 0..100".into());
+        }
+        style.opacity = n / 100.;
+        return Ok(());
+    }
+    if let Some(value) = class.strip_prefix("duration-") {
+        style.duration_ms = finite(value)?;
+        return Ok(());
+    }
+    let (sign, translated) = class.strip_prefix('-').map_or((1., class), |s| (-1., s));
+    for (prefix, target) in [
+        ("translate-x-", &mut style.translate_x),
+        ("translate-y-", &mut style.translate_y),
+    ] {
+        if let Some(value) = translated.strip_prefix(prefix) {
+            *target = sign * spacing(value)?;
+            return Ok(());
+        }
+    }
     for (prefix, target) in [
         ("min-w-", &mut style.min_width),
         ("max-w-", &mut style.max_width),

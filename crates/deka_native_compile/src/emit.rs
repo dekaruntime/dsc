@@ -30,14 +30,23 @@ fn main() {{ deka_native_ui::run(NativeApp); }}
     )
 }
 fn number(expr: &Number) -> String {
-    match expr {
-        Number::Literal(n) => format!("{n:?}"),
-        Number::State(i) => format!("state[{i}]"),
-        Number::Add(a, b) => format!("({} + {})", number(a), number(b)),
-        Number::Sub(a, b) => format!("({} - {})", number(a), number(b)),
-        Number::Mul(a, b) => format!("({} * {})", number(a), number(b)),
+    fn emit(expr: &Number, parent: u8, right: bool) -> String {
+        let (text, precedence) = match expr {
+            Number::Literal(n) => (format!("{n:?}"), 3),
+            Number::State(i) => (format!("state[{i}]"), 3),
+            Number::Add(a, b) => (format!("{} + {}", emit(a, 1, false), emit(b, 1, true)), 1),
+            Number::Sub(a, b) => (format!("{} - {}", emit(a, 1, false), emit(b, 1, true)), 1),
+            Number::Mul(a, b) => (format!("{} * {}", emit(a, 2, false), emit(b, 2, true)), 2),
+        };
+        if precedence < parent || (right && precedence == parent) {
+            format!("({text})")
+        } else {
+            text
+        }
     }
+    emit(expr, 0, false)
 }
+
 fn node(template: &Template) -> String {
     let text = match &template.text {
         None => "None".into(),

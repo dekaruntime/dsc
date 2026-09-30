@@ -1,0 +1,10 @@
+export fn App() ReactNode {
+    const [count, setCount] = useState(0);
+    return (<div className="flex flex-col gap-4 p-6 bg-[#F3EFE3] text-[#1A1611] w-96">
+        <span className="text-2xl">Deka, native.</span>
+        <span>Edit this source. The window stays alive.</span>
+        <button className="p-4 gap-2 rounded-lg bg-[#0C8B43] text-[#ffffff]" onClick={fn() { setCount(count + 1); }}>
+            Count: {string(count)}
+        </button>
+    </div>);
+}

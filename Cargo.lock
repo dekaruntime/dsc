@@ -616,6 +616,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "deka_native_compile"
+version = "0.53.7"
+dependencies = [
+ "bumpalo",
+ "deka_native_ir",
+ "deka_syntax",
+ "serde_json",
+]
+
+[[package]]
+name = "deka_native_ir"
+version = "0.53.7"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "deka_project"
 version = "0.53.7"
 dependencies = [

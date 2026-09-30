@@ -1,0 +1,16 @@
+[package]
+name = "deka_native_compile"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "dsc-native"
+path = "src/main.rs"
+
+[dependencies]
+bumpalo = "3.16"
+deka_syntax = { path = "../deka_syntax" }
+deka_native_ir = { path = "../deka_native_ir", features = ["program"] }
+serde_json.workspace = true

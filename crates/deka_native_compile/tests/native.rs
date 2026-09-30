@@ -34,3 +34,33 @@ fn wire_format_roundtrips() {
     let decoded = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
     assert_eq!(p, decoded);
 }
+
+#[test]
+fn inline_text_keeps_spaces_and_can_override_its_flow() {
+    let source = "export fn App() ReactNode { const [n, setN] = useState(0); return (<span>Count: {string(n)}</span>); }";
+    let p = compile(source).unwrap();
+    assert!(p.root.style.row);
+    assert_eq!(
+        p.root.children[0].text,
+        Some(Text::Literal("Count: ".into()))
+    );
+    assert!(
+        !compile(&source.replace("<span>", "<span className=\"flex flex-col\">"))
+            .unwrap()
+            .root
+            .style
+            .row
+    );
+    assert!(
+        compile(&source.replace("<span>", "<span className=\"flex\">"))
+            .unwrap()
+            .root
+            .style
+            .row
+    );
+    let compact = compile(&source.replace("Count: ", "Count:")).unwrap();
+    assert_eq!(
+        compact.root.children[0].text,
+        Some(Text::Literal("Count:".into()))
+    );
+}

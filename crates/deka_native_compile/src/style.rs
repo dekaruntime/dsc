@@ -3,7 +3,8 @@ use deka_native_ir::Style;
 pub fn apply(style: &mut Style, classes: &str) -> Result<(), String> {
     for class in classes.split_whitespace() {
         match class {
-            "flex" | "flex-col" => style.row = false,
+            "flex" => {}
+            "flex-col" => style.row = false,
             "flex-row" => style.row = true,
             "rounded" => style.radius = 4.,
             "rounded-lg" => style.radius = 8.,

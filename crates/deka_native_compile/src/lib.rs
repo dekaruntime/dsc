@@ -158,6 +158,7 @@ impl Lower {
             Expr::Paren { expr, .. } => return self.node(expr, id),
             Expr::JsxElement { element, .. } => {
                 if !matches!(element.tag, "div" | "span" | "p" | "button") { return Err(format!("unsupported native element: {}", element.tag)); }
+                if matches!(element.tag, "span" | "p") { node.style.row = true; }
                 if element.tag == "button" { node.style.padding = 12.; node.style.radius = 6.; node.style.background = Some(0x226c65); node.style.row = true; }
                 for attr in element.attributes {
                     match (attr.name, &attr.value) {
@@ -181,7 +182,7 @@ impl Lower {
                 }
             }
             Expr::String { value, .. } => node.text = Some(Text::Literal((*value).into())),
-            Expr::JsxText { value, .. } => node.text = Some(Text::Literal(value.split_whitespace().collect::<Vec<_>>().join(" "))),
+            Expr::JsxText { value, .. } => node.text = Some(Text::Literal(jsx_text(value))),
             Expr::Call { callee, args, .. } if ident(callee) == Some("string") => {
                 let [arg] = *args else { return Err("string requires one argument".into()); };
                 node.text = Some(Text::Number(self.number(arg)?));
@@ -190,4 +191,31 @@ impl Lower {
         }
         Ok(node)
     }
+}
+
+// Preserve deliberate spaces beside expressions while discarding source indentation.
+fn jsx_text(value: &str) -> String {
+    let lines: Vec<_> = value.split('\n').collect();
+    let last = lines.len() - 1;
+    let mut text = String::new();
+    for (i, line) in lines.into_iter().enumerate() {
+        let line = if i > 0 { line.trim_start() } else { line };
+        let line = if i < last { line.trim_end() } else { line };
+        if line.is_empty() {
+            continue;
+        }
+        if !text.is_empty() && !text.ends_with(' ') {
+            text.push(' ');
+        }
+        for c in line.chars() {
+            if c.is_whitespace() {
+                if !text.ends_with(' ') {
+                    text.push(' ');
+                }
+            } else {
+                text.push(c);
+            }
+        }
+    }
+    text
 }

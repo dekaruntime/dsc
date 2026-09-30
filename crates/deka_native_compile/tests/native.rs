@@ -171,3 +171,33 @@ fn presence_and_motion_contract_are_checked() {
         );
     }
 }
+
+#[test]
+fn local_state_assignments_and_direct_bindings_need_no_react() {
+    let source = include_str!("../examples/bindings.dsx");
+    let p = compile(source).unwrap();
+    assert_eq!(p.component, "Counter");
+    assert_eq!(p.states.len(), 2);
+    assert_eq!(p.root.style.width, Length::Percent(1.));
+    assert_eq!(p.handlers[0].state, 0);
+    assert_eq!(
+        p.handlers[0].value,
+        Number::Add(Box::new(Number::State(0)), Box::new(Number::Literal(1.)))
+    );
+    assert_eq!(p.handlers[2].state, 1);
+    assert!(matches!(
+        p.root.children[2].children[1].text,
+        Some(Text::Number(Number::State(0)))
+    ));
+    for bad in [
+        source.replace("let count", "const count"),
+        source.replace("count +=", "missing +="),
+        source.replace("count += 1", "count /= 2"),
+        source.replace("let count = 0", "let count = \"hello\""),
+        source
+            .replace("<div className", "<view className")
+            .replace("</div>", "</view>"),
+    ] {
+        assert!(compile(&bad).is_err(), "accepted {bad}");
+    }
+}

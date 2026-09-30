@@ -1,0 +1,18 @@
+export fn Counter() {
+    let count = 0;
+    let other = 10;
+
+    return (
+        <view className="p-6 gap-4 bg-[#F3EFE3] text-[#1A1611]">
+            <p className="text-2xl">A view. A binding. No React.</p>
+            <p>Only the binding you change is updated.</p>
+            <p className="text-xl">Count: {count}</p>
+            <div className="flex-row gap-3">
+                <button onClick={fn() { count += 1; }}>Add one</button>
+                <button onClick={fn() { count = 0; }}>Reset count</button>
+            </div>
+            <p>Independent value: {other}</p>
+            <button onClick={fn() { other += 10; }}>Change other</button>
+        </view>
+    );
+}

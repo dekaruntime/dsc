@@ -187,6 +187,10 @@ fn color(value: &str) -> Result<u32, String> {
 pub fn for_element(tag: &str) -> Result<Style, String> {
     let mut style = Style::default();
     match tag {
+        "view" => {
+            style.width = Length::Percent(1.);
+            style.height = Length::Percent(1.);
+        }
         "div" => {}
         "span" | "p" => style.row = true,
         "button" => {
